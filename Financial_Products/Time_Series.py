@@ -1,6 +1,4 @@
-import Utilities
-from Utilities import *
-
+from Derivative_Trading_Strategy.Utilities.API_Connection import API_Connection
 class Time_Series(API_Connection):
 
     def __init__(self):

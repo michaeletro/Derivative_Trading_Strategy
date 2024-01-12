@@ -1,6 +1,13 @@
+from requests import request
 from datetime import datetime
-from Portfolio import Portfolio
-from Derivative_Trading_Strategy.Utilities.Utilities import apiKey
+
+from Derivative_Trading_Strategy.Utilities.Utilities_Resources import apiKey
+from Derivative_Trading_Strategy.Utilities.Utilities_Resources import headers
+from Derivative_Trading_Strategy.Utilities.Utilities_Resources import payload
+
+
+from Derivative_Trading_Strategy.Financial_Products.Portfolio import Portfolio
+
 class Stock(Portfolio):
 
     def __init__(self, ticker, time_multiplier="1", timespan="day", start_date="2023-01-09",
@@ -25,7 +32,7 @@ class Stock(Portfolio):
                             limit=1200, api_key=apiKey):
         url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/{time_multiplier}/{timespan}/{start_date}/{end_date}?adjusted={adjusted}&sort={sort}&limit={limit}&apiKey={apiKey}"
 
-        response = requests.request("GET", url, headers=headers, data=payload).json()
+        response = request("GET", url, headers=headers, data=payload).json()
 
         # Adjust the MS timespan to proper time
         for i in range(0, len(response['results'])):

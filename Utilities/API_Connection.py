@@ -1,8 +1,6 @@
 from datetime import date
 from datetime import timedelta
 from datetime import datetime
-
-
 class API_Connection:
 
     def __init__(self, asset, time_multiplier="1", time_span="day", start_date="2023-01-09",

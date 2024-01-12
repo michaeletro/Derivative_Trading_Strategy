@@ -1,4 +1,4 @@
-from Time_Series import Time_Series
+from Derivative_Trading_Strategy.Financial_Products.Time_Series import Time_Series
 
 class Portfolio(Time_Series):
 
