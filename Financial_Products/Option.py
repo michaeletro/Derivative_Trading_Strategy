@@ -1,10 +1,9 @@
-from Utilities import *
 
-class Option(Time_Series):
+class Option(Portfolio):
 
     def __init__(self, ticker, time_multiplier="1", timespan="day", start_date="2023-01-09",
                  end_date=datetime.today().strftime("%Y-%m-%d"), adjusted="True", sort="asc", limit=1200,
-                 api_key="oIpqVdgJYK9nldqQ5j8JiPXxVVZptz0a"):
+                 api_key=apiKey):
         self.ticker = ticker
         self.time_multiplier = time_multiplier
         self.timespan = timespan

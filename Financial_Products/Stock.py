@@ -1,7 +1,10 @@
+from datetime import datetime
+from Portfolio import Portfolio
+from Derivative_Trading_Strategy.Utilities.Utilities import apiKey
 class Stock(Portfolio):
 
     def __init__(self, ticker, time_multiplier="1", timespan="day", start_date="2023-01-09",
-                 end_date=datetime.datetime.today().strftime("%Y-%m-%d"), adjusted="True", sort="asc", limit=1200,
+                 end_date=datetime.today().strftime("%Y-%m-%d"), adjusted="True", sort="asc", limit=1200,
                  api_key=apiKey):
         self.ticker = ticker
         self.time_multiplier = time_multiplier
@@ -18,7 +21,7 @@ class Stock(Portfolio):
                                                    limit=self.limit, api_key=self.api_key)
 
     def generate_stock_info(self, ticker, time_multiplier="1", timespan="day", start_date="2023-01-09",
-                            end_date=datetime.datetime.today().strftime("%Y-%m-%d"), adjusted="True", sort="asc",
+                            end_date=datetime.today().strftime("%Y-%m-%d"), adjusted="True", sort="asc",
                             limit=1200, api_key=apiKey):
         url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/{time_multiplier}/{timespan}/{start_date}/{end_date}?adjusted={adjusted}&sort={sort}&limit={limit}&apiKey={apiKey}"
 

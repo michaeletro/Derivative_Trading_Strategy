@@ -9,8 +9,8 @@ import yfinance as yf
 import datetime
 
 
-from .Utilities import apiKey
-from .Utilities import payload
-from .Utilities import headers
+from Utilities import apiKey
+from Utilities import payload
+from Utilities import headers
 
-from .API_Connection import API_Connection
+from API_Connection import API_Connection
