@@ -1,3 +1,5 @@
+from Utilities import *
+
 class Portfolio(Time_Series):
 
     def __init__(self, stocks  = [], options = []):

@@ -1,14 +1,3 @@
-import polygon
-import plotly
-import plotly.express as px
-from polygon import build_polygon_option_symbol
-from polygon.enums import OptionSymbolFormat
-import requests
-import pandas as pd
-import yfinance as yf
-import datetime
-from datetime import date
-from datetime import timedelta
 
 apiKey = "oIpqVdgJYK9nldqQ5j8JiPXxVVZptz0a"
 payload = {}

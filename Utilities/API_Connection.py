@@ -1,7 +1,12 @@
+from datetime import date
+from datetime import timedelta
+from datetime import datetime
+
+
 class API_Connection:
 
     def __init__(self, asset, time_multiplier="1", time_span="day", start_date="2023-01-09",
-                 end_date=datetime.datetime.today().strftime("%Y-%m-%d"), adjusted="True", sort="asc", limit=1200, *args):
+                 end_date=datetime.today().strftime("%Y-%m-%d"), adjusted="True", sort="asc", limit=1200, *args):
 
         self.apiKey          = "oIpqVdgJYK9nldqQ5j8JiPXxVVZptz0a"
         self.payload         = {}
@@ -38,5 +43,5 @@ class API_Connection:
 
 
 
-        self.url             = f"https://api.polygon.io/v2/aggs/ticker/{self.ticker}/range/{self.time_multiplier}/{self.timespan}/{self.start_date}/{self.end_date}?adjusted={self.adjusted}&sort={self.sort}&limit={self.limit}&apiKey={self.apiKey}"
+        self.url = f"https://api.polygon.io/v2/aggs/ticker/{self.ticker}/range/{self.time_multiplier}/{self.timespan}/{self.start_date}/{self.end_date}?adjusted={self.adjusted}&sort={self.sort}&limit={self.limit}&apiKey={self.apiKey}"
         self.response = requests.request("GET", self.url, headers = self.headers, data=payload).json()
