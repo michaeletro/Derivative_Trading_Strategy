@@ -1,4 +1,5 @@
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import apiKey
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import payload
+from Derivative_Trading_Strategy.Utilities.Utilities_Resources import apiKey as apiKey
+from Derivative_Trading_Strategy.Utilities.Utilities_Resources import headers as header
+from Derivative_Trading_Strategy.Utilities.Utilities_Resources import payload as payload
 from Derivative_Trading_Strategy.Utilities.API_Connection import API_Connection
 
