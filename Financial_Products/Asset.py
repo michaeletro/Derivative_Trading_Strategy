@@ -16,7 +16,7 @@ class Asset(Time_Series):
             self.asset_name = f'O:{asset_name}'
 
         self.asset_time_series = Time_Series(asset_name)
-
+        print(self.asset_time_series)
 
         self.price_data_frame = self.generate_asset_info()
 
@@ -27,15 +27,18 @@ class Asset(Time_Series):
             self.price_vector = []
             print(f'Type Error of {TE}')
 
-        self.option_data_frame = self.generate_option_ticker()
-        self.call_options = self.option_data_frame['Calls']
-        self.put_options = self.option_data_frame['Puts']
-
+        try:
+            self.option_data_frame = self.generate_option_ticker()
+            self.call_options = self.option_data_frame['Calls']
+            self.put_options = self.option_data_frame['Puts']
+        except:
+            print('e')
 
     def generate_asset_info(self):
-
+        print('---------')
+        print(self.asset_time_series.api_object.generate_request())
         response = self.asset_time_series.api_object.generate_request()
-
+        print(response)
         # Adjust the MS timespan to proper time
         try:
             for i in range(0, len(response['results'])):
@@ -50,7 +53,7 @@ class Asset(Time_Series):
                 response['results'][i]['Volume'] = response['results'][i].pop('v')
                 response['results'][i]['Lot_Size'] = response['results'][i].pop('n')
 
-
+            print(pd.DataFrame(response['results']))
             self.organized_data = pd.DataFrame(response['results'])
             return self.organized_data
         except:
