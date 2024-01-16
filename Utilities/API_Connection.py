@@ -1,6 +1,7 @@
 from datetime import date
 from datetime import timedelta
 from datetime import datetime
+import requests
 class API_Connection:
 
     def __init__(self, asset, time_multiplier="1", time_span="day", start_date="2023-01-09",
@@ -36,10 +37,17 @@ class API_Connection:
         self.attributes      = {"apikey"          : self.apiKey,     "payload"         : self.apiKey,          "headers"    : self.headers,
                                 "asset"           : self.asset,      "time_multiplier" : self.time_multiplier, "timespan"   : self.timespan,
                                 "start_date"      : self.start_date, "end_date"        : self.end_date,        "adjusted"   : self.adjusted,
-                                "sort"            : self.sort,       "limit"           : self.limit,           "attributes" : self.attributes,
+                                "sort"            : self.sort,       "limit"           : self.limit,
                                 "other_arguments" : self.other_arguments}
 
 
 
-        self.url = f"https://api.polygon.io/v2/aggs/ticker/{self.ticker}/range/{self.time_multiplier}/{self.timespan}/{self.start_date}/{self.end_date}?adjusted={self.adjusted}&sort={self.sort}&limit={self.limit}&apiKey={self.apiKey}"
-        self.response = requests.request("GET", self.url, headers = self.headers, data=payload).json()
+        self.url = f"https://api.polygon.io/v2/aggs/ticker/{self.asset}/range/{self.time_multiplier}/{self.timespan}/{self.start_date}/{self.end_date}?adjusted={self.adjusted}&sort={self.sort}&limit={self.limit}&apiKey={self.apiKey}"
+        self.response = self.generate_request()
+    def __setattr__(self, value_replacing, value_to_be_replaced):
+        super().__setattr__(value_replacing, value_to_be_replaced)
+        #self.response = requests.request("GET", self.url, headers=self.headers, data=self.payload).json()
+
+    def generate_request(self):
+        self.response = requests.request("GET", self.url, headers=self.headers, data=self.payload).json()
+        return self.response
