@@ -1,18 +1,14 @@
-from requests import request
-from datetime import datetime
 
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import apiKey
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import headers
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import payload
 
-from Derivative_Trading_Strategy.Financial_Products.Time_Series import Time_Series
-class Stock(Time_Series):
+from Derivative_Trading_Strategy.Financial_Products.Asset import Asset
+class Stock(Asset):
 
     def __init__(self, ticker):
 
-        self.stock_time_series = Time_Series(ticker)
-        self.stock_info = self.stock_time_series.response
-
-        self.value = self.stock_info['Volume_Weighted']
-        print(self.value)
+        self.stock_time_series = Asset(ticker)
+        try:
+            self.price_vector = self.stock_time_series.price_vector
+        except TypeError as TE:
+            self.price_vector = []
+            print(f'Type Error of {TE}')
 
