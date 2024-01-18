@@ -19,7 +19,7 @@ class Portfolio(Time_Series):
             for items in value:
                 print(items.price_vector)
                 cumulative_value = items.price_vector + cumulative_value
-        return cumulative_value
+        return cumulative_valuE
 
 
     def __add__(self, asset_to_include):
