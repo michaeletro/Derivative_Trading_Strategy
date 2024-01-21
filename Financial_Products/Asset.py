@@ -35,10 +35,10 @@ class Asset(Time_Series):
             print('e')
 
     def generate_asset_info(self):
-        print('---------')
-        print(self.asset_time_series.api_object.generate_request())
+        #print('---------')
+        #print(self.asset_time_series.api_object.generate_request())
         response = self.asset_time_series.api_object.generate_request()
-        print(response)
+        #print(response)
         # Adjust the MS timespan to proper time
         try:
             for i in range(0, len(response['results'])):
@@ -60,23 +60,23 @@ class Asset(Time_Series):
             return f'There was an error with the API request of type'
 
     def generate_option_ticker(self):
+        try:
+            ticker_list = yf.Ticker(self.asset_name)
+            master_dict = {"Calls": {}, "Puts": {}}
+            for i in range(0, len(ticker_list.options)):
+                master_dict["Calls"][ticker_list.options[i]] = {}
+                master_dict["Puts"][ticker_list.options[i]] = {}
+            for j in master_dict["Calls"].keys():
 
-        ticker_list = yf.Ticker(self.asset_name)
-        master_dict = {"Calls": {}, "Puts": {}}
+                call_df_for_date = ticker_list.option_chain(date=j).calls
+                puts_df_for_date = ticker_list.option_chain(date=j).puts
 
-        for i in range(0, len(ticker_list.options)):
-            master_dict["Calls"][ticker_list.options[i]] = {}
-            master_dict["Puts"][ticker_list.options[i]] = {}
-
-        for j in master_dict["Calls"].keys():
-
-            call_df_for_date = ticker_list.option_chain(date=j).calls
-            puts_df_for_date = ticker_list.option_chain(date=j).puts
-
-            for k in range(0, len(call_df_for_date['strike'])):
-                master_dict["Calls"][j][call_df_for_date['strike'][k]] = call_df_for_date['contractSymbol'][k]
-            for k in range(0, len(puts_df_for_date['strike'])):
-                master_dict["Puts"][j][puts_df_for_date['strike'][k]] = puts_df_for_date['contractSymbol'][k]
-
-        return {'Calls' : pd.DataFrame(master_dict['Calls']), 'Puts' : pd.DataFrame(master_dict['Puts'])}
+                for k in range(0, len(call_df_for_date['strike'])):
+                    master_dict["Calls"][j][call_df_for_date['strike'][k]] = call_df_for_date['contractSymbol'][k]
+                for k in range(0, len(puts_df_for_date['strike'])):
+                    master_dict["Puts"][j][puts_df_for_date['strike'][k]] = puts_df_for_date['contractSymbol'][k]
+            return {'Calls' : pd.DataFrame(master_dict['Calls']), 'Puts' : pd.DataFrame(master_dict['Puts'])}
+        except error as e:
+            print('Error on retrieving option ticker')
+            return {'Calls' : [], 'Puts' : []}
 

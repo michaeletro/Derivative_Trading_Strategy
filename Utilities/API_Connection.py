@@ -43,12 +43,12 @@ class API_Connection:
 
         if len(self.asset) > 5:
             self.asset = f'O:{asset}'
-        print(self.asset)
-        print(122222)
+  #       print(self.asset)
+ #       print(122222)
         self.url = f"https://api.polygon.io/v2/aggs/ticker/{self.asset}/range/{self.time_multiplier}/{self.timespan}/{self.start_date}/{self.end_date}?adjusted={self.adjusted}&sort={self.sort}&limit={self.limit}&apiKey={self.apiKey}"
         self.response = self.generate_request()
-        print(45345345)
-        print(self.response)
+#        print(45345345)
+#        print(self.response)
     def __setattr__(self, value_replacing, value_to_be_replaced):
         super().__setattr__(value_replacing, value_to_be_replaced)
 
