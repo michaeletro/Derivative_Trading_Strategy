@@ -45,6 +45,7 @@ class API_Connection:
             self.asset = f'O:{asset}'
   #       print(self.asset)
  #       print(122222)
+
         self.url = f"https://api.polygon.io/v2/aggs/ticker/{self.asset}/range/{self.time_multiplier}/{self.timespan}/{self.start_date}/{self.end_date}?adjusted={self.adjusted}&sort={self.sort}&limit={self.limit}&apiKey={self.apiKey}"
         self.response = self.generate_request()
 #        print(45345345)
