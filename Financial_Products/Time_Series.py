@@ -1,4 +1,5 @@
 from requests import request
+import datetime
 from datetime import datetime
 import pandas as pd
 from Derivative_Trading_Strategy.Utilities.API_Connection import API_Connection
@@ -19,6 +20,8 @@ class Time_Series(API_Connection):
     def __iter__(self):
         self.current_index = 0
         return self
+
+
 
 
 
