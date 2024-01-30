@@ -59,6 +59,7 @@ class Asset(Time_Series):
             return self.organized_data
         except:
             return f'There was an error with the API request of type'
+            print(0)
 
     def generate_option_ticker(self):
         try:
@@ -68,6 +69,7 @@ class Asset(Time_Series):
                 master_dict["Calls"][ticker_list.options[i]] = {}
                 master_dict["Puts"][ticker_list.options[i]] = {}
             for j in master_dict["Calls"].keys():
+                print(1)
 
                 call_df_for_date = ticker_list.option_chain(date=j).calls
                 puts_df_for_date = ticker_list.option_chain(date=j).puts
