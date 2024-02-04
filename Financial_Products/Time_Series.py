@@ -7,6 +7,7 @@ import yfinance as yf
 
 class Time_Series(API_Connection):
 
+
     def __init__(self, asset_name, start_date="2023-01-09", end_date=datetime.today().strftime("%Y-%m-%d"), time_multiplier="1"):
         print('Generating an Time Class')
         self.asset_name = asset_name

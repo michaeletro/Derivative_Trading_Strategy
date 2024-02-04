@@ -12,3 +12,5 @@ class Stock(Asset):
             self.price_vector = []
             print(f'Type Error of {TE}')
 
+a_1 = Stock('AAPL')
+a_2 = Stock('TSLY')

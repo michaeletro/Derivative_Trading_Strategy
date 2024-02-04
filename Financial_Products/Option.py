@@ -12,12 +12,14 @@ class Option(Asset):
     def __init__(self, asset_name):
 
         self.asset_time_series = Asset(asset_name)
+
         try:
             self.price_data_frame = self.asset_time_series.price_data_frame
             self.price_vector = self.asset_time_series.price_vector
         except TypeError as TE:
             self.price_vector = []
             print(f'Type Error of {TE}')
+
         self.option_data_frame = self.asset_time_series.generate_asset_info()
 
 o = Option('AAPL240119C00050000')

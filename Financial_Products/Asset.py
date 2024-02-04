@@ -69,7 +69,6 @@ class Asset(Time_Series):
                 master_dict["Calls"][ticker_list.options[i]] = {}
                 master_dict["Puts"][ticker_list.options[i]] = {}
             for j in master_dict["Calls"].keys():
-                print(1)
 
                 call_df_for_date = ticker_list.option_chain(date=j).calls
                 puts_df_for_date = ticker_list.option_chain(date=j).puts
