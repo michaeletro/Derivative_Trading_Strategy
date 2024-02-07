@@ -1,5 +1,3 @@
-
-
 from Derivative_Trading_Strategy.Financial_Products.Asset import Asset
 class Stock(Asset):
 
@@ -12,5 +10,5 @@ class Stock(Asset):
             self.price_vector = []
             print(f'Type Error of {TE}')
 
-a_1 = Stock('AAPL')
-a_2 = Stock('TSLY')
+#a_1 = Stock('AAPL')
+#a_2 = Stock('TSLY')

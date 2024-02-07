@@ -1,7 +1,10 @@
 from Derivative_Trading_Strategy.Financial_Products.Time_Series import Time_Series
 from Derivative_Trading_Strategy.Financial_Products.Stock import Stock
 from Derivative_Trading_Strategy.Financial_Products.Option import Option
-from Derivative_Trading_Strategy.Financial_Products.Asset import Asset
+from Derivative_Trading_Strategy.Financial_Products.Crypto import Crypto
+from Derivative_Trading_Strategy.Financial_Products.Forex import Forex
+from Derivative_Trading_Strategy.Financial_Products.Indices import Index
+from Derivative_Trading_Strategy.Financial_Products.Cash import Cash
 
 class Portfolio(Time_Series):
 
@@ -29,20 +32,61 @@ class Portfolio(Time_Series):
                 cumulative_value = items.price_vector + cumulative_value
         return cumulative_value
 
+    def return_new_portfolio(self, asset_to_include, asset_type):
+        new_portfolio = {"Stock": self.stock_position, "Option": self.option_position,
+                         "Cash": self.cash_position, "FX": self.fx_positions, "Crypto": self.crypto_position,
+                         "Index": self.index_positions}
 
+        if isinstance(asset_to_include, Portfolio):
+            print(0)
+
+            for key, value in asset_to_include.portfolio_of_assets.items():
+                if len(value) == 0:
+                    continue
+                else:
+                    new_portfolio[key].append(value)
+
+            return Portfolio(stock_position=new_portfolio['Stock'], option_position=new_portfolio['Option'],
+                             cash_position=new_portfolio['Cash'], fx_positions=new_portfolio['FX'],
+                             crypto_positions=new_portfolio['Crypto'], index_positions=new_portfolio['Index'])
+
+        else:
+            new_portfolio[asset_type].append(asset_to_include)
+            return Portfolio(stock_position = new_portfolio['Stock'], option_position = new_portfolio['Option'],
+                             cash_position = new_portfolio['Cash'], fx_positions = new_portfolio['FX'],
+                             crypto_positions = new_portfolio['Crypto'], index_positions = new_portfolio['Index'])
     def __add__(self, asset_to_include):
 
         if isinstance(asset_to_include, Stock):
-            new_portfolio = {'Stock': self.portfolio_of_assets['Stock'].append(asset_to_include),
-                             'Option': self.portfolio_of_assets['Option']}
-            return Portfolio(stock_position = new_portfolio['Stock'], option_position = new_portfolio['Option'])
+           # print('S')
+            return self.return_new_portfolio(asset_to_include, 'Stock')
 
         elif isinstance(asset_to_include, Option):
-            new_portfolio = {'Stock': self.portfolio_of_assets['Stock'],
-                             'Option': self.portfolio_of_assets['Option'].append(asset_to_include)}
-            return Portfolio(stock_position = new_portfolio['Stock'], option_position = new_portfolio['Option'])
+            return self.return_new_portfolio(asset_to_include, 'Option')
         elif isinstance(asset_to_include, Portfolio):
-            new_portfolio = {'Stock':  self.portfolio_of_assets['Stock'].append(asset_to_include.portfolio_of_assets['Stock']),
-                             'Option': self.portfolio_of_assets['Option'].append(asset_to_include.portfolio_of_assets['Option'])}
-            return Portfolio(stock_position = new_portfolio['Stock'], option_position = new_portfolio['Option'])
+            return self.return_new_portfolio(asset_to_include, 'Portfolio')
+        elif isinstance(asset_to_include, Forex):
+            return self.return_new_portfolio(asset_to_include, 'FX')
+        elif isinstance(asset_to_include, Index):
+            return self.return_new_portfolio(asset_to_include, 'Index')
+        elif isinstance(asset_to_include, Crypto):
+            return self.return_new_portfolio(asset_to_include, 'Crypto')
+        elif isinstance(asset_to_include, Cash):
+            return self.return_new_portfolio(asset_to_include, 'Cash')
 
+
+a_1 = Portfolio()
+a_2 = Stock('AAPL')
+a_3 = a_1 + a_2
+print('----------------')
+print(a_3.portfolio_of_assets)
+
+#print('----------------')
+#a_3 = a_3 + a_2
+#print(a_3.portfolio_of_assets)
+a_3 = a_3 + a_1
+
+print(a_3.portfolio_of_assets)
+
+#print('----------------')
+#print(a_3.portfolio_of_assets)

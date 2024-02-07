@@ -54,7 +54,7 @@ class Asset(Time_Series):
                 response['results'][i]['Volume'] = response['results'][i].pop('v')
                 response['results'][i]['Lot_Size'] = response['results'][i].pop('n')
 
-            print(pd.DataFrame(response['results']))
+           # print(pd.DataFrame(response['results']))
             self.organized_data = pd.DataFrame(response['results'])
             return self.organized_data
         except:
@@ -88,7 +88,7 @@ class Asset(Time_Series):
         fig = px.line(self.price_data_frame, x = 'Time', y = 'Volume',
                       title = self.asset_name)
         fig.show()
-        print(self.price_data_frame)
+       # print(self.price_data_frame)
 
 #Temp_A = Asset('AAPL')
 
