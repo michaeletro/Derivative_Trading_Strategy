@@ -75,9 +75,12 @@ class Portfolio(Time_Series):
             return self.return_new_portfolio(asset_to_include, 'Cash')
 
 
-a_1 = Portfolio()
-a_2 = Stock('AAPL')
+a_1   = Portfolio()
+a_2   = Stock('AAPL')
+a_2_3 = Option('TSLA')
 a_3 = a_1 + a_2
+
+a_3 = a_3 + a_2_3
 print('----------------')
 print(a_3.portfolio_of_assets)
 

@@ -15,8 +15,6 @@ class Asset(Time_Series):
         print('Generating an Asset Class')
         self.asset_name = asset_name
 
-        # This length clause implies that is an Option type, kinds wonky but will fix
-        # later.
         if len(asset_name) > 5:
             self.asset_name = f'O:{asset_name}'
         else:
@@ -36,10 +34,8 @@ class Asset(Time_Series):
 
 
     def generate_asset_info(self):
-        #print('---------')
-        #print(self.asset_time_series.api_object.generate_request())
         response = self.asset_time_series.api_object.generate_request()
-        #print(response)
+
         # Adjust the MS timespan to proper time
         try:
             for i in range(0, len(response['results'])):
@@ -88,10 +84,6 @@ class Asset(Time_Series):
         fig = px.line(self.price_data_frame, x = 'Time', y = 'Volume',
                       title = self.asset_name)
         fig.show()
-       # print(self.price_data_frame)
 
-#Temp_A = Asset('AAPL')
-
-#Temp_A.plot_time_series()
 
 
