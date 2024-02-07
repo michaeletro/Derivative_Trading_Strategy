@@ -1,3 +1,7 @@
+import numpy as np
+import plotly
+import plotly.express as px
+
 from Derivative_Trading_Strategy.Financial_Products.Time_Series import Time_Series
 from Derivative_Trading_Strategy.Financial_Products.Stock import Stock
 from Derivative_Trading_Strategy.Financial_Products.Option import Option
@@ -26,12 +30,19 @@ class Portfolio(Time_Series):
 
     def generate_combined_value(self):
 
-        cumulative_value = 0
+        cumulative_value = []
         for key, value in self.portfolio_of_assets.items():
             for items in value:
+                print(value)
+
                 cumulative_value = items.price_vector + cumulative_value
         return cumulative_value
 
+    def generate_portfolio_returns(self):
+        cumulative_value = self.generate_combined_value()
+
+        fig = px.line(cumulative_value, y='Volume_Weighted', title = 'Portfolio')
+        fig.show()
     def return_new_portfolio(self, asset_to_include, asset_type):
         new_portfolio = {"Stock": self.stock_position, "Option": self.option_position,
                          "Cash": self.cash_position, "FX": self.fx_positions, "Crypto": self.crypto_position,
@@ -76,20 +87,24 @@ class Portfolio(Time_Series):
 
 
 a_1   = Portfolio()
-a_2   = Stock('AAPL')
-a_2_3 = Option('TSLA')
-a_3 = a_1 + a_2
 
-a_3 = a_3 + a_2_3
-print('----------------')
-print(a_3.portfolio_of_assets)
+a_2   = Stock('TSLY')
 
-#print('----------------')
-#a_3 = a_3 + a_2
-#print(a_3.portfolio_of_assets)
-a_3 = a_3 + a_1
+print(a_2.asset_time_series.option_data_frame['Calls'].keys())
+furthest_date_tsly = a_2.asset_time_series.option_data_frame['Calls']['2024-03-15'][10.0]
 
-print(a_3.portfolio_of_assets)
+a_3 = Option(furthest_date_tsly)
+
+a_4 = a_1 + a_2
+
+a_4 = a_4 + a_3
+
+print(a_4.generate_combined_value())
+print(a_3.asset_time_series.plot_time_series())
+print(a_2.asset_time_series.plot_time_series())
+
+a_4.generate_portfolio_returns()
+
 
 #print('----------------')
 #print(a_3.portfolio_of_assets)

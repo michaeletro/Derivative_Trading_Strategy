@@ -80,8 +80,8 @@ class Asset(Time_Series):
             return {'Calls' : [], 'Puts' : []}
 
     def plot_time_series(self, start_date = datetime(2023,1,1), end_date = datetime.today()):
-        print(colnames(self.price_data_frame))
-        fig = px.line(self.price_data_frame, x = 'Time', y = 'Volume',
+
+        fig = px.line(self.price_data_frame, x = 'Time', y = 'Volume_Weighted',
                       title = self.asset_name)
         fig.show()
 

@@ -21,7 +21,3 @@ class Option(Asset):
             print(f'Type Error of {TE}')
 
         self.option_data_frame = self.asset_time_series.generate_asset_info()
-
-#o = Option('AAPL240119C00050000')
-
-#print(o.option_data_frame)

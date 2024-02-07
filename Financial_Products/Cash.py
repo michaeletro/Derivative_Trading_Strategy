@@ -6,6 +6,7 @@ class Cash(Asset):
 
         self.cash_amount = cash_amount
 
+
     def __add__(self, new_financing):
         self.cash_amount = self.cash_amount + new_financing
 
