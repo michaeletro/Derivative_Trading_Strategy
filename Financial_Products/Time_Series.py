@@ -20,7 +20,7 @@ class Time_Series(API_Connection):
 
     def __iter__(self):
         self.current_index = 0
-        print(1)
+        #print(1)
         return self
 
 

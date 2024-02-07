@@ -90,8 +90,8 @@ class Asset(Time_Series):
         fig.show()
         print(self.price_data_frame)
 
-Temp_A = Asset('AAPL')
+#Temp_A = Asset('AAPL')
 
-Temp_A.plot_time_series()
+#Temp_A.plot_time_series()
 
 
