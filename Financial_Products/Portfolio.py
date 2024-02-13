@@ -43,7 +43,7 @@ class Portfolio(Time_Series):
 
         fig = px.line(cumulative_value, y='Volume_Weighted', title = 'Portfolio')
         fig.show()
-        print(1)
+        print(2)
     def return_new_portfolio(self, asset_to_include, asset_type):
         new_portfolio = {"Stock": self.stock_position, "Option": self.option_position,
                          "Cash": self.cash_position, "FX": self.fx_positions, "Crypto": self.crypto_position,
