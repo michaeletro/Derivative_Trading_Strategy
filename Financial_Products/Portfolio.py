@@ -70,7 +70,7 @@ class Portfolio(Time_Series):
     def __add__(self, asset_to_include):
 
         if isinstance(asset_to_include, Stock):
-           # print('S')
+           # print('S1')
             return self.return_new_portfolio(asset_to_include, 'Stock')
 
         elif isinstance(asset_to_include, Option):
