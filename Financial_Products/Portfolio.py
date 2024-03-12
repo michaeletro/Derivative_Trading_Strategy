@@ -1,6 +1,4 @@
-import numpy as np
-import plotly
-import plotly.express as px
+from Derivative_Trading_Strategy.Utilities.Utilities_Resources import *
 
 from Derivative_Trading_Strategy.Financial_Products.Time_Series import Time_Series
 from Derivative_Trading_Strategy.Financial_Products.Stock import Stock
@@ -9,6 +7,7 @@ from Derivative_Trading_Strategy.Financial_Products.Crypto import Crypto
 from Derivative_Trading_Strategy.Financial_Products.Forex import Forex
 from Derivative_Trading_Strategy.Financial_Products.Indices import Index
 from Derivative_Trading_Strategy.Financial_Products.Cash import Cash
+
 
 class Portfolio(Time_Series):
 
@@ -70,9 +69,7 @@ class Portfolio(Time_Series):
     def __add__(self, asset_to_include):
 
         if isinstance(asset_to_include, Stock):
-           # print('S1')
             return self.return_new_portfolio(asset_to_include, 'Stock')
-
         elif isinstance(asset_to_include, Option):
             return self.return_new_portfolio(asset_to_include, 'Option')
         elif isinstance(asset_to_include, Portfolio):
@@ -85,14 +82,3 @@ class Portfolio(Time_Series):
             return self.return_new_portfolio(asset_to_include, 'Crypto')
         elif isinstance(asset_to_include, Cash):
             return self.return_new_portfolio(asset_to_include, 'Cash')
-
-
-
-a_1   = Portfolio()
-
-a_2   = Stock('TSLY')
-
-print(a_2.asset_time_series.option_data_frame['Calls'].keys())
-furthest_date_tsly = a_2.asset_time_series.option_data_frame['Calls']['2024-03-15'][10.0]
-
-a_3 = Option(furthest_date_tsly)

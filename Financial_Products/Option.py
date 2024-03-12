@@ -1,23 +1,11 @@
-from requests import request
-from datetime import datetime
-
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import apiKey
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import headers
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import payload
-
-
 from Derivative_Trading_Strategy.Financial_Products.Asset import Asset
 class Option(Asset):
 
     def __init__(self, asset_name):
 
-        self.asset_time_series = Asset(asset_name)
+        self.asset_name = Asset(asset_name)
 
-        try:
-            self.price_data_frame = self.asset_time_series.price_data_frame
-            self.price_vector = self.asset_time_series.price_vector
-        except TypeError as TE:
-            self.price_vector = []
-            print(f'Type Error of {TE}')
-
-        self.option_data_frame = self.asset_time_series.generate_asset_info()
+        self.asset_label = self.asset_name.asset_label
+        self.price_data_frame = self.asset_name.price_data_frame
+        self.at_the_money = int(self.asset_name.current_price['Volume_Weighted'])
+        self.price_vector = self.asset_name.price_vector

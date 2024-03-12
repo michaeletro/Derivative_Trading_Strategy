@@ -1,18 +1,10 @@
-import datetime
-from datetime import datetime
-import pandas as pd
-import plotly
-import plotly.express as px
-
-from Derivative_Trading_Strategy.Utilities.API_Connection import API_Connection
-import yfinance as yf
-
-from Derivative_Trading_Strategy.Financial_Products.Time_Series import Time_Series
+from Derivative_Trading_Strategy.Financial_Products.Time_Series import *
 
 class Asset(Time_Series):
 
     def __init__(self, asset_name):
         print('Generating an Asset Class')
+        self.asset_label = asset_name
         self.asset_name = asset_name
 
         if len(asset_name) > 5:
@@ -22,21 +14,20 @@ class Asset(Time_Series):
             self.call_options = self.option_data_frame['Calls']
             self.put_options = self.option_data_frame['Puts']
 
+
         self.asset_time_series = Time_Series(asset_name)
         self.price_data_frame = self.generate_asset_info()
 
-
         try:
-            self.price_vector = self.price_data_frame[['Volume_Weighted']]
+            self.price_vector = self.price_data_frame[['Time','Volume_Weighted']]
         except TypeError as TE:
             self.price_vector = []
             print(f'Type Error of {TE}')
 
+        self.current_price = self.price_data_frame.iloc[len(self.price_data_frame)-1]
 
     def generate_asset_info(self):
         response = self.asset_time_series.api_object.generate_request()
-
-        # Adjust the MS timespan to proper time
         try:
             for i in range(0, len(response['results'])):
                 response['results'][i]['t'] = pd.to_datetime(response['results'][i]['t'], unit='ms')
@@ -54,8 +45,6 @@ class Asset(Time_Series):
             return self.organized_data
         except:
             return f'There was an error with the API request of type'
-            print(0)
-
     def generate_option_ticker(self):
         try:
             ticker_list = yf.Ticker(self.asset_name)
@@ -73,16 +62,19 @@ class Asset(Time_Series):
                 for k in range(0, len(puts_df_for_date['strike'])):
                     master_dict["Puts"][j][puts_df_for_date['strike'][k]] = puts_df_for_date['contractSymbol'][k]
 
-            return {'Calls' : pd.DataFrame(master_dict['Calls']), 'Puts' : pd.DataFrame(master_dict['Puts'])}
+            return {'Calls': pd.DataFrame(master_dict['Calls']), 'Puts': pd.DataFrame(master_dict['Puts'])}
         except TypeError as e:
             print(f'Error on retrieving option ticker. Error type {e}')
-            return {'Calls' : [], 'Puts' : []}
-
+            return {'Calls': [], 'Puts': []}
     def plot_time_series(self, start_date = datetime(2023,1,1), end_date = datetime.today()):
 
         fig = px.line(self.price_data_frame, x = 'Time', y = 'Volume_Weighted',
-                      title = self.asset_name)
+                      title = self.asset_label)
         fig.show()
+
+    def __add__(self, other_asset):
+        print(1)
+
 
 
 
