@@ -1,15 +1,11 @@
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import *
+from Derivative_Trading_Strategy.Financial_Products.Stock import Stock as Stock
+from Derivative_Trading_Strategy.Financial_Products.Indices import Index as Index
+from Derivative_Trading_Strategy.Financial_Products.Forex import Forex as Forex
+from Derivative_Trading_Strategy.Financial_Products.Crypto import Crypto as Crypto
+from Derivative_Trading_Strategy.Financial_Products.Cash import Cash as Cash
+from Derivative_Trading_Strategy.Financial_Products.Option import Option as Option
 
-from Derivative_Trading_Strategy.Financial_Products.Time_Series import Time_Series
-from Derivative_Trading_Strategy.Financial_Products.Stock import Stock
-from Derivative_Trading_Strategy.Financial_Products.Option import Option
-from Derivative_Trading_Strategy.Financial_Products.Crypto import Crypto
-from Derivative_Trading_Strategy.Financial_Products.Forex import Forex
-from Derivative_Trading_Strategy.Financial_Products.Indices import Index
-from Derivative_Trading_Strategy.Financial_Products.Cash import Cash
-
-
-class Portfolio(Time_Series):
+class Portfolio:
 
     def __init__(self, stock_position  = [], option_position = [], cash_position = [], 
                  fx_positions = [], crypto_positions = [], index_positions = [],):
@@ -42,38 +38,40 @@ class Portfolio(Time_Series):
 
         fig = px.line(cumulative_value, y='Volume_Weighted', title = 'Portfolio')
         fig.show()
-        print(24)
+
     def return_new_portfolio(self, asset_to_include, asset_type):
-        new_portfolio = {"Stock": self.stock_position, "Option": self.option_position,
-                         "Cash": self.cash_position, "FX": self.fx_positions, "Crypto": self.crypto_position,
-                         "Index": self.index_positions}
+        new_portfolio = self.portfolio_of_assets
 
         if isinstance(asset_to_include, Portfolio):
-            print(0)
-
             for key, value in asset_to_include.portfolio_of_assets.items():
                 if len(value) == 0:
                     continue
                 else:
-                    new_portfolio[key].append(value)
-
+                    for i in range(0,len(value)-1):
+                        print(i)
+                        new_portfolio[key].append(value[i])
+            print(len(new_portfolio['Stock']))
             return Portfolio(stock_position=new_portfolio['Stock'], option_position=new_portfolio['Option'],
                              cash_position=new_portfolio['Cash'], fx_positions=new_portfolio['FX'],
                              crypto_positions=new_portfolio['Crypto'], index_positions=new_portfolio['Index'])
-
         else:
             new_portfolio[asset_type].append(asset_to_include)
+            print(len(new_portfolio['Stock']))
             return Portfolio(stock_position = new_portfolio['Stock'], option_position = new_portfolio['Option'],
                              cash_position = new_portfolio['Cash'], fx_positions = new_portfolio['FX'],
                              crypto_positions = new_portfolio['Crypto'], index_positions = new_portfolio['Index'])
     def __add__(self, asset_to_include):
 
         if isinstance(asset_to_include, Stock):
+            print(0.25)
             return self.return_new_portfolio(asset_to_include, 'Stock')
         elif isinstance(asset_to_include, Option):
             return self.return_new_portfolio(asset_to_include, 'Option')
+
         elif isinstance(asset_to_include, Portfolio):
+            print(-100000000000000000)
             return self.return_new_portfolio(asset_to_include, 'Portfolio')
+
         elif isinstance(asset_to_include, Forex):
             return self.return_new_portfolio(asset_to_include, 'FX')
         elif isinstance(asset_to_include, Index):
@@ -82,3 +80,22 @@ class Portfolio(Time_Series):
             return self.return_new_portfolio(asset_to_include, 'Crypto')
         elif isinstance(asset_to_include, Cash):
             return self.return_new_portfolio(asset_to_include, 'Cash')
+
+    def __del__(self):
+        self.stock_position = []
+        self.option_position = []
+        self.cash_position = []
+        self.fx_positions = []
+        self.crypto_position = []
+        self.index_positions = []
+        self.portfolio_of_assets = {"Stock": self.stock_position, "Option": self.option_position,
+                                    "Cash": self.cash_position, "FX": self.fx_positions,
+                                    "Crypto": self.crypto_position, "Index": self.index_positions}
+
+        del self.stock_position
+        del self.option_position
+        del self.cash_position
+        del self.fx_positions
+        del self.crypto_position
+        del self.index_positions
+        del self.portfolio_of_assets

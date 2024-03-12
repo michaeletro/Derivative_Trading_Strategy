@@ -1,5 +1,4 @@
 from Derivative_Trading_Strategy.Financial_Products.Time_Series import *
-
 class Asset(Time_Series):
 
     def __init__(self, asset_name):
@@ -72,9 +71,6 @@ class Asset(Time_Series):
                       title = self.asset_label)
         fig.show()
 
-    def __add__(self, other_asset):
-        print(1)
-
-
-
+    def __del__(self):
+        print('Destructor called, object deleted')
 

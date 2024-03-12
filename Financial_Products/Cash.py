@@ -1,8 +1,8 @@
 from Derivative_Trading_Strategy.Financial_Products.Asset import Asset
-
 class Cash(Asset):
 
     def __init__(self, cash_amount):
+        print('Generating a Cash Class')
 
         self.cash_amount = cash_amount
 

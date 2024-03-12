@@ -1,6 +1,8 @@
 from Derivative_Trading_Strategy.Financial_Products.Asset import Asset
 class Crypto(Asset):
     def __int__(self, asset):
+        print('Generating a Crypto Class')
+
         self.asset_time_series = Asset(asset)
         try:
             self.price_data_frame = self.asset_time_series.price_data_frame

@@ -1,7 +1,8 @@
 import datetime
+import plotly
+
 import pandas as pd
 import yfinance as yf
-import plotly
 import plotly.express as px
 
 from datetime import date

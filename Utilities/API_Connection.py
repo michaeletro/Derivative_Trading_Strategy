@@ -43,3 +43,6 @@ class API_Connection:
             return list(["ERROR", self.response['error']])
         else:
             return self.response
+
+    def __del__(self):
+        print('Destructor called, object deleted')
