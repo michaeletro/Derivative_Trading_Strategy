@@ -62,7 +62,7 @@ class Asset(Time_Series):
                     master_dict["Puts"][j][puts_df_for_date['strike'][k]] = puts_df_for_date['contractSymbol'][k]
 
             return {'Calls': pd.DataFrame(master_dict['Calls']), 'Puts': pd.DataFrame(master_dict['Puts'])}
-        except TypeError as e:
+        except IndexError as e:
             print(f'Error on retrieving option ticker. Error type {e}')
             return {'Calls': [], 'Puts': []}
     def plot_time_series(self, start_date = datetime(2023,1,1), end_date = datetime.today()):

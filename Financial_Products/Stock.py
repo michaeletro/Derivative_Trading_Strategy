@@ -18,14 +18,22 @@ class Stock(Asset):
     def get_option_by_index(self, option_type='call', index_of_date=0, option_strike = None):
 
         if option_type.lower() == "call":
-            farthest_date_column = self.call_options.columns[index_of_date]
-            option_column = self.call_options[farthest_date_column].sort_index()
+            try:
+                farthest_date_column = self.call_options.columns[index_of_date]
+                option_column = self.call_options[farthest_date_column].sort_index()
+            except:
+                print(0)
+                raise Date_Error(IE)
+
         elif option_type.lower() == "put":
-            farthest_date_column = self.call_options.columns[index_of_date]
-            option_column = self.put_options[farthest_date_column].sort_index()
+
+            try:
+                farthest_date_column = self.call_options.columns[index_of_date]
+                option_column = self.put_options[farthest_date_column].sort_index()
+
+            except:
+                print(1)
+                raise Date_Error(IE)
 
         if option_strike == None:
             option_strike = self.at_the_money
-
-        return option_column.loc[option_strike]
-
