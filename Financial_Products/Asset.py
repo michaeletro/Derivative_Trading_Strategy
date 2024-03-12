@@ -50,7 +50,6 @@ class Asset(Time_Series):
                 response['results'][i]['Volume'] = response['results'][i].pop('v')
                 response['results'][i]['Lot_Size'] = response['results'][i].pop('n')
 
-           # print(pd.DataFrame(response['results']))
             self.organized_data = pd.DataFrame(response['results'])
             return self.organized_data
         except:

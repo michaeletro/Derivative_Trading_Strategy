@@ -96,17 +96,3 @@ print(a_2.asset_time_series.option_data_frame['Calls'].keys())
 furthest_date_tsly = a_2.asset_time_series.option_data_frame['Calls']['2024-03-15'][10.0]
 
 a_3 = Option(furthest_date_tsly)
-
-a_4 = a_1 + a_2
-
-a_4 = a_4 + a_3
-
-print(a_4.generate_combined_value())
-print(a_3.asset_time_series.plot_time_series())
-print(a_2.asset_time_series.plot_time_series())
-
-a_4.generate_portfolio_returns()
-
-
-#print('----------------')
-#print(a_3.portfolio_of_assets)
