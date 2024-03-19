@@ -39,6 +39,7 @@ class Portfolio:
         fig = px.line(cumulative_value, y='Volume_Weighted', title = 'Portfolio')
         fig.show()
 
+
     def return_new_portfolio(self, asset_to_include, asset_type):
         new_portfolio = self.portfolio_of_assets
 
@@ -63,15 +64,11 @@ class Portfolio:
     def __add__(self, asset_to_include):
 
         if isinstance(asset_to_include, Stock):
-            print(0.25)
             return self.return_new_portfolio(asset_to_include, 'Stock')
         elif isinstance(asset_to_include, Option):
             return self.return_new_portfolio(asset_to_include, 'Option')
-
         elif isinstance(asset_to_include, Portfolio):
-            print(-100000000000000000)
             return self.return_new_portfolio(asset_to_include, 'Portfolio')
-
         elif isinstance(asset_to_include, Forex):
             return self.return_new_portfolio(asset_to_include, 'FX')
         elif isinstance(asset_to_include, Index):
@@ -81,21 +78,22 @@ class Portfolio:
         elif isinstance(asset_to_include, Cash):
             return self.return_new_portfolio(asset_to_include, 'Cash')
 
-    def __del__(self):
-        self.stock_position = []
-        self.option_position = []
-        self.cash_position = []
-        self.fx_positions = []
-        self.crypto_position = []
-        self.index_positions = []
-        self.portfolio_of_assets = {"Stock": self.stock_position, "Option": self.option_position,
-                                    "Cash": self.cash_position, "FX": self.fx_positions,
-                                    "Crypto": self.crypto_position, "Index": self.index_positions}
-
-        del self.stock_position
-        del self.option_position
-        del self.cash_position
-        del self.fx_positions
-        del self.crypto_position
-        del self.index_positions
-        del self.portfolio_of_assets
+        """  def __del__(self):
+            self.stock_position = []
+            self.option_position = []
+            self.cash_position = []
+            self.fx_positions = []
+            self.crypto_position = []
+            self.index_positions = []
+            self.portfolio_of_assets = {"Stock": self.stock_position, "Option": self.option_position,
+                                        "Cash": self.cash_position, "FX": self.fx_positions,
+                                        "Crypto": self.crypto_position, "Index": self.index_positions}
+    
+            del self.stock_position
+            del self.option_position
+            del self.cash_position
+            del self.fx_positions
+            del self.crypto_position
+            del self.index_positions
+            del self.portfolio_of_assets
+        """
