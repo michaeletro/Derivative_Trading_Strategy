@@ -6,7 +6,8 @@ class Asset(Time_Series):
         self.asset_label = asset_name
         self.asset_name = asset_name
 
-        if len(asset_name) > 5:
+        print(len(self.asset_name))
+        if len(self.asset_name) > 5:
             self.asset_name = f'O:{asset_name}'
         else:
             self.option_data_frame = self.generate_option_ticker()
@@ -23,7 +24,7 @@ class Asset(Time_Series):
             self.price_vector = []
             print(f'Type Error of {TE}')
 
-        self.current_price = self.price_data_frame.iloc[len(self.price_data_frame)-1]
+
 
     def generate_asset_info(self):
         response = self.asset_time_series.api_object.generate_request()
@@ -71,6 +72,4 @@ class Asset(Time_Series):
                       title = self.asset_label)
         fig.show()
 
-    def __del__(self):
-        print('Destructor called, object deleted')
 
