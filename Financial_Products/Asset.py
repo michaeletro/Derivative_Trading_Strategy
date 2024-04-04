@@ -28,6 +28,7 @@ class Asset(Time_Series):
 
 
     def generate_asset_info(self):
+
         response = self.asset_time_series.api_object.generate_request()
         try:
             for i in range(0, len(response['results'])):
