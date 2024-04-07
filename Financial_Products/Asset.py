@@ -31,6 +31,7 @@ class Asset(Time_Series):
 
         response = self.asset_time_series.api_object.generate_request()
         try:
+
             for i in range(0, len(response['results'])):
                 response['results'][i]['t'] = pd.to_datetime(response['results'][i]['t'], unit='ms')
 
