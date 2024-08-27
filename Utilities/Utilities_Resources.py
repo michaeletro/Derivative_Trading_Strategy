@@ -10,7 +10,7 @@ from datetime import timedelta
 from datetime import datetime
 from requests import request
 
-apiKey = "oIpqVdgJYK9nldqQ5j8JiPXxVVZptz0a"
+apiKey = ""
 payload = {}
 headers = {
     'Accept': 'text/json',
