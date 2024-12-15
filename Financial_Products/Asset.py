@@ -1,11 +1,9 @@
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import yfinance as yf
-from keras.src.backend.jax.core import switch
+import re
 
 from Financial_Products.Time_Series import Time_Series_Class
-from Financial_Products.Asset import Asset_Class
 from Financial_Products.Cash import Cash_Class
 from Financial_Products.Crypto import Crypto_Class
 from Financial_Products.Forex import Forex_Class
@@ -60,28 +58,34 @@ class Asset_Class(Time_Series_Class):
                 print(f'Asset name {asset_name} is not in the dictionary and is not a Stock.'
                       f'Defaulting to Cash_Class')
 
+        # Generate asset information based on the asset type
         if self.model_asset:
 
+            # Generate the asset information DataFrame
             self.price_data_frame = self.generate_asset_info()
             self.price_vector = pd.Series(self.price_data_frame['Volume_Weighted'], index=self.price_data_frame['Time'])
             self.at_the_money = int(self.price_vector['Volume_Weighted'].iloc[-1])
 
             if isinstance(self.asset_type, Stock_Class):
+                # Generate the option ticker information
                 self.option_info = self.generate_option_ticker()
                 self.call_options = self.option_info['Calls']
                 self.put_options = self.option_info['Puts']
             if isinstance(self.asset_type, Option_Class):
-                self.expiration_date = self.asset_name.split('_')[1]
-                self.strike_price = None
-                self.option_type = None
-                self.option_info = None
+                # Parse the expiration date and option type
+                self.expiration_date, self.option_type = self.parse_expiration_date()
+                self.strike_price = self.at_the_money
             if isinstance(self.asset_type, Crypto_Class):
                 print(3)
             if isinstance(self.asset_type, Forex_Class):
-                print(4)
+                # Extract the currency pair, numerator, and denominator
+                self.currency_pair = self.asset_name[2:]
+                self.currency_numerator = self.currency_pair[2:4]
+                self.currency_denominator = self.currency_pair[5:7]
             if isinstance(self.asset_type, Index_Class):
                 print(5)
         else:
+            # If the asset is not modeled, set the attributes to None
             self.price_data_frame = []
             self.price_vector = []
             self.at_the_money = None
@@ -111,9 +115,7 @@ class Asset_Class(Time_Series_Class):
         except (KeyError, TypeError) as e:
             return f'There was an error with the API request: {e}'
 
-    def plot_time_series(self,
-                         start_date=datetime(2023, 1, 1),
-                         end_date=datetime.today()):
+    def plot_time_series(self):
         fig = px.line(self.price_data_frame, x='Time', y='Volume_Weighted',
                       title=self.asset_name + ' Time Series')
         fig.show()
@@ -134,3 +136,19 @@ class Asset_Class(Time_Series_Class):
         except IndexError as e:
             print(f'Error on retrieving option ticker. Error type {e}')
             return {'Calls': [], 'Puts': []}
+
+    def parse_option_details(self):
+        # Define the regular expression pattern to capture the date part and the option type
+        pattern = r'O:[A-Z]+(\d{6})([CP])\d+'
+        # Search for the pattern in the option string
+        match = re.search(pattern, self.asset_name)
+
+        if match:
+            # Extract the date part and the option type
+            date_str = match.group(1)
+            option_type = match.group(2)
+            # Convert the date string to a datetime object
+            expiration_date = datetime.strptime(date_str, '%y%m%d')
+            return expiration_date, option_type
+        else:
+            raise ValueError("Invalid option string format")
