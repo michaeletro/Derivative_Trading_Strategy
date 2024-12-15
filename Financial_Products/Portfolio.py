@@ -1,7 +1,7 @@
 import plotly.express as px
 
 
-class Portfolio:
+class Portfolio_Class:
 
     def __init__(self, stock_position  = [], option_position = [], cash_position = [], 
                  fx_positions = [], crypto_positions = [], index_positions = [],):

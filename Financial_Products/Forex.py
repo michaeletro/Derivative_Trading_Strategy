@@ -1,4 +1,4 @@
-from Asset import Asset_Class
+from Financial_Products.Asset import Asset_Class
 
 class Forex_Class(Asset_Class):
     def __init__(self, currency_swap_position):

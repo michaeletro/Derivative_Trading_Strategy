@@ -1,4 +1,4 @@
-from Asset import Asset_Class
+from Financial_Products.Asset import Asset_Class
 
 class Stock_Class(Asset_Class):
 

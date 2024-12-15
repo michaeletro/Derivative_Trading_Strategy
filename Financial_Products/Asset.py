@@ -1,4 +1,4 @@
-from Time_Series import Time_Series
+from Financial_Products.Time_Series import Time_Series
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
