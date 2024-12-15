@@ -1,5 +1,4 @@
 from Financial_Products.Asset import Asset_Class
-import pandas as pd
 
 class Stock_Class(Asset_Class):
     """
