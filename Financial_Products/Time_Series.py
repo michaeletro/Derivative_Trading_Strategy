@@ -1,5 +1,5 @@
-from Derivative_Trading_Strategy.Utilities import *
-from Derivative_Trading_Strategy.Error_Handling import Date_Error
+from Utilities import API_Connection
+from datetime import datetime
 
 
 class Time_Series(API_Connection):

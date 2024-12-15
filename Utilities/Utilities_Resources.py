@@ -1,14 +1,5 @@
-import datetime
-import plotly
-
-import pandas as pd
-import yfinance as yf
-import plotly.express as px
-
-from datetime import date
-from datetime import timedelta
-from datetime import datetime
-from requests import request
+# Description: This file contains the resources for the Utilities module.
+# This module is used to store the API key and headers for the API connection.
 
 apiKey = ""
 payload = {}

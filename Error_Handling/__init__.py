@@ -1,2 +1,2 @@
-from Derivative_Trading_Strategy.Error_Handling.Error_Types import Index_Error
-from Derivative_Trading_Strategy.Error_Handling.Error_Types import Date_Error
+from Error_Handling.Error_Types import Index_Error
+from Error_Handling.Error_Types import Date_Error

@@ -1,10 +1,10 @@
-from Derivative_Trading_Strategy.Financial_Products.Asset import Asset
+from Asset import Asset_Class
 
-class Stock(Asset):
+class Stock_Class(Asset_Class):
 
     def __init__(self, ticker):
         print('Generating a Stock Class')
-        self.asset_type = Asset(ticker)
+        self.asset_type = Asset_Class(ticker)
         self.asset_name = ticker
         self.asset_label = self.asset_type.asset_label
 

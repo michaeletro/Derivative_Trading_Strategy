@@ -1,5 +1,10 @@
-from Derivative_Trading_Strategy.Financial_Products.Time_Series import *
-class Asset(Time_Series):
+from Time_Series import Time_Series
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
+import yfinance as yf
+
+class Asset_Class(Time_Series):
 
     def __init__(self, asset_name):
         print('Generating an Asset Class')
@@ -74,5 +79,3 @@ class Asset(Time_Series):
         fig = px.line(self.price_data_frame, x = 'Time', y = 'Volume_Weighted',
                       title = self.asset_label)
         fig.show()
-
-

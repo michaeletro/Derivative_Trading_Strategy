@@ -1,5 +1,3 @@
-import Derivative_Trading_Strategy.Utilities.Utilities_Resources
-
-from Derivative_Trading_Strategy.Utilities.API_Connection import API_Connection
-from Derivative_Trading_Strategy.Utilities.Utilities_Resources import *
+from .API_Connection import API_Connection
+from .Utilities_Resources import (apiKey, payload, headers)
 
