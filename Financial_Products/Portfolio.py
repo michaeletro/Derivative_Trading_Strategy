@@ -1,10 +1,19 @@
 import plotly.express as px
 
+from Financial_Products.Asset import Asset_Class
+from Financial_Products.Cash import Cash_Class
+from Financial_Products.Crypto import Crypto_Class
+from Financial_Products.Forex import Forex_Class
+from Financial_Products.Indices import Index_Class
+from Financial_Products.Option import Option_Class
+from Financial_Products.Stock import Stock_Class
+from Financial_Products.Time_Series import Time_Series_Class
+
 
 class Portfolio_Class:
 
     def __init__(self, stock_position  = [], option_position = [], cash_position = [], 
-                 fx_positions = [], crypto_positions = [], index_positions = [],):
+                 fx_positions = [], crypto_positions = [], index_positions = []):
         print('Generating a Portfolio Class')
 
         self.stock_position = stock_position
@@ -39,7 +48,7 @@ class Portfolio_Class:
     def return_new_portfolio(self, asset_to_include, asset_type):
         new_portfolio = self.portfolio_of_assets
 
-        if isinstance(asset_to_include, Portfolio):
+        if isinstance(asset_to_include, Portfolio_Class):
             for key, value in asset_to_include.portfolio_of_assets.items():
                 if len(value) == 0:
                     continue
@@ -48,30 +57,30 @@ class Portfolio_Class:
                         print(i)
                         new_portfolio[key].append(value[i])
             print(len(new_portfolio['Stock']))
-            return Portfolio(stock_position=new_portfolio['Stock'], option_position=new_portfolio['Option'],
+            return Portfolio_Class(stock_position=new_portfolio['Stock'], option_position=new_portfolio['Option'],
                              cash_position=new_portfolio['Cash'], fx_positions=new_portfolio['FX'],
                              crypto_positions=new_portfolio['Crypto'], index_positions=new_portfolio['Index'])
         else:
             new_portfolio[asset_type].append(asset_to_include)
             print(len(new_portfolio['Stock']))
-            return Portfolio(stock_position = new_portfolio['Stock'], option_position = new_portfolio['Option'],
+            return Portfolio_Class(stock_position = new_portfolio['Stock'], option_position = new_portfolio['Option'],
                              cash_position = new_portfolio['Cash'], fx_positions = new_portfolio['FX'],
                              crypto_positions = new_portfolio['Crypto'], index_positions = new_portfolio['Index'])
     def __add__(self, asset_to_include):
 
-        if isinstance(asset_to_include, Stock):
+        if isinstance(asset_to_include, Stock_Class):
             return self.return_new_portfolio(asset_to_include, 'Stock')
-        elif isinstance(asset_to_include, Option):
+        elif isinstance(asset_to_include, Option_Class):
             return self.return_new_portfolio(asset_to_include, 'Option')
-        elif isinstance(asset_to_include, Portfolio):
+        elif isinstance(asset_to_include, Portfolio_Class):
             return self.return_new_portfolio(asset_to_include, 'Portfolio')
-        elif isinstance(asset_to_include, Forex):
+        elif isinstance(asset_to_include, Forex_Class):
             return self.return_new_portfolio(asset_to_include, 'FX')
-        elif isinstance(asset_to_include, Index):
+        elif isinstance(asset_to_include, Index_Class):
             return self.return_new_portfolio(asset_to_include, 'Index')
-        elif isinstance(asset_to_include, Crypto):
+        elif isinstance(asset_to_include, Crypto_Class):
             return self.return_new_portfolio(asset_to_include, 'Crypto')
-        elif isinstance(asset_to_include, Cash):
+        elif isinstance(asset_to_include, Cash_Class):
             return self.return_new_portfolio(asset_to_include, 'Cash')
 
         """  def __del__(self):

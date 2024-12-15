@@ -1,10 +1,10 @@
-from Financial_Products.Time_Series import Time_Series
+from Financial_Products.Time_Series import Time_Series_Class
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import yfinance as yf
 
-class Asset_Class(Time_Series):
+class Asset_Class(Time_Series_Class):
 
     def __init__(self, asset_name):
         print('Generating an Asset Class')
@@ -20,7 +20,7 @@ class Asset_Class(Time_Series):
             self.put_options = self.option_data_frame['Puts']
 
 
-        self.asset_time_series = Time_Series(asset_name)
+        self.asset_time_series = Time_Series_Class(asset_name)
         self.price_data_frame = self.generate_asset_info()
 
         try:
