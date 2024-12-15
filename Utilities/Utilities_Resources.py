@@ -1,5 +1,15 @@
-# Description: This file contains the resources for the Utilities module.
-# This module is used to store the API key and headers for the API connection.
+"""
+This module contains the resources for the Utilities module, which are used to store the API key and headers for the API connection.
+
+Attributes:
+-----------
+apiKey : str
+    The API key for authentication.
+payload : dict
+    The payload for the API request.
+headers : dict
+    The headers for the API request, including various HTTP headers required for making requests to the Polygon API.
+"""
 
 apiKey = ""
 payload = {}

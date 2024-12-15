@@ -11,7 +11,46 @@ from Financial_Products.Time_Series import Time_Series_Class
 
 
 class Portfolio_Class:
+    """
+    A class to represent and manage a portfolio of various financial assets.
 
+    This class initializes and manages a portfolio containing different types of assets,
+    including stocks, options, cash, forex, cryptocurrencies, and indices.
+
+    Attributes:
+    -----------
+    stock_position : list
+        A list of stock positions in the portfolio.
+    option_position : list
+        A list of option positions in the portfolio.
+    cash_position : list
+        A list of cash positions in the portfolio.
+    fx_positions : list
+        A list of forex positions in the portfolio.
+    crypto_position : list
+        A list of cryptocurrency positions in the portfolio.
+    index_positions : list
+        A list of index positions in the portfolio.
+    portfolio_of_assets : dict
+        A dictionary containing all asset positions categorized by asset type.
+
+    Methods:
+    --------
+    __init__(self, stock_position=[], option_position=[], cash_position=[], fx_positions=[], crypto_positions=[], index_positions=[]):
+        Initializes the Portfolio_Class with the specified asset positions.
+
+    generate_combined_value(self):
+        Calculates the cumulative value of all assets in the portfolio.
+
+    generate_portfolio_returns(self):
+        Generates a plot of the portfolio's cumulative value over time.
+
+    return_new_portfolio(self, asset_to_include, asset_type):
+        Creates a new portfolio by adding a specified asset or another portfolio to the current portfolio.
+
+    __add__(self, asset_to_include):
+        Allows the addition of different asset types to the portfolio using the + operator.
+    """
     def __init__(self, stock_position  = [], option_position = [], cash_position = [], 
                  fx_positions = [], crypto_positions = [], index_positions = []):
         print('Generating a Portfolio Class')

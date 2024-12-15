@@ -5,7 +5,28 @@ from datetime import datetime
 import yfinance as yf
 
 class Asset_Class(Time_Series_Class):
+    """
+    This module defines the `Asset_Class` for managing asset data in the financial products package.
 
+    Classes:
+    --------
+    Asset_Class(Time_Series_Class):
+        A class to represent and manage asset data for a given financial asset.
+
+        Methods:
+        --------
+        __init__(self, asset_name):
+            Initializes the Asset_Class with the specified asset name and creates a Time_Series_Class instance.
+
+        generate_asset_info(self):
+            Generates and returns a DataFrame containing organized asset information from the API response.
+
+        generate_option_ticker(self):
+            Generates and returns a dictionary containing call and put option tickers for the asset.
+
+        plot_time_series(self, start_date=datetime(2023,1,1), end_date=datetime.today()):
+            Plots the time series data of the asset using Plotly.
+    """
     def __init__(self, asset_name):
         print('Generating an Asset Class')
         self.asset_label = asset_name
