@@ -1,4 +1,4 @@
-from Utilities.API_Connection import API_Connection
+from Utilities import API_Connection
 from datetime import datetime
 
 
@@ -38,7 +38,10 @@ class Time_Series_Class(API_Connection):
         self.start_date = start_date
         self.end_date = end_date
         self.time_multiplier = time_multiplier
-        self.api_object = API_Connection(asset=asset_name, time_multiplier=self.time_multiplier, start_date=self.start_date,
+        self.api_object = API_Connection(asset=asset_name,
+                                         time_multiplier=self.time_multiplier,
+                                         start_date=self.start_date,
                                          end_date=self.end_date)
+
 
 

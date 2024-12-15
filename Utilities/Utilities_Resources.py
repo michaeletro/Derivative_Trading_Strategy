@@ -11,7 +11,7 @@ headers : dict
     The headers for the API request, including various HTTP headers required for making requests to the Polygon API.
 """
 
-apiKey = ""
+apiKey = "oIpqVdgJYK9nldqQ5j8JiPXxVVZptz0a"
 payload = {}
 headers = {
     'Accept': 'text/json',
