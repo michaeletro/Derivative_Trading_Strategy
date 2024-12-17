@@ -102,7 +102,7 @@ class Asset_Class(Time_Series_Class):
         """
         response = self.asset_time_series.api_object.generate_request()
         retry_count = 0
-        max_retries = 500
+        max_retries = 3
 
         while retry_count < max_retries:
             try:
@@ -110,7 +110,7 @@ class Asset_Class(Time_Series_Class):
                     raise APIError(response)
                 elif response.get('status') == 'DELAYED' and response.get('resultsCount') == 0:
                     logging.warning("Response delayed. Retrying...")
-                    time.sleep(10)
+                    time.sleep(13)
                     retry_count += 1
                     continue
 
@@ -150,7 +150,7 @@ class Asset_Class(Time_Series_Class):
                            name='Candlestick'),
             go.Scatter(x=self.price_data_frame.index,
                        y=self.price_data_frame['Volume_Weighted'],
-                       mode='lines', name='Volume Weighted', line=dict(color='yellow'))
+                       mode='lines', name='Volume Weighted', line=dict(color='yellow',dash='dot'))
         ])
 
         fig.update_layout(title=f'{ticker} Time Series Data',
