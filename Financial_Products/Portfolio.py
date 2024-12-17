@@ -1,13 +1,5 @@
 import plotly.express as px
-from Financial_Products.Asset import Asset_Class
-from Financial_Products.Cash import Cash_Class
-from Financial_Products.Crypto import Crypto_Class
-from Financial_Products.Forex import Forex_Class
-from Financial_Products.Indices import Index_Class
-from Financial_Products.Option import Option_Class
-from Financial_Products.Stock import Stock_Class
-from Financial_Products.Time_Series import Time_Series_Class
-
+from .Asset import Asset_Class
 
 class Portfolio_Class:
     """

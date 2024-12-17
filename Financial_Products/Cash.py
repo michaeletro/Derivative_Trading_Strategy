@@ -1,4 +1,5 @@
-from Financial_Products.Asset import Asset_Class
+from .Asset import Asset_Class
+
 
 class Cash_Class(Asset_Class):
     """

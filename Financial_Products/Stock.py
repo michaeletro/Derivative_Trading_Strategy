@@ -1,58 +1,367 @@
+import re
+from typing import Dict, Tuple, Union
 from Financial_Products.Asset import Asset_Class
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from scipy.stats import norm
+from scipy.optimize import minimize_scalar
+import yfinance as yf
+from datetime import datetime, timedelta
+
 
 class Stock_Class(Asset_Class):
     """
     A class to represent and manage stock data for a given financial asset.
 
-    This class inherits from the Asset_Class class and initalized stock data
-    for a specified ticker symbol.
-
     Attributes:
     -----------
-    asset_type : Asset_Class
-        An instance of the Asset_Class initialized with the ticker symbol.
-    asset_name : str
-        The ticker symbol of the stock.
-    asset_label : str
-        The label of the asset.
-    price_data_frame : DataFrame
-        The price data frame of the asset.
-    call_options : DataFrame
-        The call options data frame of the asset.
-    put_options : DataFrame
-        The put options data frame of the asset.
-    price_vector : DataFrame
-        The price vector data frame of the asset.
-    at_the_money : int
-        The at-the-money strike price of the asset.
+    ticker_list : yfinance.Ticker
+        An instance of the Yahoo Finance Ticker class.
+    option_data_frame : Dict[str, Union[pd.DataFrame, dict]]
+        A dictionary containing call, put, and total options data.
 
     Methods:
     --------
-    __init__(self, ticker):
-        Initializes the Stock_Class with the specified ticker symbol and creates an Asset_Class instance.
+    __init__(self, ticker: str):
+        Initializes the Stock_Class with the specified ticker symbol.
 
-    get_option_by_index(self, option_type='call', index_of_date=0, option_strike=None):
-        Retrieves option data based on the specified parameters.
+    _generate_option_ticker_mid_point(self) -> Dict[str, Union[pd.DataFrame, dict]]:
+        Generates option mid-point prices for calls and puts.
 
+    parse_option_details(self) -> Tuple[datetime, str]:
+        Parses option details to extract expiration date and option type.
+
+    get_option_by_index(self, option_type: str, index_of_date: int, option_strike: int = None):
+        Retrieves options data by date index and strike price.
     """
 
-    def __init__(self, ticker):
+    def __init__(self, ticker: str):
+        """
+        Initializes the Stock_Class with stock and options data.
+
+        Parameters:
+        -----------
+        ticker : str
+            Ticker symbol for the financial asset.
+        """
+        print("Generating a Stock Class...")
         super().__init__(ticker)
-        print('Generating a Stock Class')
-        self.at_the_money = int(self.price_vector['Volume_Weighted'].iloc[-1])
+        self._generate_price_data()
+        self.ticker_list = yf.Ticker(ticker)
+        self.option_data_frame = self._generate_option_ticker_mid_point()
+        self.call_options_mid_point = self.option_data_frame['Calls']
+        self.put_options_mid_point = self.option_data_frame['Puts']
+        self.total_option_db = self.option_data_frame['Total']
 
-        self.asset_label = self.asset_type.asset_label
-        self.price_data_frame = self.asset_type.price_data_frame
-        self.call_options = self.asset_type.call_options
-        self.put_options = self.asset_type.put_options
-        self.price_vector = self.asset_type.price_vector
-        self.at_the_money = int(self.price_vector['Volume_Weighted'].iloc[-1])
+        self.ticker = ticker
+        self.ticker_data = yf.Ticker(ticker)
 
-    def get_option_by_index(self, option_type='call', index_of_date=0, option_strike=None):
-        options = self.call_options if option_type.lower() == "call" else self.put_options
+        self.ticker = ticker
+        self.ticker_data = yf.Ticker(ticker)
+
+        self._plot_time_series()
+        self.build_and_plot_iv_surface()
+
+    def _generate_option_ticker_mid_point(self) -> Dict[str, Union[pd.DataFrame, dict]]:
+        """
+        Generates a dictionary of mid-point prices for calls and puts for each option expiration date.
+
+        Returns:
+        --------
+        Dict[str, Union[pd.DataFrame, dict]]:
+            A dictionary containing:
+                - 'Calls': Mid-point prices for call options.
+                - 'Puts': Mid-point prices for put options.
+                - 'Total': Raw options data frames.
+        """
+        try:
+            master_dict = {"Calls": {}, "Puts": {}}
+            total_dict = {"Calls": {}, "Puts": {}}
+
+            for date in self.ticker_list.options:
+                call_df, put_df = self._get_option_chain_data(date)
+                total_dict["Calls"][date], total_dict["Puts"][date] = call_df, put_df
+
+                master_dict["Calls"][date] = self._calculate_midpoints(call_df)
+                master_dict["Puts"][date] = self._calculate_midpoints(put_df)
+
+            return {'Calls': pd.DataFrame(master_dict['Calls']),
+                    'Puts': pd.DataFrame(master_dict['Puts']),
+                    'Total': total_dict}
+
+        except Exception as e:
+            print(f"Error retrieving option ticker: {e}")
+            return {'Calls': pd.DataFrame(), 'Puts': pd.DataFrame(), 'Total': {}}
+
+    def _get_option_chain_data(self, date: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Retrieves option chain data for a specific expiration date.
+
+        Parameters:
+        -----------
+        date : str
+            Expiration date of the options.
+
+        Returns:
+        --------
+        Tuple[pd.DataFrame, pd.DataFrame]:
+            DataFrames for call and put options.
+        """
+        option_chain = self.ticker_list.option_chain(date=date)
+        return option_chain.calls, option_chain.puts
+
+    def _calculate_midpoints(self, df: pd.DataFrame) -> Dict[float, float]:
+        """
+        Calculates the mid-point prices for a given options DataFrame.
+
+        Parameters:
+        -----------
+        df : pd.DataFrame
+            Options DataFrame (calls or puts).
+
+        Returns:
+        --------
+        Dict[float, float]:
+            A dictionary of strike prices to mid-point prices.
+        """
+        return {
+            strike: (bid + ask) / 2 if (bid + ask) / 2 != 0 else last_price
+            for strike, bid, ask, last_price in zip(df['strike'], df['bid'], df['ask'], df['lastPrice'])
+        }
+
+    def parse_option_details(self) -> Tuple[datetime, str]:
+        """
+        Parses an option string to extract the expiration date and option type.
+
+        Returns:
+        --------
+        Tuple[datetime, str]:
+            Expiration date as a datetime object and option type ('C' or 'P').
+
+        Raises:
+        -------
+        ValueError:
+            If the option string format is invalid.
+        """
+        pattern = r'O:[A-Z]+(\d{6})([CP])\d+'
+        match = re.search(pattern, self.asset_name)
+
+        if match:
+            date_str = match.group(1)
+            option_type = match.group(2)
+            expiration_date = datetime.strptime(date_str, '%y%m%d')
+            return expiration_date, option_type
+        else:
+            raise ValueError("Invalid option string format")
+
+    def get_option_by_index(self, option_type: str = 'call', index_of_date: int = 0, option_strike: int = None):
+        """
+        Retrieves option data by the date index and strike price.
+
+        Parameters:
+        -----------
+        option_type : str
+            Type of option ('call' or 'put').
+        index_of_date : int
+            Index of the expiration date.
+        option_strike : int, optional
+            Specific strike price. Defaults to the at-the-money price.
+
+        Returns:
+        --------
+        pd.Series:
+            Option prices for the given date and strike.
+        """
+        options = self.call_options_mid_point if option_type.lower() == "call" else self.put_options_mid_point
         farthest_date_column = options.columns[index_of_date]
         option_column = options[farthest_date_column].sort_index()
+
         if option_strike is None:
-            option_strike = self.at_the_money
+            option_strike = int(option_column.index[len(option_column) // 2])  # Default to mid-point strike
 
         return option_column.loc[option_strike]
+
+    def plot_option_surface(self, include='both', interpolation_method='linear', order=None):
+        """
+        Generate a 3D surface plot for call and/or put options with interpolation.
+
+        Parameters:
+        -----------
+        include : str, optional
+            Option to include in the surface plot:
+            - 'call': Include call options only.
+            - 'put': Include put options only.
+            - 'both': Include both call and put options.
+        interpolation_method : str, optional
+            Method for interpolating missing values. Default is 'linear'.
+            Examples: 'linear', 'polynomial', 'spline', etc.
+        order : int, optional
+            The order of the polynomial or spline interpolation. Required for 'polynomial' or 'spline'.
+        """
+        if include not in ['call', 'put', 'both']:
+            raise ValueError("Parameter 'include' must be one of 'call', 'put', or 'both'.")
+
+        # Sort strike prices and expiration dates
+        call_df = self.call_options_mid_point.sort_index(axis=0).sort_index(axis=1)
+        put_df = self.put_options_mid_point.sort_index(axis=0).sort_index(axis=1)
+
+        # Interpolate missing values
+        if interpolation_method in ['polynomial', 'spline'] and order is None:
+            raise ValueError("You must specify 'order' for 'polynomial' or 'spline' interpolation.")
+
+        call_df = call_df.interpolate(method=interpolation_method, axis=0, limit_direction='both',
+                                      order=order if order else None)
+        put_df = put_df.interpolate(method=interpolation_method, axis=0, limit_direction='both',
+                                    order=order if order else None)
+
+        # Extract strike prices (X-axis) and expiration dates (Y-axis)
+        expiration_dates = call_df.columns if include in ['call', 'both'] else put_df.columns
+        strike_prices = call_df.index if include in ['call', 'both'] else put_df.index
+
+        # Combine call and put data
+        surfaces = []
+        if include in ['call', 'both']:
+            surfaces.append(
+                go.Surface(
+                    z=call_df.values,
+                    x=strike_prices,
+                    y=expiration_dates,
+                    name='Call Options',
+                    colorscale='Viridis',
+                    opacity=0.8
+                )
+            )
+        if include in ['put', 'both']:
+            surfaces.append(
+                go.Surface(
+                    z=put_df.values,
+                    x=strike_prices,
+                    y=expiration_dates,
+                    name='Put Options',
+                    colorscale='Cividis',
+                    opacity=0.8
+                )
+            )
+
+        # Plot
+        fig = go.Figure(data=surfaces)
+
+        # Update layout
+        fig.update_layout(
+            title="3D Option Surface Plot (Interpolated)",
+            scene=dict(
+                xaxis_title="Strike Prices",
+                yaxis_title="Expiration Dates",
+                zaxis_title="Option Prices"
+            ),
+            template="plotly_dark"
+        )
+        fig.write_html(f'{self.asset_name}_option_surface.html')
+        fig.show()
+
+    def _black_scholes(self, S, K, T, r, sigma, derivative="call"):
+        """Black-Scholes option pricing formula."""
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        if derivative == "call":
+            return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+        elif derivative == "put":
+            return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+
+    def _calculate_iv(self, market_price, S, K, T, r, derivative="call"):
+        """Solve for implied volatility using Black-Scholes."""
+
+        def objective_function(sigma):
+            return abs(self._black_scholes(S, K, T, r, sigma, derivative) - market_price)
+
+        result = minimize_scalar(objective_function, bounds=(0.001, 3.0), method="bounded")
+        return result.x if result.success else np.nan
+
+    def build_iv_surface(self, risk_free_rate=0.01, derivative="call"):
+        """
+        Build the implied volatility surface using live market data.
+
+        Parameters:
+        -----------
+        risk_free_rate : float
+            Risk-free interest rate.
+        option_type : str
+            "call" or "put".
+
+        Returns:
+        --------
+        pd.DataFrame:
+            Implied volatility surface with spline interpolation.
+        """
+        iv_surface = {}
+        current_price = self.ticker_data.history(period="1d")["Close"].iloc[-1]
+        expiration_dates = self.ticker_data.options
+
+        print(expiration_dates)
+        for expiry in expiration_dates:
+            print(f"Calculating IV for expiration: {expiry}")
+            T = (datetime.strptime(expiry, "%Y-%m-%d") - datetime.now()).days / 365
+            option_chain = self.ticker_data.option_chain(expiry)
+            options_df = option_chain.calls if derivative == "call" else option_chain.puts
+
+            # Calculate mid-point price and IV
+            print("Almost here")
+            iv_list = [
+                self._calculate_iv(
+                    market_price=(bid + ask) / 2,
+                    S=current_price,
+                    K=strike,
+                    T=T,
+                    r=risk_free_rate,
+                    derivative=derivative,
+                )
+                for strike, bid, ask in zip(options_df["strike"], options_df["bid"], options_df["ask"])
+            ]
+            print("IN HERE")
+            iv_surface[expiry] = pd.Series(iv_list, index=options_df["strike"])
+        print("OUT OF HERE")
+        # Build IV surface DataFrame
+        iv_df = pd.DataFrame(iv_surface)
+
+        # Apply spline interpolation to fill missing values
+        iv_df = iv_df.sort_index(axis=0).sort_index(axis=1)  # Sort before interpolation
+        iv_df = iv_df.interpolate(method='spline', order=3, axis=0, limit_direction='both')  # Row-wise
+        iv_df = iv_df.interpolate(method='spline', order=3, axis=1, limit_direction='both')  # Column-wise
+        print("OUT OF HERE2")
+        return iv_df
+
+    def plot_iv_surface(self, iv_surface, derivative="call"):
+        """Plot the implied volatility surface as a 3D interactive plot."""
+        fig = go.Figure()
+
+        # Prepare the surface
+        fig.add_trace(
+            go.Surface(
+                z=iv_surface.values,
+                x=iv_surface.index,
+                y=iv_surface.columns,
+                colorscale="Viridis" if derivative == "call" else "Cividis",
+                name=f"{derivative.capitalize()} IV Surface",
+            )
+        )
+
+        # Update layout
+        fig.update_layout(
+            title=f"{self.ticker} {derivative.capitalize()} Implied Volatility Surface",
+            scene=dict(
+                xaxis_title="Strike Prices",
+                yaxis_title="Expiration Dates",
+                zaxis_title="Implied Volatility",
+            ),
+            template="plotly_dark",
+        )
+
+        fig.show()
+
+    def build_and_plot_iv_surface(self, risk_free_rate=0.01, derivative="call"):
+        """Build and plot the interpolated implied volatility surface."""
+        print(0)
+        iv_surface = self.build_iv_surface(risk_free_rate=risk_free_rate, derivative=derivative)
+        print(1)
+        self.plot_iv_surface(iv_surface, derivative=derivative)

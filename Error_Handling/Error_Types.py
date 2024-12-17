@@ -37,3 +37,17 @@ class Date_Error(Index_Error):
         self.error_date = error_date
     def __str__(self):
         print('There was an error with your date')
+
+class APIError(Exception):
+    def __init__(self, error_message):
+        self.error_message = error_message
+        pass
+    def __str__(self):
+        return f'Error API Request \nError:{self.error_message})'
+    def __repr__(self):
+        return (f'You have exceeded the maximum amount of requests per minute. '
+                f'Will attempt again in 10 seconds. Error: {self.error_message}')
+    def delayed_data(self):
+        print(self.error_message)
+        print('Attempting to retrieve delayed data...')
+        pass

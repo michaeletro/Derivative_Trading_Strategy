@@ -1,4 +1,4 @@
-from Financial_Products.Asset import Asset_Class
+from .Asset import Asset_Class
 
 class Option_Class(Asset_Class):
     """
@@ -25,11 +25,8 @@ class Option_Class(Asset_Class):
     __init__(self, asset_name):
         Initializes the Option_Class with the specified asset name and creates an Asset_Class instance.
     """
-    def __init__(self, asset_name):
+    def __init__(self, ticker):
         print('Generating an Option Class')
+        super().__init__(ticker)
+        self._generate_price_data()
 
-        self.asset_name = Asset_Class(asset_name)
-        self.asset_label = self.asset_name.asset_label
-        self.price_data_frame = self.asset_name.price_data_frame
-        self.at_the_money = int(self.asset_name.current_price['Volume_Weighted'])
-        self.price_vector = self.asset_name.price_vector

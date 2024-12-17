@@ -1,154 +1,161 @@
+import time
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
-import re
+import importlib
+import logging
+from .Time_Series import Time_Series_Class
+from Error_Handling.Error_Types import APIError
+import warnings
 
-from Financial_Products.Time_Series import Time_Series_Class
-from Financial_Products.Cash import Cash_Class
-from Financial_Products.Crypto import Crypto_Class
-from Financial_Products.Forex import Forex_Class
-from Financial_Products.Indices import Index_Class
-from Financial_Products.Option import Option_Class
-from Financial_Products.Stock import Stock_Class
+# Setup Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
 
 class Asset_Class(Time_Series_Class):
     """
-    This module defines the `Asset_Class` for managing asset data in the financial products package.
+    A class to represent and manage asset data for a given financial asset.
 
-    Classes:
+    Attributes:
+    -----------
+    asset_name : str
+        The name of the financial asset.
+    asset_time_series : Time_Series_Class
+        An instance for time series data management.
+    model_asset : bool
+        Indicates whether the asset can be modeled.
+
+    Methods:
     --------
-    Asset_Class(Time_Series_Class):
-        A class to represent and manage asset data for a given financial asset.
+    _generate_price_data():
+        Generates price and volume-weighted data for the asset.
 
-        Methods:
-        --------
-        __init__(self, asset_name):
-            Initializes the Asset_Class with the specified asset name and creates a Time_Series_Class instance.
+    _get_sub_class():
+        Dynamically determines and converts the asset instance to a subclass based on its type.
 
-        generate_asset_info(self):
-            Generates and returns a DataFrame containing organized asset information from the API response.
+    _generate_asset_info():
+        Generates and returns asset price information from an API.
 
-        generate_option_ticker(self):
-            Generates and returns a dictionary containing call and put option tickers for the asset.
-
-        plot_time_series(self, start_date=datetime(2023,1,1), end_date=datetime.today()):
-            Plots the time series data of the asset using Plotly.
+    plot_time_series():
+        Plots the candlestick chart and volume-weighted price of the asset.
     """
-    def __init__(self, asset_name):
-        print('Generating an Asset Class')
-        # Initialize the Asset_Class with the specified asset name
+
+    def __init__(self, asset_name: str):
+        """
+        Initialize the Asset_Class with asset name and time series data.
+
+        Parameters:
+        -----------
+        asset_name : str
+            The name or identifier of the asset.
+        """
+        logging.info("Generating an Asset Class...")
+        self.asset_name = asset_name
         self.asset_time_series = Time_Series_Class(asset_name)
         self.model_asset = True
-        self.asset_name = asset_name
 
-        # Determine the asset type based on the asset name
-        self.asset_type = {'O:': Option_Class(asset_name),
-                           'X:': Crypto_Class(asset_name),
-                           'C:': Forex_Class(asset_name),
-                           'I:': Index_Class(asset_name)}.get(asset_name[:2])
+    def _generate_price_data(self):
+        """Generates price data and volume-weighted price vectors."""
+        self.price_data_frame = self._generate_asset_info()
+        self.price_vector = self.price_data_frame[['Volume_Weighted']]
+        self.at_the_money = int(self.price_vector.iloc[-1])
 
-        # If the asset type is not found, default to Stock_Class
-        # If asset type fails Stock_Class, default to Cash_Class
-        if self.asset_type is None:
-            try:
-                self.asset_type = Stock_Class(asset_name)
-            except ValueError:
-                self.asset_type = Cash_Class(asset_name)
-                self.model_asset = False
-                print(f'Asset name {asset_name} is not in the dictionary and is not a Stock.'
-                      f'Defaulting to Cash_Class')
+    def _get_sub_class(self):
+        """
+        Dynamically determine and convert the instance into a subclass based on asset name prefixes.
+        Falls back to Stock_Class or Cash_Class as necessary.
+        """
+        asset_type_map = {
+            'O:': 'Option',
+            'X:': 'Crypto',
+            'C:': 'Forex',
+            'I:': 'Index'
+        }
+        self.asset_type = asset_type_map.get(self.asset_name[:2])
 
-        # Generate asset information based on the asset type
-        if self.model_asset:
+        try:
+            if self.asset_type:
+                asset_module = importlib.import_module(f'Financial_Products.{self.asset_type}')
+                asset_class = getattr(asset_module, f'{self.asset_type}_Class')
+                self.__class__ = asset_class
+                asset_class.__init__(self, self.asset_name)
+                logging.info(f"Converted to {self.__class__.__name__} successfully.")
+            else:
+                from .Stock import Stock_Class
+                self.__class__ = Stock_Class
+                Stock_Class.__init__(self, self.asset_name)
+                logging.info(f"Converted to Stock_Class as a fallback.")
+        except ValueError:
+            from .Cash import Cash_Class
+            self.__class__ = Cash_Class
+            Cash_Class.__init__(self, self.asset_name)
+            logging.info(f"Converted to Cash_Class as the final fallback.")
 
-            # Generate the asset information DataFrame
-            self.price_data_frame = self.generate_asset_info()
-            self.price_vector = pd.Series(self.price_data_frame['Volume_Weighted'], index=self.price_data_frame['Time'])
-            self.at_the_money = int(self.price_vector['Volume_Weighted'].iloc[-1])
+    def _generate_asset_info(self) -> pd.DataFrame:
+        """
+        Fetches asset price information from an API and organizes it into a DataFrame.
 
-            if isinstance(self.asset_type, Stock_Class):
-                # Generate the option ticker information
-                self.option_info = self.generate_option_ticker()
-                self.call_options = self.option_info['Calls']
-                self.put_options = self.option_info['Puts']
-            if isinstance(self.asset_type, Option_Class):
-                # Parse the expiration date and option type
-                self.expiration_date, self.option_type = self.parse_expiration_date()
-                self.strike_price = self.at_the_money
-            if isinstance(self.asset_type, Crypto_Class):
-                print(3)
-            if isinstance(self.asset_type, Forex_Class):
-                # Extract the currency pair, numerator, and denominator
-                self.currency_pair = self.asset_name[2:]
-                self.currency_numerator = self.currency_pair[2:4]
-                self.currency_denominator = self.currency_pair[5:7]
-            if isinstance(self.asset_type, Index_Class):
-                print(5)
-        else:
-            # If the asset is not modeled, set the attributes to None
-            self.price_data_frame = []
-            self.price_vector = []
-            self.at_the_money = None
-            self.option_info = None
-            self.call_options = []
-            self.put_options = []
-            self.expiration_date = None
-            self.strike_price = None
-
-    # Generate asset information from the API response
-    def generate_asset_info(self):
+        Returns:
+        --------
+        pd.DataFrame:
+            DataFrame containing organized asset price data.
+        """
         response = self.asset_time_series.api_object.generate_request()
-        try:
-            for i in range(0, len(response['results'])):
-                response['results'][i]['t'] = pd.to_datetime(response['results'][i]['t'], unit='ms')
+        retry_count = 0
+        max_retries = 500
 
-                response['results'][i]['Time'] = response['results'][i].pop('t')
-                response['results'][i]['Volume_Weighted'] = response['results'][i].pop('vw')
-                response['results'][i]['Open_Price'] = response['results'][i].pop('o')
-                response['results'][i]['Lowest_Price'] = response['results'][i].pop('l')
-                response['results'][i]['Highest_Price'] = response['results'][i].pop('h')
-                response['results'][i]['Close_Price'] = response['results'][i].pop('c')
-                response['results'][i]['Volume'] = response['results'][i].pop('v')
-                response['results'][i]['Lot_Size'] = response['results'][i].pop('n')
+        while retry_count < max_retries:
+            try:
+                if response.get('status') == 'ERROR':
+                    raise APIError(response)
+                elif response.get('status') == 'DELAYED' and response.get('resultsCount') == 0:
+                    logging.warning("Response delayed. Retrying...")
+                    time.sleep(10)
+                    retry_count += 1
+                    continue
 
-            return pd.DataFrame(response['results'])
-        except (KeyError, TypeError) as e:
-            return f'There was an error with the API request: {e}'
+                for result in response['results']:
+                    result['Time'] = pd.to_datetime(result.pop('t'), unit='ms', utc=True)
+                    result['Volume_Weighted'] = result.pop('vw')
+                    result['Open_Price'] = result.pop('o')
+                    result['Lowest_Price'] = result.pop('l')
+                    result['Highest_Price'] = result.pop('h')
+                    result['Close_Price'] = result.pop('c')
+                    result['Volume'] = result.pop('v')
 
-    def plot_time_series(self):
-        fig = px.line(self.price_data_frame, x='Time', y='Volume_Weighted',
-                      title=self.asset_name + ' Time Series')
-        fig.show()
+                return pd.DataFrame(response['results']).set_index('Time')
 
-    def generate_option_ticker(self):
-        try:
-            master_dict = {"Calls": {}, "Puts": {}}
-            for date in self.asset_name.options:
-                master_dict["Calls"][date] = {}
-                master_dict["Puts"][date] = {}
-                call_df = self.asset_name.option_chain(date=date).calls
-                put_df = self.asset_name.option_chain(date=date).puts
-                for strike, symbol in zip(call_df['strike'], call_df['contractSymbol']):
-                    master_dict["Calls"][date][strike] = symbol
-                for strike, symbol in zip(put_df['strike'], put_df['contractSymbol']):
-                    master_dict["Puts"][date][strike] = symbol
-            return {'Calls': pd.DataFrame(master_dict['Calls']), 'Puts': pd.DataFrame(master_dict['Puts'])}
-        except IndexError as e:
-            print(f'Error on retrieving option ticker. Error type {e}')
-            return {'Calls': [], 'Puts': []}
+            except APIError as e:
+                logging.error(f"API Error: {repr(e)}. Retrying...")
+                time.sleep(10)
+                retry_count += 1
 
-    def parse_option_details(self):
-        # Define the regular expression pattern to capture the date part and the option type
-        pattern = r'O:[A-Z]+(\d{6})([CP])\d+'
-        # Search for the pattern in the option string
-        match = re.search(pattern, self.asset_name)
+        raise APIError("Max retries reached. Failed to fetch asset data.")
 
-        if match:
-            # Extract the date part and the option type
-            date_str = match.group(1)
-            option_type = match.group(2)
-            # Convert the date string to a datetime object
-            expiration_date = datetime.strptime(date_str, '%y%m%d')
-            return expiration_date, option_type
+    def _plot_time_series(self):
+        """
+        Plots the asset's time series data as a candlestick chart with volume-weighted prices.
+        """
+        if self.asset_name[1] == ':':
+            ticker = self.asset_name[2:]
         else:
-            raise ValueError("Invalid option string format")
+            ticker = self.asset_name
+
+        fig = go.Figure(data=[
+            go.Candlestick(x=self.price_data_frame.index,
+                           open=self.price_data_frame['Open_Price'],
+                           high=self.price_data_frame['Highest_Price'],
+                           low=self.price_data_frame['Lowest_Price'],
+                           close=self.price_data_frame['Close_Price'],
+                           name='Candlestick'),
+            go.Scatter(x=self.price_data_frame.index,
+                       y=self.price_data_frame['Volume_Weighted'],
+                       mode='lines', name='Volume Weighted', line=dict(color='yellow'))
+        ])
+
+        fig.update_layout(title=f'{ticker} Time Series Data',
+                          xaxis_title='Date',
+                          yaxis_title='Price',
+                          template='plotly_dark')
+        fig.write_html(f'{ticker}_time_series.html')
+        fig.show()

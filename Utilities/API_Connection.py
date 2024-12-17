@@ -92,8 +92,4 @@ class API_Connection:
                                 url=self.url,
                                 headers=self.headers,
                                 data=self.payload).json()
-
-        if self.response['status'] == 'ERROR':
-            return list(["ERROR", self.response['error']])
-        else:
-            return self.response
+        return self.response
