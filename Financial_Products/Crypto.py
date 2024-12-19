@@ -14,5 +14,7 @@ class Crypto_Class(Asset_Class):
         __init__(self, asset):
             Initializes the Crypto_Class with the specified asset and creates an Asset_Class instance.
     """
-    def __int__(self, asset):
+    def __int__(self, asset_name):
         print('Generating a Crypto Class')
+        super().__init__(asset_name=asset_name)
+        self.pricing_data = self.generate_price_data()

@@ -1,120 +1,172 @@
 import plotly.express as px
+from typing import List, Dict, Union
 from .Asset import Asset_Class
+
 
 class Portfolio_Class:
     """
     A class to represent and manage a portfolio of various financial assets.
 
-    This class initializes and manages a portfolio containing different types of assets,
-    including stocks, options, cash, forex, cryptocurrencies, and indices.
-
     Attributes:
     -----------
-    stock_position : list
-        A list of stock positions in the portfolio.
-    option_position : list
-        A list of option positions in the portfolio.
-    cash_position : list
-        A list of cash positions in the portfolio.
-    fx_positions : list
-        A list of forex positions in the portfolio.
-    crypto_position : list
-        A list of cryptocurrency positions in the portfolio.
-    index_positions : list
-        A list of index positions in the portfolio.
-    portfolio_of_assets : dict
+    portfolio_of_assets : Dict[str, List[Asset_Class]]
         A dictionary containing all asset positions categorized by asset type.
 
     Methods:
     --------
-    __init__(self, stock_position=[], option_position=[], cash_position=[], fx_positions=[], crypto_positions=[], index_positions=[]):
-        Initializes the Portfolio_Class with the specified asset positions.
-
-    generate_combined_value(self):
+    generate_combined_value() -> Dict[str, float]:
         Calculates the cumulative value of all assets in the portfolio.
 
-    generate_portfolio_returns(self):
+    generate_portfolio_returns():
         Generates a plot of the portfolio's cumulative value over time.
 
-    return_new_portfolio(self, asset_to_include, asset_type):
-        Creates a new portfolio by adding a specified asset or another portfolio to the current portfolio.
+    add_to_portfolio(asset_or_portfolio: Union[Asset_Class, 'PortfolioClass'], asset_type: str = None):
+        Adds a specified asset or portfolio to the current portfolio.
 
-    __add__(self, asset_to_include):
-        Allows the addition of different asset types to the portfolio using the + operator.
+    __add__(self, asset_or_portfolio: Union[Asset_Class, 'PortfolioClass']) -> 'PortfolioClass':
+        Enables the use of the + operator to add assets or portfolios.
     """
-    def __init__(self,
-                 stock_position=[],
-                 option_position=[],
-                 cash_position=[],
-                 fx_positions=[],
-                 crypto_positions=[],
-                 index_positions=[]):
 
-        print('Generating a Portfolio Class')
+    def __init__(
+        self,
+        stock_position: List[Asset_Class] = None,
+        option_position: List[Asset_Class] = None,
+        cash_position: List[Asset_Class] = None,
+        fx_positions: List[Asset_Class] = None,
+        crypto_position: List[Asset_Class] = None,
+        index_positions: List[Asset_Class] = None,
+    ):
+        """
+        Initializes the PortfolioClass with specified asset positions.
 
-        self.stock_position = stock_position
-        self.option_position = option_position
-        self.cash_position = cash_position
-        self.fx_positions = fx_positions
-        self.crypto_position = crypto_positions
-        self.index_positions = index_positions
+        Parameters:
+        -----------
+        stock_position : List[Asset_Class]
+            List of stock positions in the portfolio.
+        option_position : List[Asset_Class]
+            List of option positions in the portfolio.
+        cash_position : List[Asset_Class]
+            List of cash positions in the portfolio.
+        fx_positions : List[Asset_Class]
+            List of forex positions in the portfolio.
+        crypto_position : List[Asset_Class]
+            List of cryptocurrency positions in the portfolio.
+        index_positions : List[Asset_Class]
+            List of index positions in the portfolio.
+        """
+        print("Initializing PortfolioClass...")
 
-        self.portfolio_of_assets = {"Stock": self.stock_position, "Option": self.option_position,
-                                    "Cash": self.cash_position, "FX": self.fx_positions,
-                                    "Crypto": self.crypto_position, "Index": self.index_positions}
+        self.portfolio_of_assets: Dict[str, List[Asset_Class]] = {
+            "Stock": stock_position or [],
+            "Option": option_position or [],
+            "Cash": cash_position or [],
+            "FX": fx_positions or [],
+            "Crypto": crypto_position or [],
+            "Index": index_positions or [],
+        }
 
-    def generate_combined_value(self):
-        cumulative_value = []
-        for key, value in self.portfolio_of_assets.items():
-            for items in value:
-                print(value)
-                cumulative_value = items.price_vector + cumulative_value
-        return cumulative_value
+    def generate_combined_value(self) -> Dict[str, float]:
+        """
+        Calculates the cumulative value of all assets in the portfolio.
 
-    def generate_portfolio_returns(self):
-        cumulative_value = self.generate_combined_value()
-        fig = px.line(cumulative_value, y='Volume_Weighted', title='Portfolio')
+        Returns:
+        --------
+        Dict[str, float]:
+            A dictionary of cumulative values for each asset type.
+        """
+        combined_values = {}
+        for asset_type, assets in self.portfolio_of_assets.items():
+            combined_values[asset_type] = sum(
+                asset.price_vector.sum() for asset in assets
+            )
+        return combined_values
+
+    def generate_portfolio_returns(self) -> None:
+        """
+        Generates a plot of the portfolio's cumulative value over time.
+        """
+        combined_value = self.generate_combined_value()
+        fig = px.bar(
+            x=combined_value.keys(),
+            y=combined_value.values(),
+            title="Portfolio Cumulative Value by Asset Type",
+        )
         fig.show()
 
-    def return_new_portfolio(self, asset_to_include, asset_type):
-        new_portfolio = self.portfolio_of_assets
-        if isinstance(asset_to_include, Portfolio_Class):
-            for key, value in asset_to_include.portfolio_of_assets.items():
-                if len(value) == 0:
-                    continue
-                else:
-                    for i in range(0, len(value) - 1):
-                        print(i)
-                        new_portfolio[key].append(value[i])
-            print(len(new_portfolio['Stock']))
-            return Portfolio_Class(stock_position=new_portfolio['Stock'],
-                                   option_position=new_portfolio['Option'],
-                                   cash_position=new_portfolio['Cash'],
-                                   fx_positions=new_portfolio['FX'],
-                                   crypto_positions=new_portfolio['Crypto'],
-                                   index_positions=new_portfolio['Index'])
-        else:
-            new_portfolio[asset_type].append(asset_to_include)
-            print(len(new_portfolio['Stock']))
-            return Portfolio_Class(stock_position=new_portfolio['Stock'],
-                                   option_position=new_portfolio['Option'],
-                                   cash_position=new_portfolio['Cash'],
-                                   fx_positions=new_portfolio['FX'],
-                                   crypto_positions=new_portfolio['Crypto'],
-                                   index_positions=new_portfolio['Index'])
+    def add_to_portfolio(
+        self, asset_or_portfolio: Union[Asset_Class, "PortfolioClass"]
+    ) -> None:
+        """
+        Adds an asset or another portfolio to the current portfolio.
 
-    def __add__(self, asset_to_include):
-        if isinstance(asset_to_include, Stock_Class):
-            return self.return_new_portfolio(asset_to_include, 'Stock')
-        elif isinstance(asset_to_include, Option_Class):
-            return self.return_new_portfolio(asset_to_include, 'Option')
-        elif isinstance(asset_to_include, Portfolio_Class):
-            return self.return_new_portfolio(asset_to_include, 'Portfolio')
-        elif isinstance(asset_to_include, Forex_Class):
-            return self.return_new_portfolio(asset_to_include, 'FX')
-        elif isinstance(asset_to_include, Index_Class):
-            return self.return_new_portfolio(asset_to_include, 'Index')
-        elif isinstance(asset_to_include, Crypto_Class):
-            return self.return_new_portfolio(asset_to_include, 'Crypto')
-        elif isinstance(asset_to_include, Cash_Class):
-            return self.return_new_portfolio(asset_to_include, 'Cash')
+        Parameters:
+        -----------
+        asset_or_portfolio : Union[Asset_Class, PortfolioClass]
+            The asset or portfolio to add.
+        asset_type : str, optional
+            The type of the asset if adding a single asset.
+        """
+        if isinstance(asset_or_portfolio, PortfolioClass):
+            for key, value in asset_or_portfolio.portfolio_of_assets.items():
+                self.portfolio_of_assets[key].extend(value)
+        elif isinstance(asset_or_portfolio, Asset_Class):
+            asset_type = asset_or_portfolio.__class__.__name__.replace("_Class", "")
+            self.portfolio_of_assets[asset_type].append(asset_or_portfolio)
+        else:
+            raise TypeError("Unsupported type for addition to portfolio.")
+
+    def subtract_from_portfolio(
+            self, asset_or_portfolio: Union[Asset_Class, "PortfolioClass"]
+    ) -> None:
+        """Removes an asset or another portfolio from the current portfolio."""
+        asset_type = asset_or_portfolio.__class__.__name__.replace("_Class", "")
+        asset_name = asset_or_portfolio.asset_name
+
+        if isinstance(asset_or_portfolio, PortfolioClass):
+            for key, value in asset_or_portfolio.portfolio_of_assets.items():
+                for asset in value:
+                    if asset in self.portfolio_of_assets[key]:
+                        self.portfolio_of_assets[key].remove(asset)
+        elif isinstance(asset_or_portfolio, Asset_Class):
+            if asset_type not in self.portfolio_of_assets:
+                raise ValueError(f"Invalid asset type: {asset_or_portfolio}")
+            if asset_name in self.portfolio_of_assets[asset_type]:
+                self.portfolio_of_assets[asset_type].remove(asset_or_portfolio)
+            else:
+                raise ValueError(f"Asset not found in {asset_type} portfolio.")
+        else:
+            raise TypeError("Invalid input: must specify asset type for a single asset or provide a portfolio.")
+
+    def __add__(
+        self, asset_or_portfolio: Union[Asset_Class, "PortfolioClass"]
+    ) -> "PortfolioClass":
+        """
+        Enables the use of the + operator to add assets or portfolios.
+
+        Parameters:
+        -----------
+        asset_or_portfolio : Union[Asset_Class, PortfolioClass]
+            The asset or portfolio to add.
+
+        Returns:
+        --------
+        PortfolioClass:
+            A new portfolio containing the combined assets.
+        """
+        new_portfolio = PortfolioClass(
+            stock_position=self.portfolio_of_assets["Stock"][:],
+            option_position=self.portfolio_of_assets["Option"][:],
+            cash_position=self.portfolio_of_assets["Cash"][:],
+            fx_positions=self.portfolio_of_assets["FX"][:],
+            crypto_position=self.portfolio_of_assets["Crypto"][:],
+            index_positions=self.portfolio_of_assets["Index"][:],
+        )
+        if isinstance(asset_or_portfolio, PortfolioClass):
+            new_portfolio.add_to_portfolio(asset_or_portfolio)
+        elif isinstance(asset_or_portfolio, Asset_Class):
+            new_portfolio.add_to_portfolio(asset_or_portfolio)
+        else:
+            raise TypeError("Unsupported type for addition to portfolio.")
+
+        return new_portfolio
+

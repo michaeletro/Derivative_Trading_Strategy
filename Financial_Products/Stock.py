@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Dict, Tuple, Union
 from Financial_Products.Asset import Asset_Class
@@ -8,6 +9,9 @@ from scipy.stats import norm
 from scipy.optimize import minimize_scalar
 import yfinance as yf
 from datetime import datetime, timedelta
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 
 class Stock_Class(Asset_Class):
@@ -36,7 +40,7 @@ class Stock_Class(Asset_Class):
         Retrieves options data by date index and strike price.
     """
 
-    def __init__(self, ticker: str):
+    def __init__(self, asset_name: str):
         """
         Initializes the Stock_Class with stock and options data.
 
@@ -45,19 +49,37 @@ class Stock_Class(Asset_Class):
         ticker : str
             Ticker symbol for the financial asset.
         """
-        print("Generating a Stock Class...")
-        super().__init__(ticker)
-        self._generate_price_data()
-        self.ticker_data = yf.Ticker(ticker)
+        logging.info("Generating a Stock Class...")
+        super().__init__(asset_name=asset_name)
 
+        self.ticker_data = yf.Ticker(asset_name)
         self.option_data_frame = self._generate_option_ticker_mid_point()
         self.call_options_mid_point = self.option_data_frame['Calls']
         self.put_options_mid_point = self.option_data_frame['Puts']
-        self.total_option_db = self.option_data_frame['Total']
 
-        self._plot_time_series()
-        self.plot_option_surface()
-        self.build_and_plot_iv_surface()
+        self.expirations = self.call_options_mid_point.columns
+        self.strikes = self.call_options_mid_point.index
+        self.current_price = self.price_vector.iloc[-1]
+        self.risk_free_rate = 0.01
+
+        #self.call_iv_surface = self.build_iv_surface(risk_free_rate=self.risk_free_rate, derivative="call")
+        #self.put_iv_surface = self.build_iv_surface(risk_free_rate=self.risk_free_rate, derivative="put")
+
+        #self.build_and_plot_iv_surface()
+
+    def _interpolate_option_df(self, option_data: pd.DataFrame = None, interpolation_method='spline', order=3):
+        full_strikes = np.arange(option_data.index.min(), option_data.index.max() + 1, step=0.5)
+        full_dates = pd.date_range(option_data.columns.min(), option_data.columns.max())
+
+        option_data = option_data.reindex(index=full_strikes, columns=full_dates)
+
+        if interpolation_method in ['polynomial', 'spline'] and order is None:
+            raise ValueError("You must specify 'order' for 'polynomial' or 'spline' interpolation.")
+
+        option_data = option_data.interpolate(method=interpolation_method, axis=0, limit_direction='both', order=order)
+        option_data = option_data.interpolate(method=interpolation_method, axis=1, limit_direction='both', order=order)
+
+        return option_data.sort_index(axis=0).sort_index(axis=1)
 
     def _generate_option_ticker_mid_point(self) -> Dict[str, Union[pd.DataFrame, dict]]:
         """
@@ -73,22 +95,24 @@ class Stock_Class(Asset_Class):
         """
         try:
             master_dict = {"Calls": {}, "Puts": {}}
-            total_dict = {"Calls": {}, "Puts": {}}
 
             for date in self.ticker_data.options:
                 call_df, put_df = self._get_option_chain_data(date)
-                total_dict["Calls"][date], total_dict["Puts"][date] = call_df, put_df
 
                 master_dict["Calls"][date] = self._calculate_midpoints(call_df)
                 master_dict["Puts"][date] = self._calculate_midpoints(put_df)
 
-            return {'Calls': pd.DataFrame(master_dict['Calls']),
-                    'Puts': pd.DataFrame(master_dict['Puts']),
-                    'Total': total_dict}
+            if self.debug:
+                logging.info("Option Mid-Point Prices:")
+                logging.info(pd.DataFrame(master_dict['Calls']))
+                logging.info(pd.DataFrame(master_dict['Puts']))
+
+            return {'Calls': self._interpolate_option_df(pd.DataFrame(master_dict['Calls'])),
+                    'Puts': self._interpolate_option_df(pd.DataFrame(master_dict['Puts']))}
 
         except Exception as e:
-            print(f"Error retrieving option ticker: {e}")
-            return {'Calls': pd.DataFrame(), 'Puts': pd.DataFrame(), 'Total': {}}
+            logging.warning(f"Error retrieving option ticker: {e}")
+            return {'Calls': pd.DataFrame(), 'Puts': pd.DataFrame()}
 
     def _get_option_chain_data(self, date: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -105,6 +129,9 @@ class Stock_Class(Asset_Class):
             DataFrames for call and put options.
         """
         option_chain = self.ticker_data.option_chain(date=date)
+        if self.debug:
+            logging.info(f"Option Chain Data for {date}:")
+            logging.info(option_chain)
         return option_chain.calls, option_chain.puts
 
     def _calculate_midpoints(self, df: pd.DataFrame) -> Dict[float, float]:
@@ -121,10 +148,11 @@ class Stock_Class(Asset_Class):
         Dict[float, float]:
             A dictionary of strike prices to mid-point prices.
         """
-        return {
-            strike: (bid + ask) / 2 if (bid + ask) / 2 != 0 else last_price
-            for strike, bid, ask, last_price in zip(df['strike'], df['bid'], df['ask'], df['lastPrice'])
-        }
+        df = {strike: (bid + ask) / 2 if (bid + ask) / 2 != 0 else last_price
+              for strike, bid, ask, last_price in zip(df['strike'], df['bid'], df['ask'], df['lastPrice'])}
+        if self.debug:
+            logging.info(f"Calculating mid-point prices for {df.shape} options...")
+        return df
 
     def parse_option_details(self) -> Tuple[datetime, str]:
         """
@@ -173,12 +201,20 @@ class Stock_Class(Asset_Class):
         farthest_date_column = options.columns[index_of_date]
         option_column = options[farthest_date_column].sort_index()
 
+        if self.debug:
+            logging.info(f"Option Data for {farthest_date_column}:")
+            logging.info(option_column)
+
         if option_strike is None:
             option_strike = int(option_column.index[len(option_column) // 2])  # Default to mid-point strike
 
+        if self.debug:
+            logging.info(f"Option Data for Strike Price {option_strike}:")
+            logging.info(option_column.loc[option_strike])
+
         return option_column.loc[option_strike]
 
-    def plot_option_surface(self, include='both', interpolation_method='linear', order=None):
+    def plot_option_surface(self, include='both', interpolation_method='spline', order=3):
         """
         Generate a 3D surface plot for call and/or put options with interpolation.
 
@@ -195,45 +231,13 @@ class Stock_Class(Asset_Class):
         order : int, optional
             The order of the polynomial or spline interpolation. Required for 'polynomial' or 'spline'.
         """
-        if include not in ['call', 'put', 'both']:
-            raise ValueError("Parameter 'include' must be one of 'call', 'put', or 'both'.")
-
-        # Step 1: Clean and sort data
-        def clean_and_prepare(df):
-            df = df.copy()
-            df.index = pd.to_numeric(df.index, errors='coerce')  # Ensure numeric index
-            df.columns = pd.to_datetime(df.columns, errors='coerce')  # Ensure datetime columns
-            df = df.sort_index(axis=0).sort_index(axis=1)  # Sort strikes and expirations
-            return df
-
-        call_df = clean_and_prepare(self.call_options_mid_point)
-        put_df = clean_and_prepare(self.put_options_mid_point)
-
-        # Step 2: Reindex to create uniform grids
-        full_strikes = np.arange(call_df.index.min(), call_df.index.max() + 1, step=1)
-        full_dates = pd.date_range(call_df.columns.min(), call_df.columns.max(), freq='D')
-
-        call_df = call_df.reindex(index=full_strikes, columns=full_dates)
-        put_df = put_df.reindex(index=full_strikes, columns=full_dates)
-
-        # Step 3: Interpolate missing values
-        if interpolation_method in ['polynomial', 'spline'] and order is None:
-            raise ValueError("You must specify 'order' for 'polynomial' or 'spline' interpolation.")
-
-        call_df = call_df.interpolate(method=interpolation_method, axis=0, limit_direction='both', order=order)
-        call_df = call_df.interpolate(method=interpolation_method, axis=1, limit_direction='both', order=order)
-
-        put_df = put_df.interpolate(method=interpolation_method, axis=0, limit_direction='both', order=order)
-        put_df = put_df.interpolate(method=interpolation_method, axis=1, limit_direction='both', order=order)
-
-        # Step 4: Extract axes for Plotly
         surfaces = []
         if include in ['call', 'both']:
             surfaces.append(
                 go.Surface(
-                    z=call_df.values,
-                    x=call_df.index,  # Strike prices
-                    y=call_df.columns,  # Expiration dates
+                    z=self.call_options_mid_point.values,
+                    x=self.call_options_mid_point.index,  # Strike prices
+                    y=self.call_options_mid_point.columns,  # Expiration dates
                     name='Call Options',
                     colorscale='Viridis',
                     opacity=0.8
@@ -242,9 +246,9 @@ class Stock_Class(Asset_Class):
         if include in ['put', 'both']:
             surfaces.append(
                 go.Surface(
-                    z=put_df.values,
-                    x=put_df.index,  # Strike prices
-                    y=put_df.columns,  # Expiration dates
+                    z=self.put_options_mid_point.values,
+                    x=self.put_options_mid_point.index,  # Strike prices
+                    y=self.put_options_mid_point.columns,  # Expiration dates
                     name='Put Options',
                     colorscale='Cividis',
                     opacity=0.8
@@ -264,8 +268,9 @@ class Stock_Class(Asset_Class):
             template="plotly_dark"
         )
 
-        fig.write_html(f'{self.asset_name}_option_surface.html')
+        fig.write_html(f'HTML_Diagrams/{self.asset_name}_option_surface.html')
         fig.show()
+
     def _black_scholes(self, S, K, T, r, sigma, derivative="call"):
         """Black-Scholes option pricing formula."""
         d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -278,6 +283,11 @@ class Stock_Class(Asset_Class):
     def _calculate_iv(self, market_price, S, K, T, r, derivative="call"):
         """Solve for implied volatility using Black-Scholes."""
 
+        print(market_price)
+        print(S)
+        print(K)
+        print(T)
+        print(r)
         def objective_function(sigma):
             return abs(self._black_scholes(S, K, T, r, sigma, derivative) - market_price)
 
@@ -301,42 +311,39 @@ class Stock_Class(Asset_Class):
             Implied volatility surface with spline interpolation.
         """
         iv_surface = {}
-        current_price = self.ticker_data.history(period="1d")["Close"].iloc[-1]
-        expiration_dates = self.ticker_data.options
+        current_price = self.current_price
+        options_df = self.call_options_mid_point if derivative == "call" else self.put_options_mid_point
 
-        for expiry in expiration_dates:
-            #print(f"Calculating IV for expiration: {expiry}")
-            T = (datetime.strptime(expiry, "%Y-%m-%d") - datetime.now()).days / 365
-            option_chain = self.ticker_data.option_chain(expiry)
-            options_df = option_chain.calls if derivative == "call" else option_chain.puts
+        for expiry in options_df.columns:
+            expiry = expiry.to_pydatetime()
+            if self.debug:
+                logging.info(f"Calculating IV for {expiry}...")
 
+            T = (expiry - datetime.now()).days/365
+            print(pd.Series(options_df.index.values)[:])
+            print(options_df[[expiry]][:])
             # Calculate mid-point price and IV
             iv_list = [
                 self._calculate_iv(
-                    market_price=(bid + ask) / 2,
-                    S=current_price,
+                    market_price=midpoint,
+                    S=current_price.values[0],
                     K=strike,
                     T=T,
                     r=risk_free_rate,
                     derivative=derivative,
                 )
-                for strike, bid, ask in zip(options_df["strike"], options_df["bid"], options_df["ask"])
+                for strike, midpoint in zip(pd.to_numeric(pd.Series(options_df.index.values)[:]), pd.to_numeric(options_df[[expiry]][:]))
             ]
-            iv_surface[expiry] = pd.Series(iv_list, index=options_df["strike"])
+            iv_surface[expiry] = pd.Series(iv_list, index=options_df.index)
+
         # Build IV surface DataFrame
         iv_df = pd.DataFrame(iv_surface)
-        iv_df.index = pd.to_numeric(iv_df.index)
-        iv_df.columns = pd.to_datetime(iv_df.columns)
+        iv_df.index = pd.to_numeric(iv_df.index, errors='coerce')
+        iv_df.columns = pd.to_datetime(iv_df.columns, errors='coerce')
 
-        # Apply spline interpolation to fill missing values
-        iv_df = iv_df.sort_index(axis=0).sort_index(axis=1)  # Sort before interpolation
-        iv_df = iv_df.interpolate(method='spline', order=2, axis=0, limit_direction='both')  # Row-wise
-        iv_df = iv_df.interpolate(method='spline', order=2, axis=1, limit_direction='both')  # Column-wise
-        print(f"Strike price range included: {iv_df.index.min()} to {iv_df.index.max()}")
+        return iv_df.sort_index(axis=0).sort_index(axis=1)
 
-        return iv_df
-
-    def plot_iv_surface(self, iv_surface_1, iv_surface_2=None, derivative="call"):
+    def plot_iv_surface(self, iv_surface_1 : pd.DataFrame=None, iv_surface_2: pd.DataFrame=None):
         """
         Plot the implied volatility surface as a 3D interactive plot with adjustable camera angles.
         Ensures all strike prices and expiration dates are correctly displayed.
@@ -350,22 +357,6 @@ class Stock_Class(Asset_Class):
         derivative : str
             Type of options: 'call' or 'put'.
         """
-        import plotly.graph_objects as go
-
-        # Debug: Print the index and column ranges
-        print("Strike price range:", iv_surface_1.index.min(), "to", iv_surface_1.index.max())
-        print("Expiration dates range:", iv_surface_1.columns.min(), "to", iv_surface_1.columns.max())
-
-        # Ensure strike prices and expiration dates are sorted and numeric
-        iv_surface_1 = iv_surface_1.sort_index(axis=0).sort_index(axis=1)
-        iv_surface_1.index = pd.to_numeric(iv_surface_1.index, errors='coerce')  # Ensure numeric index
-        iv_surface_1.columns = pd.to_datetime(iv_surface_1.columns, errors='coerce')  # Ensure datetime columns
-
-        if iv_surface_2 is not None:
-            iv_surface_2 = iv_surface_2.sort_index(axis=0).sort_index(axis=1)
-            iv_surface_2.index = pd.to_numeric(iv_surface_2.index, errors='coerce')
-            iv_surface_2.columns = pd.to_datetime(iv_surface_2.columns, errors='coerce')
-
         fig = go.Figure()
 
         # Plot Surface 1
@@ -394,7 +385,7 @@ class Stock_Class(Asset_Class):
             )
 
         # Add Current Stock Price Indicator
-        current_price = self.ticker_data.history(period="1d")["Close"].iloc[-1]
+        current_price = self.current_price
         stock_price_line_x = [current_price] * len(iv_surface_1.columns)
         stock_price_line_y = iv_surface_1.columns
         stock_price_line_z = [np.nanmean(iv_surface_1.values)] * len(iv_surface_1.columns)
@@ -424,12 +415,14 @@ class Stock_Class(Asset_Class):
             ),
             template="plotly_dark",
         )
-
         fig.show()
+        # Save and Display Plot
+        if self.bool_to_save_paths:
+            fig.write_html(f'{self.save_path}/{self.asset_name}_iv_surface.html')
 
-    def build_and_plot_iv_surface(self, risk_free_rate=0.01, derivative="call"):
+    def build_and_plot_iv_surface(self, risk_free_rate=0.01):
         """Build and plot the interpolated implied volatility surface."""
         call_surface = self.build_iv_surface(risk_free_rate=risk_free_rate, derivative="call")
         put_surface = self.build_iv_surface(risk_free_rate=risk_free_rate, derivative="put")
 
-        self.plot_iv_surface(call_surface, put_surface)
+        self.plot_iv_surface(put_surface, call_surface)

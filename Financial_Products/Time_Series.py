@@ -1,5 +1,8 @@
 from Utilities import API_Connection
-from datetime import datetime
+import logging
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 
 class Time_Series_Class(API_Connection):
@@ -27,21 +30,9 @@ class Time_Series_Class(API_Connection):
     __init__(self, asset_name, start_date="2023-01-09", end_date=datetime.today().strftime("%Y-%m-%d"), time_multiplier="1"):
         Initializes the Time_Series_Class with the specified parameters and creates an API_Connection instance.
     """
-    def __init__(self,
-                 asset_name,
-                 start_date="2023-01-09",
-                 end_date=datetime.today().strftime("%Y-%m-%d"),
-                 time_multiplier="1"):
-
-        print('Generating an Time Class')
-        self.asset_name = asset_name
-        self.start_date = start_date
-        self.end_date = end_date
-        self.time_multiplier = time_multiplier
-        self.api_object = API_Connection(asset=asset_name,
-                                         time_multiplier=self.time_multiplier,
-                                         start_date=self.start_date,
-                                         end_date=self.end_date)
-
+    def __init__(self, asset_name):
+        super().__init__(asset_name=asset_name)
+        if self.debug:
+            logging.info("Generating a Time Series Class...")
 
 

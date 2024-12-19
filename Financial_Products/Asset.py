@@ -1,12 +1,15 @@
 import time
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime
 import importlib
 import logging
+
 from .Time_Series import Time_Series_Class
-from Error_Handling.Error_Types import APIError
-import warnings
+from Error_Handling import CustomAPIError
+from Error_Handling import (
+    CashConversionError,
+    AssetTypeError, AssetConversionError,
+    InvalidAssetFormatError, StockConversionError)
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -49,12 +52,18 @@ class Asset_Class(Time_Series_Class):
         asset_name : str
             The name or identifier of the asset.
         """
-        logging.info("Generating an Asset Class...")
-        self.asset_name = asset_name
-        self.asset_time_series = Time_Series_Class(asset_name)
-        self.model_asset = True
+        super().__init__(asset_name=asset_name)
+        if self.debug:
+            logging.info("Generating an Asset Class...")
 
-    def _generate_price_data(self):
+        self.save_path = 'HTML_Diagrams/'
+        self.bool_to_save_paths = False
+
+        self.price_data_frame = self._generate_asset_info()
+        self.price_vector = self.price_data_frame[['Volume_Weighted']]
+        self.at_the_money = int(self.price_vector.iloc[-1])
+
+    def generate_price_data(self):
         """Generates price data and volume-weighted price vectors."""
         self.price_data_frame = self._generate_asset_info()
         self.price_vector = self.price_data_frame[['Volume_Weighted']]
@@ -65,31 +74,90 @@ class Asset_Class(Time_Series_Class):
         Dynamically determine and convert the instance into a subclass based on asset name prefixes.
         Falls back to Stock_Class or Cash_Class as necessary.
         """
-        asset_type_map = {
-            'O:': 'Option',
-            'X:': 'Crypto',
-            'C:': 'Forex',
-            'I:': 'Index'
-        }
-        self.asset_type = asset_type_map.get(self.asset_name[:2])
-
         try:
-            if self.asset_type:
-                asset_module = importlib.import_module(f'Financial_Products.{self.asset_type}')
-                asset_class = getattr(asset_module, f'{self.asset_type}_Class')
-                self.__class__ = asset_class
-                asset_class.__init__(self, self.asset_name)
+            # Map prefixes to asset types
+            asset_type_map = {
+                'O:': 'Option',
+                'X:': 'Crypto',
+                'C:': 'Forex',
+                'I:': 'Index'
+            }
+
+            # Determine asset type based on prefix
+            self.asset_type = asset_type_map.get(self.asset_name[:2])
+            acceptable_classes = {"Option", "Crypto", "Forex", "Index"}
+
+            # Validate asset type
+            if self.asset_type not in acceptable_classes:
+                raise AssetTypeError(
+                    message=f"Asset type not recognized: {self.asset_name}. Attempting fallback to Stock class.",
+                    asset_type=self.asset_name,
+                    sub_error=True
+                )
+
+            if self.debug:
+                logging.info(f"Attempting to convert to {self.asset_type} class...")
+
+            # Dynamically import the appropriate module and class
+            asset_module = importlib.import_module(f'Financial_Products.{self.asset_type}')
+            asset_class = getattr(asset_module, f'{self.asset_type}_Class')
+
+            # Convert to the appropriate class
+            self.__class__ = asset_class
+            asset_class.__init__(self, self.asset_name)
+
+            if self.debug:
                 logging.info(f"Converted to {self.__class__.__name__} successfully.")
-            else:
+
+        except (ModuleNotFoundError, ImportError, AttributeError) as e:
+            # Handle invalid module or class
+            raise InvalidAssetFormatError(
+                asset_data=self.asset_name,
+                message=f"Failed to import module or class for {self.asset_type}.",
+                details={"error": repr(e)}
+            )
+
+        except AssetTypeError as e:
+            # Handle unrecognized asset types by falling back to Stock_Class
+            logging.warning(str(e))
+            try:
                 from .Stock import Stock_Class
                 self.__class__ = Stock_Class
                 Stock_Class.__init__(self, self.asset_name)
-                logging.info(f"Converted to Stock_Class as a fallback.")
-        except ValueError:
-            from .Cash import Cash_Class
-            self.__class__ = Cash_Class
-            Cash_Class.__init__(self, self.asset_name)
-            logging.info(f"Converted to Cash_Class as the final fallback.")
+                if self.debug:
+                    logging.info("Converted to Stock_Class as a fallback.")
+            except (TypeError, AttributeError) as stock_error:
+                raise StockConversionError(
+                    asset_name=self.asset_name,
+                    message="Failed to convert to Stock_Class.",
+                    details={"error": repr(stock_error)}
+                )
+
+        except StockConversionError as e:
+            # Handle failed conversion to Stock_Class by falling back to Cash_Class
+            logging.warning(str(e))
+            try:
+                from .Cash import Cash_Class
+                self.__class__ = Cash_Class
+                Cash_Class.__init__(self, self.asset_name)
+                if self.debug:
+                    logging.info("Converted to Cash_Class as the final fallback.")
+            except (TypeError, AttributeError) as cash_error:
+                raise CashConversionError(
+                    asset_name=self.asset_name,
+                    message="Failed to convert to Cash_Class.",
+                    details={"error": repr(cash_error)}
+                    )
+
+        except Exception as e:
+            # Handle any other unexpected errors
+            logging.error(f"Unexpected error during subclass conversion: {repr(e)}")
+            raise AssetConversionError(
+                asset_name=self.asset_name,
+                target_class=self.asset_type,
+                message="Failed to convert asset to subclass.",
+                details={"error": repr(e)}
+            )
 
     def _generate_asset_info(self) -> pd.DataFrame:
         """
@@ -100,37 +168,31 @@ class Asset_Class(Time_Series_Class):
         pd.DataFrame:
             DataFrame containing organized asset price data.
         """
-        response = self.asset_time_series.api_object.generate_request()
         retry_count = 0
         max_retries = 3
 
         while retry_count < max_retries:
+            if self.debug:
+                logging.info(f"Retrying API request... Attempt {retry_count + 1}/{max_retries}")
             try:
-                if response.get('status') == 'ERROR':
-                    raise APIError(response)
-                elif response.get('status') == 'DELAYED' and response.get('resultsCount') == 0:
-                    logging.warning("Response delayed. Retrying...")
-                    time.sleep(13)
-                    retry_count += 1
-                    continue
-
-                for result in response['results']:
-                    result['Time'] = pd.to_datetime(result.pop('t'), unit='ms', utc=True)
-                    result['Volume_Weighted'] = result.pop('vw')
-                    result['Open_Price'] = result.pop('o')
-                    result['Lowest_Price'] = result.pop('l')
-                    result['Highest_Price'] = result.pop('h')
-                    result['Close_Price'] = result.pop('c')
-                    result['Volume'] = result.pop('v')
-
-                return pd.DataFrame(response['results']).set_index('Time')
-
-            except APIError as e:
-                logging.error(f"API Error: {repr(e)}. Retrying...")
-                time.sleep(10)
+                response = self.generate_request()
+                break
+            except CustomAPIError as e:
+                logging.error(f"{repr(e)} Retry {retry_count + 1}/{max_retries}...")
                 retry_count += 1
+                time.sleep(15)  # Optional delay for retries
 
-        raise APIError("Max retries reached. Failed to fetch asset data.")
+        result = pd.DataFrame(response['results'])
+
+        result['Time'] = pd.to_datetime(result.pop('t'), unit='ms', utc=True)
+        result['Volume_Weighted'] = result.pop('vw')
+        result['Open_Price'] = result.pop('o')
+        result['Lowest_Price'] = result.pop('l')
+        result['Highest_Price'] = result.pop('h')
+        result['Close_Price'] = result.pop('c')
+        result['Volume'] = result.pop('v')
+
+        return result.set_index('Time')
 
     def _plot_time_series(self):
         """
@@ -157,5 +219,6 @@ class Asset_Class(Time_Series_Class):
                           xaxis_title='Date',
                           yaxis_title='Price',
                           template='plotly_dark')
-        fig.write_html(f'{ticker}_time_series.html')
         fig.show()
+        if self.bool_to_save_paths:
+            fig.write_html(f'{self.save_path}{ticker}_time_series.html')
