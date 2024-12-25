@@ -82,6 +82,7 @@ class Asset_Class(Time_Series_Class):
                 'C:': 'Forex',
                 'I:': 'Index'
             }
+            print("structure")
 
             # Determine asset type based on prefix
             self.asset_type = asset_type_map.get(self.asset_name[:2])

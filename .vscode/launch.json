@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "name": "Clang Debug (GDB/LLDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb", // Use "gdb" for GDB or "lldb" for LLDB
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Build with Clang" // Match the task label in tasks.json
+        }
+    ]
+}
