@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="29695818-bb28-4692-b9c3-3cdfe6a3c14d" name="Changes" comment="squash! Implementing" />
+    <list default="true" id="29695818-bb28-4692-b9c3-3cdfe6a3c14d" name="Changes" comment="squash! Implementing">
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Financial_Products/Stock.py" beforeDir="false" afterPath="$PROJECT_DIR$/Financial_Products/Stock.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -242,6 +245,7 @@
       <workItem from="1734618882497" duration="3047000" />
       <workItem from="1734633663357" duration="4262000" />
       <workItem from="1734647251567" duration="809000" />
+      <workItem from="1735158603924" duration="636000" />
     </task>
     <servers />
   </component>

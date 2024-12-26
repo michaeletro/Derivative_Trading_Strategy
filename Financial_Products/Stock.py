@@ -322,6 +322,7 @@ class Stock_Class(Asset_Class):
             T = (expiry - datetime.now()).days/365
             print(pd.Series(options_df.index.values)[:])
             print(options_df[[expiry]][:])
+            print(3)
             # Calculate mid-point price and IV
             iv_list = [
                 self._calculate_iv(
