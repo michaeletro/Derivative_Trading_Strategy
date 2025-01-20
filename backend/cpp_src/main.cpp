@@ -1,54 +1,63 @@
 #include <iostream>
-#include <curl/curl.h>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
-#include <map>
+#include <vector>
 #include <string>
+#include "StockClass.h"
+#include "OptionClass.h"
 
-#include "headers/APIConnection.h"
+namespace fs = std::filesystem;
 
-/*
-static size_t WriteCallBack(void* contents, size_t size, size_t nmemb, std::string* output) {
-    size_t totalSize = size * nmemb;
-    output->append((char*)contents, totalSize);
-    return totalSize;
-}
-
-std::string generateAPIEndpoint(const std::string& baseURL, const std::string& endpoint, const std::map<std::string, std::string>& query_params){
-    std::ostringstream api_endpoint;
-
-    if(!baseURL.empty() && baseURL.back() =='/'){
-        api_endpoint << baseURL.substr(0, baseURL.size() - 1);
-    } else {
-        api_endpoint << baseURL;
+std::vector<std::vector<std::string>> readCSV(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open file: " + filename);
     }
-    return api_endpoint.str();
 
-}
+    std::vector<std::vector<std::string>> data;
+    std::string line;
 
-int main() {
-    CURL* curl = curl_easy_init();
-    CURLcode res;
-    std::string readBuffer;
-    std::string api_endpoint;
+    while (std::getline(file, line)) {
+        std::vector<std::string> row;
+        std::istringstream stream(line);
+        std::string cell;
 
-    
-    if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, api_endpoint); // Set your API endpoint here
-        CURLcode res = curl_easy_perform(curl); // Perform the request, res will get the return code
-
-        if (res != CURLE_OK) {
-            std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+        while (std::getline(stream, cell, ',')) {
+            row.push_back(cell);
         }
-        curl_easy_cleanup(curl); // Always cleanup
+        data.push_back(row);
     }
-    return 0;
+
+    file.close();
+    return data;
 }
 
-*/
-
 int main() {
-    APIConnection api();
-    std::string url = api.buildURL();
-    std::cout << "Generated API Endpoint: " << url << std::endl;
+
+    std::string api_key = readCSV("./data_files/access_key.csv")[0][0];
+
+    try {
+
+        // Test StockClass
+        StockClass stock("AAPL", "2024-01-01", "2025-01-10", "1", 
+                         "day", "asc", api_key, 10000, true, true);
+
+        stock.fetchStockData();
+        stock.writeToCSV("./data_files/stock_data.csv");
+
+        // Test OptionClass
+        /*
+        OptionClass option("AAPL", "2024-01-01", "2025-01-10", "100",
+                           "hour", "asc", api_key, 5000, true, true);
+
+        option.fetchOptionData();
+        option.writeToCSV("option_data.csv");
+        */
+
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: " << ex.what() << std::endl;
+    }
+
     return 0;
 }
