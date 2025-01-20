@@ -22,7 +22,7 @@ void TimeSeriesClass::validateResponse(const rapidjson::Document& response) cons
     }
 }
 
-rapidjson::Value::Array TimeSeriesClass::fetchTimeSeriesData() const {
+rapidjson::Value::Array TimeSeriesClass::fetchTimeSeriesData() {
     // Fetch API data using APIConnection
     rapidjson::Document response = fetchAPIData();
 

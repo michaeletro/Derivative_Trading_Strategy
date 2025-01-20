@@ -34,17 +34,17 @@ int main() {
 
     try {
         // Create a StockClass object
-        auto stock = std::make_shared<StockClass>("AAPL", "2024-01-01", "2025-01-10", 
-                                                  "1", "day", "asc", api_key, false, false);
+        auto stock = std::make_shared<StockClass>("AAPL", "2024-06-01", "2025-01-10", 
+                                                  "1000", "day", "asc", api_key, false, false);
 
         // Fetch asset data
-        stock->fetchAssetData();
+        //stock->fetchAssetData();
 
         // Print fetched data
-        stock->printTimeSeriesData();
+        //stock->printTimeSeriesData();
 
         // Write data to a CSV file
-        stock->writeToCSV("../data_files/stock_data.csv");
+        stock->createNewCSV("stock_sssssss.csv");
 
         // Create a PortfolioClass object and add the stock to the portfolio
         PortfolioClass portfolio;

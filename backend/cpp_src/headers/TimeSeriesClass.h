@@ -6,14 +6,15 @@
 #include <memory>
 
 struct APIResult {
-    double volume;
-    double volume_weighted_price;
+    int64_t timestamp; // Numeric timestamp for calculations
     double open_price;
     double close_price;
     double highest_price;
     double lowest_price;
-    long long timestamp;
+    double volume;
+    double volume_weighted_price;
     int num_transactions;
+    std::string date; // For display purposes
 };
 
 // TimeSeriesClass inherits from APIConnection
@@ -28,7 +29,7 @@ class TimeSeriesClass : public APIConnection {
 
         void validateResponse(const rapidjson::Document& response) const override;
 
-        rapidjson::Value::Array fetchTimeSeriesData() const; // Fetches and parses the data
+        rapidjson::Value::Array fetchTimeSeriesData(); // Fetches and parses the data
         void printTimeSeriesData() const; // Prints the data to the console
         void createNewCSV(const std::string& filename) const;
         void writeToCSV(const std::string& filename) const; // Exports data to CSV

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <stdexcept>
 
+
 namespace fs = std::filesystem;
 
 // Constructor
@@ -16,28 +17,52 @@ AssetClass::AssetClass(const std::string& asset_name, const std::string& start_d
 
 // Validate Response
 
+// Function to convert Unix ms timestamp to readable time
+std::string convertUnixTimestampToTime(double unix_msec) {
+    // Convert milliseconds to seconds
+    std::time_t unix_sec = unix_msec / 1000;
+
+    // Convert to system time
+    std::tm* time_info = std::gmtime(&unix_sec); // For UTC
+    // std::tm* time_info = std::localtime(&unix_sec); // For local time
+
+    // Format the time into a readable string
+    char buffer[100];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", time_info);
+
+    return std::string(buffer);
+}
+
 
 std::vector<APIResult> AssetClass::fetchAssetData() {
-    auto results = fetchTimeSeriesData();  // Now returns rapidjson::Value::Array
+    auto results = fetchTimeSeriesData(); // Assuming this returns a JSON array
+    std::vector<APIResult> data;
 
-    std::vector<APIResult> api_results;
     for (const auto& entry : results) {
-        APIResult result = {
-            entry["timestamp"].GetInt64(),
-            entry["volume"].GetDouble(),
-            entry["volume_weighted_price"].GetDouble(),
+        APIResult result{
+            entry["timestamp"].GetInt64(),             // Store numeric timestamp
             entry["open_price"].GetDouble(),
             entry["close_price"].GetDouble(),
             entry["highest_price"].GetDouble(),
             entry["lowest_price"].GetDouble(),
+            entry["volume"].GetDouble(),
+            entry["volume_weighted_price"].GetDouble(),
             entry["num_transactions"].GetInt()
         };
-        api_results.push_back(result);
+
+        data.push_back(result);
+        // Convert Unix timestamp to human-readable time
+        result.date = convertUnixTimestampToTime(result.timestamp);
+
+        // Debugging: Display converted timestamp for human readability
+        std::cout << "Timestamp: "
+                  << convertUnixTimestampToTime(result.timestamp) // For display
+                  << ", Open: " << result.open_price
+                  << ", Close: " << result.close_price << std::endl;
     }
 
-    return api_results;
+    return data;
 }
-
 
 bool AssetClass::operator==(const AssetClass& other) const {
     return this->asset_name == other.asset_name;
@@ -72,7 +97,7 @@ void AssetClass::writeToCSV(const std::string& filename) const {
 
     // Write each data row
     for (const auto& entry : asset_data) {
-        file << entry.timestamp << ","
+        file << entry.date << ","
              << entry.open_price << ","
              << entry.close_price << ","
              << entry.highest_price << ","
