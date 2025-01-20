@@ -2,8 +2,6 @@
 #define API_CONNECTION_H
 
 #include <string>
-#include <curl/curl.h>
-#include "../libs/rapidjson/include/rapidjson/document.h"
 
 class APIConnection {
 public:
