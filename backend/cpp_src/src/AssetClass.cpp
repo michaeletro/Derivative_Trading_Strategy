@@ -15,30 +15,50 @@ AssetClass::AssetClass(const std::string& asset_name, const std::string& start_d
                       api_key, limit, adjusted, debug) {}
 
 // Validate Response
-void AssetClass::validateResponse(const rapidjson::Document& response) const {
-    TimeSeriesClass::validateResponse(response);
 
-    if (response.HasMember("ticker") && response["ticker"].IsString() &&
-        response["ticker"].GetString() != asset_name) {
-        throw std::runtime_error("Invalid API response: Ticker does not match the requested asset name.");
+
+std::vector<APIResult> AssetClass::fetchAssetData() {
+    auto results = fetchTimeSeriesData();  // Now returns rapidjson::Value::Array
+
+    std::vector<APIResult> api_results;
+    for (const auto& entry : results) {
+        APIResult result = {
+            entry["timestamp"].GetInt64(),
+            entry["volume"].GetDouble(),
+            entry["volume_weighted_price"].GetDouble(),
+            entry["open_price"].GetDouble(),
+            entry["close_price"].GetDouble(),
+            entry["highest_price"].GetDouble(),
+            entry["lowest_price"].GetDouble(),
+            entry["num_transactions"].GetInt()
+        };
+        api_results.push_back(result);
     }
 
-    if (debug) {
-        std::cout << "AssetClass response validation passed successfully." << std::endl;
-    }
+    return api_results;
 }
 
-// Fetch Asset Data
-void AssetClass::fetchAssetData() {
-    fetchTimeSeriesData();
-    if (debug) {
-        std::cout << "Asset data fetched successfully." << std::endl;
+
+bool AssetClass::operator==(const AssetClass& other) const {
+    return this->asset_name == other.asset_name;
+}
+
+std::string AssetClass::getAssetName() const {
+    return asset_name;
+}
+
+double AssetClass::getCurrentValue() const {
+    if (asset_data.empty()) {
+        throw std::runtime_error("Time series data is empty.");
     }
+    // Access the last APIResult struct in the vector
+    const APIResult& last_entry = asset_data.back();
+    return last_entry.volume_weighted_price; // Assuming "volume_weighted_price" is the field you need
 }
 
 // Write to CSV (Append or Create)
 void AssetClass::writeToCSV(const std::string& filename) const {
-    if (time_series_data.empty()) {
+    if (asset_data.empty()) {
         throw std::runtime_error("Time series data is empty. Nothing to write.");
     }
 
@@ -51,7 +71,7 @@ void AssetClass::writeToCSV(const std::string& filename) const {
     file << "Timestamp,Open_Price,Close_Price,Highest_Price,Lowest_Price,Volume,Volume_Weighted\n";
 
     // Write each data row
-    for (const auto& entry : time_series_data) {
+    for (const auto& entry : asset_data) {
         file << entry.timestamp << ","
              << entry.open_price << ","
              << entry.close_price << ","
@@ -79,5 +99,11 @@ void AssetClass::createNewCSV(const std::string& file_name) const {
     writeToCSV(file_name);
     if (debug) {
         std::cout << "Created a new CSV file: " << file_name << std::endl;
+    }
+}
+
+void AssetClass::validateResponse(const rapidjson::Document& response) const {
+    if (!response.HasMember("results") || !response["results"].IsArray()) {
+        throw std::runtime_error("Invalid API response: 'results' field missing or not an array.");
     }
 }

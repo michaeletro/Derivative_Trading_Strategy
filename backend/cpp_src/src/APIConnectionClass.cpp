@@ -86,7 +86,7 @@ std::string APIConnection::buildURL() const {
 }
 
 // Fetch API Data
-std::vector<APIResult> APIConnection::fetchAPIData() const {
+rapidjson::Document APIConnection::fetchAPIData() const {
     validateParameters(); // Validate parameters before API call
     
     std::string url = buildURL();
@@ -139,22 +139,11 @@ std::vector<APIResult> APIConnection::fetchAPIData() const {
         throw std::runtime_error("Invalid JSON response: Missing or malformed 'results' field.");
     }
 
-    const rapidjson::Value& results = doc["results"];
-    std::vector<APIResult> parsedResults;
+    // Extract and return results
+    if (!doc.HasMember("resultsCount") || !doc["resultsCount"].IsInt()) {
+        throw std::runtime_error("Invalid JSON response: Missing or malformed 'resultsCount' field.");
+    }   
+    validateResponse(doc);
 
-    for (auto& result : results.GetArray()) {
-        APIResult parsedResult;
-        parsedResult.volume = result["v"].GetDouble();
-        parsedResult.volume_weighted_price = result["vw"].GetDouble();
-        parsedResult.open_price = result["o"].GetDouble();
-        parsedResult.close_price = result["c"].GetDouble();
-        parsedResult.highest_price = result["h"].GetDouble();
-        parsedResult.lowest_price = result["l"].GetDouble();
-        parsedResult.timestamp = result["t"].GetInt64();
-        parsedResult.num_transactions = result["n"].GetInt();
-
-        parsedResults.push_back(parsedResult);
-    }
-
-    return parsedResults;
+    return doc;
 }

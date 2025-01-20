@@ -3,52 +3,60 @@
 #include <fstream>
 #include <stdexcept>
 
-// Constructor
-TimeSeriesClass::TimeSeriesClass(const std::string& asset_name, const std::string& start_date,
-                                 const std::string& end_date, const std::string& time_multiplier,
-                                 const std::string& time_span, const std::string& sort,
-                                 const std::string& api_key, int limit, bool adjusted, bool debug)
-    : APIConnection(asset_name, start_date, end_date, time_multiplier, time_span, sort, api_key,
-                    limit, adjusted, debug){}
+TimeSeriesClass::TimeSeriesClass(
+    const std::string& asset_name,
+    const std::string& start_date,
+    const std::string& end_date,
+    const std::string& time_multiplier,
+    const std::string& time_span,
+    const std::string& sort,
+    const std::string& api_key,
+    int limit,
+    bool adjusted,
+    bool debug)
+    : APIConnection(asset_name, start_date, end_date, time_multiplier, time_span, sort, api_key, limit, adjusted, debug) {}
 
-// Fetch time series data
-void TimeSeriesClass::fetchTimeSeriesData() {
-    try {
-        // Use APIConnection's fetchAPIData method to retrieve data
-        time_series_data = fetchAPIData();
-
-        if (debug) {
-            std::cout << "Time series data fetched successfully. Number of records: "
-                      << time_series_data.size() << std::endl;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Error fetching time series data: " << e.what() << std::endl;
+void TimeSeriesClass::validateResponse(const rapidjson::Document& response) const {
+    if (!response.HasMember("results") || !response["results"].IsArray()) {
+        throw std::runtime_error("Invalid JSON response: Missing or invalid 'results' array.");
     }
 }
 
-// Print time series data
+rapidjson::Value::Array TimeSeriesClass::fetchTimeSeriesData() const {
+    // Fetch API data using APIConnection
+    rapidjson::Document response = fetchAPIData();
+
+    // Validate response
+    validateResponse(response);
+
+    // Return the "results" array
+    if (response.HasMember("results") && response["results"].IsArray()) {
+        return response["results"].GetArray();
+    } else {
+        throw std::runtime_error("API response does not contain a valid 'results' field.");
+    }
+}
+
 void TimeSeriesClass::printTimeSeriesData() const {
-    std::cout << "Time Series Data:" << std::endl;
-    for (const auto& record : time_series_data) {
-        std::cout << "Timestamp: " << record.timestamp
-                  << ", Open: " << record.open_price
-                  << ", Close: " << record.close_price
-                  << ", High: " << record.highest_price
-                  << ", Low: " << record.lowest_price
-                  << ", Volume: " << record.volume
-                  << ", VWAP: " << record.volume_weighted_price
-                  << ", Transactions: " << record.num_transactions
+    for (const auto& entry : time_series_data) {
+        std::cout << "Timestamp: " << entry.timestamp
+                  << ", Open: " << entry.open_price
+                  << ", Close: " << entry.close_price
+                  << ", High: " << entry.highest_price
+                  << ", Low: " << entry.lowest_price
+                  << ", Volume: " << entry.volume
+                  << ", VWAP: " << entry.volume_weighted_price
                   << std::endl;
     }
 }
 
-// Write time series data to a CSV file
 void TimeSeriesClass::writeToCSV(const std::string& filename) const {
-    std::ofstream file(filename, std::ios::app); // Open in append mode
+    std::ofstream file(filename);
     if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filename);
+        throw std::runtime_error("Unable to open file: " + filename);
     }
 
+    file << "Timestamp,Open,Close,High,Low,Volume,VWAP,Transactions\n";
     for (const auto& record : time_series_data) {
         file << record.timestamp << ","
              << record.open_price << ","
@@ -61,22 +69,4 @@ void TimeSeriesClass::writeToCSV(const std::string& filename) const {
     }
 
     file.close();
-    std::cout << "Data written to " << filename << " successfully." << std::endl;
-}
-
-// Create a new CSV file
-void TimeSeriesClass::createNewCSV(const std::string& filename) const {
-    std::ofstream file(filename, std::ios::trunc); // Open in truncate mode (overwrite file)
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filename);
-    }
-
-    // Write headers
-    file << "Timestamp,Open,Close,High,Low,Volume,VWAP,Transactions\n";
-
-    // Write data
-    writeToCSV(filename);
-
-    file.close();
-    std::cout << "New CSV file created: " << filename << std::endl;
 }

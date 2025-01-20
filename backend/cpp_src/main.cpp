@@ -1,13 +1,9 @@
 #include <iostream>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <string>
+#include <memory>
 #include "StockClass.h"
 #include "OptionClass.h"
-
-namespace fs = std::filesystem;
+#include "PortfolioClass.h"
+#include <fstream>
 
 std::vector<std::vector<std::string>> readCSV(const std::string& filename) {
     std::ifstream file(filename);
@@ -34,30 +30,33 @@ std::vector<std::vector<std::string>> readCSV(const std::string& filename) {
 }
 
 int main() {
-
-    std::string api_key = readCSV("./data_files/access_key.csv")[0][0];
+    const std::string api_key = readCSV("../data_files/access_key.csv")[0][0];
 
     try {
+        // Create a StockClass object
+        auto stock = std::make_shared<StockClass>("AAPL", "2024-01-01", "2025-01-10", 
+                                                  "1", "day", "asc", api_key, false, false);
 
-        // Test StockClass
-        StockClass stock("AAPL", "2024-01-01", "2025-01-10", "1", 
-                         "day", "asc", api_key, 10000, true, true);
+        // Fetch asset data
+        stock->fetchAssetData();
 
-        stock.fetchStockData();
-        stock.writeToCSV("./data_files/stock_data.csv");
+        // Print fetched data
+        stock->printTimeSeriesData();
 
-        // Test OptionClass
-        /*
-        OptionClass option("AAPL", "2024-01-01", "2025-01-10", "100",
-                           "hour", "asc", api_key, 5000, true, true);
+        // Write data to a CSV file
+        stock->writeToCSV("../data_files/stock_data.csv");
 
-        option.fetchOptionData();
-        option.writeToCSV("option_data.csv");
-        */
+        // Create a PortfolioClass object and add the stock to the portfolio
+        PortfolioClass portfolio;
+        portfolio.addToPortfolio(stock, "Stock");
 
-    } catch (const std::exception& ex) {
-        std::cerr << "Error: " << ex.what() << std::endl;
+        // Print portfolio contents
+        portfolio.printPortfolio();
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return EXIT_FAILURE;
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }

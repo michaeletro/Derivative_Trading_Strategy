@@ -10,18 +10,6 @@
 
 #include "APIStringGeneratorClass.h"
 
-
-struct APIResult {
-    double volume;
-    double volume_weighted_price;
-    double open_price;
-    double close_price;
-    double highest_price;
-    double lowest_price;
-    long long timestamp;
-    int num_transactions;
-};
-
 class APIConnection {
 protected:
     // Attributes
@@ -41,8 +29,11 @@ protected:
     // Build URL dynamically
     std::string buildURL() const;
 
+
     // Validation methods
     virtual void validateParameters() const;
+
+    rapidjson::Document doc;
     virtual void validateResponse(const rapidjson::Document& response) const;
 
 public:
@@ -63,7 +54,7 @@ public:
     APIConnection& operator=(APIConnection&&) noexcept = default;
 
     // API Interaction
-    std::vector<APIResult> fetchAPIData() const;
+    rapidjson::Document fetchAPIData() const;
 };
 
 #endif // API_CONNECTION_H
