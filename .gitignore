@@ -13,5 +13,10 @@ __pycache__/
 *.log
 *.tmp
 
+backend/data_files/
+backend/cpp_src/obj/
+backend/cpp_src/bin/
+*.gitignore
+
 # Ignore environment files
 .env

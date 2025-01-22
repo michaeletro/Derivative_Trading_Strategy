@@ -28,7 +28,8 @@ APIConnection::APIConnection(const std::string& asset_name, const std::string& s
                              const std::string& api_key, int limit, bool adjusted, bool debug)
     : asset_name(asset_name), start_date(start_date), end_date(end_date),
       time_multiplier(time_multiplier), time_span(time_span), sort(sort),
-      api_key(api_key), limit(limit), adjusted(adjusted), debug(debug) {}
+      api_key(api_key), limit(limit), ng bf
+      adjusted(adjusted), debug(debug) {}
 
 // Validate Parameters
 void APIConnection::validateParameters() const {

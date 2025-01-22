@@ -34,8 +34,9 @@ int main() {
 
     try {
         // Create a StockClass object
-        auto stock = std::make_shared<StockClass>("AAPL", "2024-06-01", "2025-01-10", 
-                                                  "1000", "day", "asc", api_key, false, false);
+        auto stock = std::make_shared<StockClass>("MSFT", "2024-06-01", "2025-01-10", 
+                                                  "100", "day", "asc", api_key, true, true);
+        stock->fetchTimeSeriesData();
 
         // Fetch asset data
         //stock->fetchAssetData();

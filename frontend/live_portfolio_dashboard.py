@@ -1,76 +1,139 @@
-
 import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
-import pandas as pd
+from dash import dcc, html, Input, Output, dash_table, State
 import plotly.express as px
-import requests
+import pandas as pd
+import io
+import base64
+import os
 
-# Initialize Dash app
-app = dash.Dash(__name__)
-app.title = "Quantitative Dashboard"
+# Initialize Dash App
+app = dash.Dash(__name__, external_stylesheets=["https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css"])
+app.title = "Live Financial Data Dashboard"
 
-# App layout
+# Helper Function to Load CSV Data
+def load_csv(file_path):
+    if os.path.exists(file_path):
+        return pd.read_csv(file_path)
+    else:
+        return pd.DataFrame({
+            "timestamp": [], "open_price": [], "close_price": [],
+            "highest_price": [], "lowest_price": [], "volume": []
+        })
+
+# Initial Data Load (replace 'data.csv' with your CSV file path)
+CSV_PATH = "data.csv"
+df = load_csv(CSV_PATH)
+
+# App Layout
 app.layout = html.Div([
-    html.H1("Quantitative Research Dashboard", style={"textAlign": "center"}),
-    dcc.Tabs([
-        dcc.Tab(label="Live Portfolio", children=[
-            dcc.Graph(id="live-portfolio-graph"),
-            dcc.Interval(
-                id="live-portfolio-interval",
-                interval=1000,  # Update every second
-                n_intervals=0
-            )
-        ]),
-        dcc.Tab(label="Time Series Analysis", children=[
-            dcc.Graph(id="time-series-graph"),
-            html.Button("Fetch Time Series Data", id="fetch-time-series-btn", n_clicks=0)
-        ])
-    ])
+    html.Div([
+        html.H1("Live Financial Data Dashboard", className="text-center my-4"),
+
+        # File Upload Section
+        html.Div([
+            html.Label("Upload CSV File", className="form-label"),
+            dcc.Upload(
+                id="upload_csv",
+                children=html.Div(["Drag and Drop or ", html.A("Select a File")]),
+                style={
+                    "width": "100%", "height": "60px", "lineHeight": "60px",
+                    "borderWidth": "1px", "borderStyle": "dashed",
+                    "borderRadius": "5px", "textAlign": "center",
+                    "marginBottom": "20px",
+                },
+                multiple=False,
+            ),
+        ], className="container"),
+
+        # Dropdown to Select Metric
+        html.Div([
+            dcc.Dropdown(
+                id="metric_dropdown",
+                options=[
+                    {"label": "Open Price", "value": "open_price"},
+                    {"label": "Close Price", "value": "close_price"},
+                    {"label": "Highest Price", "value": "highest_price"},
+                    {"label": "Lowest Price", "value": "lowest_price"},
+                    {"label": "Volume", "value": "volume"}
+                ],
+                value="close_price",
+                multi=False,
+                clearable=False,
+                placeholder="Select a metric",
+                className="mb-3",
+            ),
+        ], className="container"),
+
+        # Chart Section
+        html.Div([
+            dcc.Graph(id="line_chart"),
+        ], className="container mb-4"),
+
+        # Data Table
+        html.Div([
+            html.Label("Data Table", className="form-label"),
+            dash_table.DataTable(
+                id="data_table",
+                columns=[],
+                data=[],
+                style_table={"overflowX": "auto"},
+                style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+                style_cell={"textAlign": "center", "padding": "5px"},
+            ),
+        ], className="container"),
+    ]),
+
+    # Interval Component for Live Updates
+    dcc.Interval(
+        id="interval_component",
+        interval=10*1000,  # 10 seconds
+        n_intervals=0
+    )
 ])
 
-# Callback to update the live portfolio graph
+# Callbacks
 @app.callback(
-    Output("live-portfolio-graph", "figure"),
-    [Input("live-portfolio-interval", "n_intervals")]
+    [Output("line_chart", "figure"), Output("data_table", "columns"), Output("data_table", "data")],
+    [Input("metric_dropdown", "value"), Input("upload_csv", "contents"), Input("interval_component", "n_intervals")],
+    [State("upload_csv", "filename")],
 )
-def update_live_portfolio_graph(n):
-    try:
-        # Fetch live portfolio data from C++ backend
-        response = requests.get("http://127.0.0.1:8080/live_portfolio")
-        response.raise_for_status()
-        data = pd.DataFrame.from_dict(response.json()["assets"])
-        
-        # Create the figure
-        fig = px.line(data, x="name", y="value", title="Live Portfolio Value")
-        fig.update_layout(template="plotly_dark")
-        return fig
-    except Exception as e:
-        print(f"Error fetching portfolio data: {e}")
-        return {}
+def update_dashboard(selected_metric, contents, n_intervals, filename):
+    global df
 
-# Callback to fetch and display time series data
-@app.callback(
-    Output("time-series-graph", "figure"),
-    [Input("fetch-time-series-btn", "n_clicks")]
-)
-def fetch_time_series_data(n_clicks):
-    if n_clicks > 0:
-        try:
-            # Fetch time series data from C++ backend
-            response = requests.get("http://127.0.0.1:8080/time_series")
-            response.raise_for_status()
-            data = pd.DataFrame.from_dict(response.json()["priceData"], orient="index")
-            data.reset_index(inplace=True)
-            data.columns = ["Timestamp", "Price"]
-            
-            # Create the graph
-            fig = px.line(data, x="Timestamp", y="Price", title="Time Series Data")
-            fig.update_layout(template="plotly_dark")
-            return fig
-        except Exception as e:
-            print(f"Error fetching time series data: {e}")
-            return {}
+    # Handle file upload
+    if contents:
+        content_type, content_string = contents.split(",")
+        decoded = base64.b64decode(content_string)
+        df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+
+    # Reload the CSV file periodically
+    if os.path.exists(CSV_PATH):
+        df = load_csv(CSV_PATH)
+
+    # Ensure metric exists in data
+    if selected_metric not in df.columns:
+        return px.line(title="No Data Available"), [], []
+
+    # Update line chart
+    fig = px.line(
+        df,
+        x="timestamp",
+        y=selected_metric,
+        title=f"{selected_metric.replace('_', ' ').title()} Over Time",
+        markers=True,
+    )
+    fig.update_layout(
+        template="plotly_white",
+        xaxis_title="Timestamp",
+        yaxis_title=selected_metric.replace("_", " ").title(),
+    )
+
+    # Update table
+    table_columns = [{"name": col, "id": col} for col in df.columns]
+    table_data = df.to_dict("records")
+
+    return fig, table_columns, table_data
+
 
 # Run the app
 if __name__ == "__main__":
