@@ -1,0 +1,55 @@
+# Ignore Python virtual environments
+venv/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Ignore compiled C++ files and build artifacts
+*.o
+*.so
+*.a
+*.exe
+*.dll
+bin/
+obj/
+
+# Ignore logs and debug files
+*.log
+*.tmp
+*.bak
+
+# Ignore SQLite database files
+*.db
+*.sqlite
+
+# Ignore dependency directories
+node_modules/
+package-lock.json
+
+# Ignore Webpack build artifacts
+dist/
+.bundle.js
+.bundle.js.map
+
+# Ignore editor and IDE-specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore sensitive files
+.env
+access_key.csv
+config.json
+
+# Ignore other temporary files
+*.~*
+*.backup
+*.orig
+*.rej
