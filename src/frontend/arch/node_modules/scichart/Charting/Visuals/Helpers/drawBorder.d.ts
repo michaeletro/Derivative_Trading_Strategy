@@ -1,5 +1,0 @@
-import { Rect } from "../../../Core/Rect";
-import { TSciChart } from "../../../types/TSciChart";
-import { SolidBrushCache } from "../../Drawing/SolidBrushCache";
-import { WebGlRenderContext2D } from "../../Drawing/WebGlRenderContext2D";
-export declare const drawBorder: (renderContext: WebGlRenderContext2D, webAssemblyContext2D: TSciChart, solidBrushCacheBorder: SolidBrushCache, borderRect: Rect, leftBorder: number, topBorder: number, rightBorder: number, bottomBorder: number, color: string) => void;

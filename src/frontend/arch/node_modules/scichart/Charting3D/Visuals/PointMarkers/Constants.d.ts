@@ -1,4 +1,0 @@
-export declare enum PROPERTY {
-    FILL = "Fill",
-    SIZE = "Size"
-}

@@ -1,1 +1,0 @@
-export declare function memoize<ResultType, ParamsListType extends any[]>(heavyCalculationFunction: (...params: ParamsListType) => ResultType, equalityComparisonFunction?: (params: ParamsListType, prevParams: ParamsListType) => boolean): (...args: ParamsListType) => ResultType;

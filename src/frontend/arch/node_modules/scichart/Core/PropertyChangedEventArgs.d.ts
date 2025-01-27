@@ -1,7 +1,0 @@
-/**
- * General class for Property Changed event handlers within SciChart
- */
-export declare class PropertyChangedEventArgs {
-    readonly propertyName: string;
-    constructor(propertyName: string);
-}

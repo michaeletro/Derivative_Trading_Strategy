@@ -1,5 +1,0 @@
-declare let IS_TEST_ENV: boolean;
-export { IS_TEST_ENV };
-export declare const DEFAULT_WIDTH = 900;
-export declare const DEFAULT_HEIGHT = 600;
-export declare const EPSILON = 0.0001;

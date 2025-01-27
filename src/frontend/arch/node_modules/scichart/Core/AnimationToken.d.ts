@@ -1,8 +1,0 @@
-/// <reference types="node" />
-export declare class AnimationToken {
-    private token;
-    private readonly onCompleted;
-    constructor(token: NodeJS.Timeout, onCompleted: () => void);
-    cancelAnimation(): void;
-    completeAnimation(): void;
-}

@@ -1,7 +1,0 @@
-import { HitTestInfo } from "../../Visuals/RenderableSeries/HitTest/HitTestInfo";
-import { IRenderableSeries } from "../../Visuals/RenderableSeries/IRenderableSeries";
-import { SeriesInfo } from "./SeriesInfo";
-export declare class StackedXySeriesInfo extends SeriesInfo {
-    accumulatedValue: number;
-    constructor(renderableSeries: IRenderableSeries, hitTestInfo: HitTestInfo);
-}

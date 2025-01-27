@@ -1,9 +1,0 @@
-/***
- *
- * @param red - number value from 0 to 255
- * @param green - number value from 0 to 255
- * @param blue - number value from 0 to 255
- * @param opacity - number value from 0 to 255
- * @returns pixel in hex format: opacity, red, green, blue. For example: "0xff0000ff" - blue pixel with no opacity
- */
-export declare const convertToPixel: (red: number, green: number, blue: number, opacity: number) => number;

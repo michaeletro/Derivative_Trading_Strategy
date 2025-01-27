@@ -1,8 +1,0 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.EColorMapMode = void 0;
-var EColorMapMode;
-(function (EColorMapMode) {
-    EColorMapMode[EColorMapMode["Interpolated"] = 0] = "Interpolated";
-    EColorMapMode[EColorMapMode["Stepped"] = 1] = "Stepped";
-})(EColorMapMode = exports.EColorMapMode || (exports.EColorMapMode = {}));

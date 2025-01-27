@@ -1,5 +1,0 @@
-export declare enum ERenderLayer {
-    First = 0,
-    Second = 1,
-    Third = 2
-}

@@ -1,7 +1,0 @@
-/**
- * Return random number in range [min, max]
- * @param min
- * @param max
- * @param decimalPlaces
- */
-export declare const getRandomInRange: (min: number, max: number, decimalPlaces: number) => number;

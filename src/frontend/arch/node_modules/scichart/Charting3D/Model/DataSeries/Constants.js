@@ -1,7 +1,0 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PROPERTY = void 0;
-var PROPERTY;
-(function (PROPERTY) {
-    PROPERTY["DATA_SERIES"] = "DATA_SERIES";
-})(PROPERTY = exports.PROPERTY || (exports.PROPERTY = {}));
