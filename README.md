@@ -1,130 +1,141 @@
-Derivative Trading Strategy Framework
+# Derivative Trading Strategy Project
 
-This project is a high-performance trading strategy framework, designed with a Python-based frontend for data visualization and a C++ backend for handling data processing and API interactions. It includes modules for financial asset analysis, portfolio management, and real-time data visualization.
+This project is a multi-component application for developing, testing, and analyzing derivative trading strategies. It consists of a backend written in C++ with SQLite integration and a frontend built using Python's Dash framework.
 
+---
+
+## Project Structure
+
+### Directory Layout:
+
+```
 Derivative_Trading_Strategy/
-├── backend/
-│   ├── cpp_src/
-│   │   ├── src/
-│   │   │   ├── APIConnectionClass.cpp
-│   │   │   ├── APIStringGeneratorClass.cpp
-│   │   │   ├── AssetClass.cpp
-│   │   │   ├── OptionClass.cpp
-│   │   │   ├── PortfolioClass.cpp
-│   │   │   ├── StockClass.cpp
-│   │   │   ├── TimeSeriesClass.cpp
-│   │   │   ├── TimeConversion.cpp
-│   │   │   └── main.cpp
-│   │   ├── headers/
-│   │   │   ├── APIConnectionClass.h
-│   │   │   ├── APIStringGeneratorClass.h
-│   │   │   ├── AssetClass.h
-│   │   │   ├── OptionClass.h
-│   │   │   ├── PortfolioClass.h
-│   │   │   ├── StockClass.h
-│   │   │   ├── TimeSeriesClass.h
-│   │   │   └── TimeConversion.h
-│   │   ├── Makefile
-│   │   └── obj/
-│   └── bin/
-│       └── program (generated after build)
-├── frontend/
-│   ├── app.py (Dash app for live visualization)
-│   ├── utils.py (Helper functions for data handling)
-│   └── data/
-│       └── example.csv (Sample data file for testing)
-└── README.md
+├── src/
+│   ├── backend/
+│   │   ├── cpp_src/
+│   │   │   ├── headers/       # Header files for C++ classes
+│   │   │   ├── src/           # Source files for backend functionality
+│   │   │   ├── bin/           # Compiled executables
+│   │   │   ├── obj/           # Compiled object files
+│   │   │   └── build.sh       # Shell script to build the backend
+│   ├── frontend/
+│   │   ├── app.py             # Entry point for Dash application
+│   │   ├── assets/            # Static assets (CSS, JS, images)
+│   │   ├── requirements.txt   # Python dependencies
+│   │   └── README.md          # Frontend-specific documentation
+├── data_files/                # Data input files and configurations
+├── .gitignore                 # Ignored files for Git
+└── README.md                  # Project documentation (this file)
+```
 
-Backend (C++)
+---
 
-High-Performance Data Processing: Processes financial time-series data efficiently using C++.
+## Backend
 
-API Interaction: Fetches data from financial APIs using libcurl.
-Asset and Portfolio Management: Classes for managing stocks, options, and portfolios.
-Real-Time Integration: Communicates with the frontend for real-time updates.
-Unix Timestamp Conversion: Includes utilities for converting Unix timestamps to human-readable formats.
+### Overview:
+The backend is a C++ application with the following features:
+- REST API server using the Crow framework.
+- SQLite database for storing and querying financial data.
+- Core classes for managing assets, portfolios, and financial calculations.
 
-Frontend (Python)
+### Build Instructions:
+1. Navigate to the `cpp_src` directory:
+   ```bash
+   cd src/backend/cpp_src
+   ```
+2. Build the project:
+   ```bash
+   ./build.sh
+   ```
+   This compiles all source files and generates an executable in the `bin/` directory.
+3. Run the server:
+   ```bash
+   ./bin/server
+   ```
 
-Interactive Visualization: Built with Dash, providing a live-updating bar chart and CSV upload feature.
-Data Integration: Periodically reads data from the backend and updates the charts dynamically.
+### REST API Endpoints:
+- `GET /api/data` - Fetch all asset data from the database.
+- `POST /api/add` - Add a new asset data entry.
 
-Setup
+### Database:
+SQLite is used for storing asset data. The database file `quant_data.db` resides in the backend directory.
 
-Requirements
-Backend
-C++17 or higher
-libcurl library
-Makefile (for building the C++ source code)
-Frontend
-Python 3.7 or higher
-Python libraries:
-dash
-pandas
-plotly
-Installation
+### Example Table Schema:
+```sql
+CREATE TABLE asset_data (
+    id INTEGER PRIMARY KEY,
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,
+    open_price REAL,
+    close_price REAL,
+    high_price REAL,
+    low_price REAL,
+    volume REAL
+);
+```
 
-Clone the repository:
+---
 
-bash
-Copy
-Edit
-git clone https://github.com/your-repo/Derivative_Trading_Strategy.git
-cd Derivative_Trading_Strategy
-Backend Setup:
+## Frontend
 
-Navigate to backend/cpp_src and build the C++ project:
-bash
-Copy
-Edit
-cd backend/cpp_src
-./build.sh
-Ensure the compiled binary is located in backend/bin/program.
-Frontend Setup:
+### Overview:
+The frontend is a Python Dash application for visualizing and interacting with financial data.
 
-Install Python dependencies:
-bash
-Copy
-Edit
-pip install dash pandas plotly
-Start the Dash app:
-bash
-Copy
-Edit
-python frontend/app.py
+### Setup Instructions:
+1. Create a virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+   ```
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the application:
+   ```bash
+   python app.py
+   ```
 
-Usage
-Run the Backend: Execute the compiled binary in backend/bin/:
+### Features:
+- Interactive dashboards with visualizations of trading strategies.
+- Integration with the backend for fetching and updating financial data.
+- Real-time charting using Dash and Plotly.
 
-bash
-Copy
-Edit
-./program
+---
 
-Run the Frontend: Start the Dash app:
+## Development Notes
 
-bash
-Copy
-Edit
-python frontend/app.py
+### Adding Backend Features:
+- To add a new API endpoint, modify `server.cpp`.
+- Define database interactions in `DatabaseClass.cpp`.
+- Rebuild the backend after any changes.
 
-Live Updates:
+### Adding Frontend Features:
+- Modify `app.py` to add new pages or charts.
+- Place static assets (CSS, JS, images) in the `assets/` directory.
 
-Upload a CSV file via the frontend to see it visualized in real-time.
-Backend and frontend communicate seamlessly for periodic updates.
-Performance Comparison
-The backend leverages C++ for high-performance data handling, outperforming traditional Python-based processing by approximately 10-20x (depending on the complexity of operations).
+### Testing:
+- Backend: Use tools like Postman or cURL to test API endpoints.
+- Frontend: Use a browser to interact with the Dash application.
 
-Future Improvements
+---
 
-Integrate a database for persistent storage.
-Add more visualization options (e.g., line charts, scatter plots).
-Enable multi-user functionality.
-Enhance API support for more financial data providers.
+## Future Enhancements
 
-Contributors
+- **Advanced Analytics:** Add machine learning models for predictive trading.
+- **User Authentication:** Secure API endpoints and frontend access.
+- **Expanded Database:** Include additional financial data such as options and futures.
+- **Deployment:** Deploy the application using Docker or a cloud platform.
 
-Michael Perez - Development Lead
-License
-This project is licensed under the MIT License.
+---
+
+## License
+This project is licensed under the MIT License. See `LICENSE` for more details.
+
+---
+
+## Contact
+For questions or contributions, contact:
+- **Developer:** Michael Perez
+- **Email:** mperez1498@gmail.com
 
