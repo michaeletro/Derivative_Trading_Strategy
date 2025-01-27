@@ -1,0 +1,12 @@
+import { IThemeProvider } from "./IThemeProvider";
+/**
+ * The interface for types which are Themeable in SciChart - High Performance Realtime
+ * {@link https://www.scichart.com/javascript-chart-features | JavaScript Charts}
+ */
+export interface IThemeable {
+    /**
+     * Applies a theme (defined by {@link IThemeProvider}) to the current element
+     * @param themeProvider The theme data to apply
+     */
+    applyTheme(themeProvider: IThemeProvider): void;
+}

@@ -1,0 +1,5 @@
+export declare enum ECursorStyle {
+    NS = "ns-resize",
+    EW = "ew-resize",
+    Defalut = "auto"
+}

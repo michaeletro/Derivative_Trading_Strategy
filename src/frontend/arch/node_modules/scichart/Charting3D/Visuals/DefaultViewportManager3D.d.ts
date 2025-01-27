@@ -1,0 +1,3 @@
+import { ViewportManager3DBase } from "./ViewportManager3DBase";
+export declare class DefaultViewportManager3D extends ViewportManager3DBase {
+}

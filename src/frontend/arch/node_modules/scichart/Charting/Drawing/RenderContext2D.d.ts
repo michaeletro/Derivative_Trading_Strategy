@@ -1,0 +1,35 @@
+/**
+ * The RenderContext2D provides methods for drawing to an {@link HTMLCanvasElement | Html5 Canvas}
+ * This context class is used in SciChart's High Performance Realtime {@link https://www.scichart.com/javascript-chart-features | JavaScript Charts}
+ * to draw shapes, lines, fills, images and more
+ */
+export declare class RenderContext2D {
+    private canvas2D;
+    private ctx2D;
+    /**
+     * Creates an instance of the RenderContext2D
+     * @param canvas2D the {@link HTMLCanvasElement} we are drawing to
+     */
+    constructor(canvas2D: HTMLCanvasElement);
+    /**
+     * Draws a rectangle to the specified location and with provided Htmlcolor string
+     * @param x the X-location of the rectangle
+     * @param y the Y-location of the rectangle
+     * @param width the width of the rectangle
+     * @param height the height of the rectangle
+     * @param htmlColor the Html color code to fill the rectangle
+     */
+    drawRect(x: number, y: number, width: number, height: number, htmlColor?: string): void;
+    /**
+     * Draws a circle to the specified location and with provided Htmlcolor string
+     * @param x the X-location of the rectangle
+     * @param y the Y-location of the rectangle
+     * @param radius the radius of the circle
+     * @param fillHtmlColor the Html color code to fill the circle
+     */
+    drawCircle(x: number, y: number, radius: number, fillHtmlColor: string): void;
+    /**
+     * Clears the backing canvas element
+     */
+    clear(): void;
+}

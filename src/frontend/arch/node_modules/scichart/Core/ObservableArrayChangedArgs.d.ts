@@ -1,0 +1,50 @@
+/**
+ * An action which occurred when a {@link ObservableArray} was updated
+ */
+export declare enum EObservableArrayChangedAction {
+    /**
+     * One or more items was added. Check the {@link ObservableArrayChangedArgs.newItems} property for which items
+     */
+    Add = 0,
+    /**
+     * One or more items were removed. Check the {@link ObservableArrayChangedArgs.oldItems} property for which items
+     */
+    Remove = 1,
+    /**
+     * One or more items were replaced. Check the {@link ObservableArrayChangedArgs.newItems} and
+     * {@link ObservableArrayChangedArgs.oldItems} properties for which items
+     */
+    Replace = 2,
+    /**
+     * Treat this as a new collection (collection drastically changed). Consider all old items removed and all items as new
+     */
+    Reset = 3
+}
+/**
+ * Event args used by the {@link ObservableArray.collectionChanged} event
+ */
+export declare class ObservableArrayChangedArgs {
+    private readonly action;
+    private readonly newItems;
+    private readonly oldItems;
+    /**
+     * Creates an instance of the {@link ObservableArrayChangedArgs}
+     * @param action
+     * @param newItems
+     * @param oldItems
+     */
+    constructor(action: EObservableArrayChangedAction, newItems: any[], oldItems: any[]);
+    /**
+     * Gets the operation that occurred on the {@link ObservableArray}. See {@link EObservableArrayChangedAction} for a
+     * list of values
+     */
+    getAction(): EObservableArrayChangedAction;
+    /**
+     * Gets new items added if the {@link EObservableArrayChangedAction} was Add or Replace
+     */
+    getNewItems(): any[];
+    /**
+     * Gets old items removed if the {@link EObservableArrayChangedAction} was Remove or Replace
+     */
+    getOldItems(): any[];
+}

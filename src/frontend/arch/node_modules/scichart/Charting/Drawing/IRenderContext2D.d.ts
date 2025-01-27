@@ -1,0 +1,51 @@
+import { IDeletable } from "../../Core/IDeletable";
+import { Rect } from "../../Core/Rect";
+import { IBrush2D } from "./IBrush2D";
+import { IPen2D } from "./IPen2D";
+import { ELineDrawMode } from "./WebGlRenderContext2D";
+/**
+ * The RenderContext provides methods for drawing to a WebGL WebAssembly Canvas or standard HTML5 Canvas.
+ * This interface is used in SciChart's High Performance Realtime {@link https://www.scichart.com/javascript-chart-features | JavaScript Charts}
+ * to draw shapes, lines, fills, images and more
+ */
+export interface IRenderContext2D extends IDeletable {
+    /**
+     * @description creates a pen (which you should cache) from the provided stroke and strokeThickness
+     * @param stroke in hex format e.g. #FF6600 or CSS rgba format rgb(255,70,30,0.8)
+     * @param strokeThickness in pixels
+     * @param antiAliased true if the pen draws an Anti-Aliased linez
+     */
+    createPen(stroke: string, strokeThickness: number, strokeDashArray?: number[], antiAliased?: boolean): IPen2D;
+    /**
+     * @description creates a solid color brush (which you should cache) from the provided fillColor and opacity
+     * @param fill color in hex format, e.g. #FF6600 or CSS rgba format rgb(255,70,30,0.8)
+     * @param opacity from 0.0 to 1.0
+     */
+    createSolidBrush(fill: string, opacity?: number): IBrush2D;
+    /**
+     * @description Draws a single line from (x1,y1) to (x2,y2) with the specified Pen
+     * @param x1 The X1 coordinate in pixels
+     * @param y1 The Y1 coordinate in pixels
+     * @param x2 The X2 coordinate in pixels
+     * @param y2 The Y2 coordinate in pixels
+     * @param strokePen the pen to draw with
+     * @param viewRect the series viewRect, used for translate and clipping
+     */
+    drawLine(x1: number, y1: number, x2: number, y2: number, strokePen: IPen2D, viewRect: Rect): void;
+    /**
+     * @description Draws a polyline with the specified Pen
+     * @param xyValues An array of x,y points arranged as x0y0 x1y1 ... xnyn
+     * @param strokePen the pen to draw with
+     * @param viewRect the series viewRect, used for translate and clipping
+     * @param lineDrawMode whether to draw lines as a polyline, or disconnected lines
+     */
+    drawLines(xyValues: number[], strokePen: IPen2D, viewRect: Rect, lineDrawMode?: ELineDrawMode): void;
+    /**
+     * @description Draws a Rect with optional fill and stroke
+     * @param rect the Rect dimensions to draw
+     * @param viewRect the series viewRect, used for translate and clipping
+     * @param strokePen the stroke pen to draw the outline with
+     * @param fillBrush the fill brush to draw the fill with
+     */
+    drawRect(rect: Rect, viewRect: Rect, strokePen?: IPen2D, fillBrush?: IBrush2D): void;
+}

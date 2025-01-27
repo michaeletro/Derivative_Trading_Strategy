@@ -1,0 +1,15 @@
+import { SCRTPalette, UIntVector } from "../../types/TSciChart";
+import { BaseCache } from "./BaseCache";
+/**
+ * @ignore
+ */
+export declare class PaletteCache extends BaseCache<SCRTPalette> {
+    private fillColors;
+    get value(): SCRTPalette;
+    /**
+     * Creates or fetches a new palette with the specified colors
+     * @param fillColors
+     */
+    create(fillColors: UIntVector): SCRTPalette;
+    reset(): void;
+}

@@ -1,0 +1,9 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ERenderLayer = void 0;
+var ERenderLayer;
+(function (ERenderLayer) {
+    ERenderLayer[ERenderLayer["First"] = 0] = "First";
+    ERenderLayer[ERenderLayer["Second"] = 1] = "Second";
+    ERenderLayer[ERenderLayer["Third"] = 2] = "Third";
+})(ERenderLayer = exports.ERenderLayer || (exports.ERenderLayer = {}));

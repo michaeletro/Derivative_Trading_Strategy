@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PROPERTY = void 0;
+var PROPERTY;
+(function (PROPERTY) {
+    PROPERTY["IS_HIDDEN"] = "IS_HIDDEN";
+    PROPERTY["X1"] = "X1";
+    PROPERTY["X2"] = "X2";
+    PROPERTY["Y1"] = "Y1";
+    PROPERTY["Y2"] = "Y2";
+})(PROPERTY = exports.PROPERTY || (exports.PROPERTY = {}));

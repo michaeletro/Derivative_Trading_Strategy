@@ -1,0 +1,39 @@
+import { CanvasTexture } from "../../../../Charting/Visuals/TextureManager/CanvasTexture";
+import { EventHandler } from "../../../../Core/EventHandler";
+import { PropertyChangedEventArgs } from "../../../../Core/PropertyChangedEventArgs";
+import { Size } from "../../../../types/Size";
+import { TSciChart3D } from "../../../../types/TSciChart3D";
+/**
+ * Provides a base class for color palettes which may be applied to the {@link SurfaceMeshRenderableSeries3D.meshColorPalette} property
+ * @remarks See concrete types {@link SolidColorBrushPalette} and {@link GradientColorPalette} for more details.
+ */
+export declare abstract class MeshColorPalette {
+    /**
+     * An event handler which notifies subscribers that a property has changed and scene needs to be redrawn
+     */
+    propertyChanged: EventHandler<PropertyChangedEventArgs>;
+    /**
+     * The {@link TSciChart3D | SciChart 3D WebAssembly Context}
+     * containing native methods and access to our WebGL2 Engine and WebAssembly numerical methods
+     */
+    protected webAssemblyContext: TSciChart3D;
+    /**
+     * Creates an instance of a {@link MeshColorPalette}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context}
+     * containing native methods and access to our WebGL2 Engine and WebAssembly numerical methods
+     */
+    protected constructor(webAssemblyContext: TSciChart3D);
+    /**
+     * Used internally - returns a {@link CanvasTexture} containing the palette colors which will be
+     * sent to SciChart's WebGL WebAssembly rendering engine during rendering
+     * @remarks
+     * {@link CanvasTexture} implements {@link IDeletable} and must be deleted to free native memory
+     * @param size The desired size of the texture. Default / expected value is [1024,1]
+     */
+    abstract getTexture(size: Size): CanvasTexture;
+    /**
+     * Notifies subscribers of {@link propertyChanged}
+     * @param propertyName The property name which changed
+     */
+    protected notifyPropertyChanged(propertyName: string): void;
+}

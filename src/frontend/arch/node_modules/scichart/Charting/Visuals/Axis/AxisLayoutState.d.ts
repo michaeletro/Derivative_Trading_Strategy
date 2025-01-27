@@ -1,0 +1,11 @@
+/**
+ * Properties to describe axis layout state
+ */
+export declare class AxisLayoutState {
+    axisSize: number;
+    additionalLeftSize: number;
+    additionalRightSize: number;
+    additionalTopSize: number;
+    additionalBottomSize: number;
+    clear(): void;
+}

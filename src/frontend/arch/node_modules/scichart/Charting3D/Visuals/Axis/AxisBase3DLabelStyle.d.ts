@@ -1,0 +1,22 @@
+import { eSCRTTextAlignement } from "../../../types/TSciChart3D";
+import { AxisBase3D } from "./AxisBase3D";
+export declare class AxisBase3DLabelStyle {
+    private parentAxis;
+    private alignmentProperty;
+    private dpiScalingProperty;
+    private fontFamilyProperty;
+    private fontSizeProperty;
+    private foregroundProperty;
+    constructor(parentAxis: AxisBase3D);
+    get alignment(): eSCRTTextAlignement;
+    set alignment(value: eSCRTTextAlignement);
+    get dpiScaling(): number;
+    set dpiScaling(value: number);
+    get fontFamily(): string;
+    set fontFamily(value: string);
+    get fontSize(): number;
+    set fontSize(value: number);
+    get foreground(): string;
+    set foreground(value: string);
+    protected notifyPropertyChanged(propertyName: string): void;
+}

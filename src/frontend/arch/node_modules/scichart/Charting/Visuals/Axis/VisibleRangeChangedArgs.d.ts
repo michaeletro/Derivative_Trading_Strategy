@@ -1,0 +1,11 @@
+import { NumberRange } from "../../../Core/NumberRange";
+/**
+ * Args for the {@link AxisCore.visibleRangeChanged} event
+ */
+export declare class VisibleRangeChangedArgs {
+    /**
+     * Gets the VisibleRange after the change event
+     */
+    readonly visibleRange: NumberRange;
+    constructor(visibleRange: NumberRange);
+}

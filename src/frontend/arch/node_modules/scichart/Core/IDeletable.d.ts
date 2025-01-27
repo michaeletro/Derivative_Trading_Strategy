@@ -1,0 +1,23 @@
+/**
+ * A type which implements {@link IDeletable} must be deleted manually to free webassembly memory
+ * @Remarks
+ * Call .delete() before finishing with the object to ensure that WebAssmembly memory leaks do
+ * not occur.
+ *
+ * All elements within SciChart's High Performance
+ * {@link https://www.scichart.com/javascript-chart-features | Realtime JavaScript Charts} which implement
+ * {@link IDeletable} must be deleted manually to free native (WebAssembly) memory
+ */
+export interface IDeletable {
+    /**
+     * Deletes native (WebAssembly) memory used by this type, after which it cannot be used.
+     * @Remarks
+     * Call .delete() before finishing with the object to ensure that WebAssmembly memory leaks do
+     * not occur.
+     *
+     * All elements within SciChart's High Performance
+     * {@link https://www.scichart.com/javascript-chart-features | Realtime JavaScript Charts} which implement
+     * {@link IDeletable} must be deleted manually to free native (WebAssembly) memory
+     */
+    delete(): void;
+}

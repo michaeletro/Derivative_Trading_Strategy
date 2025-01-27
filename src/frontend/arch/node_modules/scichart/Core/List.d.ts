@@ -1,0 +1,21 @@
+/**
+ * Generic class for a dynamic List or array
+ */
+export declare class List<T> {
+    private items;
+    constructor();
+    /**
+     * gets the list size
+     */
+    size(): number;
+    /**
+     * Adds an item to the list
+     * @param value
+     */
+    add(value: T): void;
+    /**
+     * gets the item at index
+     * @param index
+     */
+    get(index: number): T;
+}

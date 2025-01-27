@@ -1,22 +1,66 @@
-# Ignore virtual environment
-.venv/
+# Operating system files
+.DS_Store
+Thumbs.db
 
-# Ignore IDE-specific files
+# Build artifacts
+/build/
+bin/
+obj/
+*.o
+*.so
+*.dll
+*.exe
+*.out
+*.a
+
+# IDE and editor-specific files
 .idea/
 .vscode/
+*.swp
+*.swo
+*.swn
+*.bak
 
-# Ignore compiled Python files
-*.pyc
-__pycache__/
-
-# Ignore logs and temporary files
+# Logs and temporary files
 *.log
 *.tmp
+*.cache
+*.pid
 
-backend/data_files/
-backend/cpp_src/obj/
-backend/cpp_src/bin/
-*.gitignore
+# SQLite database files
+*.db
+*.db-journal
 
-# Ignore environment files
+# Node.js and frontend-related files
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# CMake and Makefiles
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+
+# Generated documentation
+/docs/
+
+# Ignore compiled HTML and JS artifacts
+*.html
+*.js
+dist/
+
+# Ignore secrets and environment files
 .env
+.env.local
+.env.development
+.env.production
+secrets.json
+access_keys.csv

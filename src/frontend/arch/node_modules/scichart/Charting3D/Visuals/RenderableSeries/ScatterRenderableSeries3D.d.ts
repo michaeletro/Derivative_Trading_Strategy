@@ -1,0 +1,41 @@
+import { TSciChart3D } from "../../../types/TSciChart3D";
+import { BaseRenderableSeries3D, IBaseRenderableSeries3DOptions } from "./BaseRenderableSeries3D";
+import { ESeriesType3D } from "./ESeriesType";
+/**
+ * Defines a 3D scatter-series or 3D Bubble chart type in the SciChart's High Performance Real-time
+ * {@link https://www.scichart.com/javascript-chart-features | JavaScript 3D Charts}
+ * @remarks
+ * To add a 3D scatter series to a {@link SciChart3DSurface} you need to declare both the {@link ScatterRenderableSeries3D}
+ * and a {@link XyzDataSeries3D}. Simplified code sample below:
+ *
+ * ```ts
+ * const sciChart3DSurface: SciChart3DSurface;
+ * const wasmContext: TSciChart3D;
+ * // Create and fill the dataseries
+ * const dataSeries = new XyzDataSeries3D(wasmContext);
+ * dataSeries.append(1,2,3);
+ * dataSeries.append(3,4,5);
+ * // Create the renderableSeries
+ * const scatterSeries = new ScatterRenderableSeries3D(wasmContext);
+ * scatterSeries.dataSeries = dataSeries;
+ * scatterSeries.pointMarker = new SpherePointMarker3D(wasmContext, {
+ *     size: 3,
+ *     fill: "#FF0000"
+ * });
+ * // append to the SciChartSurface
+ * sciChart3DSurface.renderableSeries.add(scatterSeries);
+ * ```
+ */
+export declare class ScatterRenderableSeries3D extends BaseRenderableSeries3D {
+    /**
+     * @inheritDoc
+     */
+    readonly type: ESeriesType3D;
+    /**
+     * Creates an instance of a {@link ScatterRenderableSeries3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing
+     * native methods and access to our WebGL2 WebAssembly Drawing Engine
+     * @param options Optional parameters of type {@link IBaseRenderableSeries3DOptions} to configure the series
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBaseRenderableSeries3DOptions);
+}

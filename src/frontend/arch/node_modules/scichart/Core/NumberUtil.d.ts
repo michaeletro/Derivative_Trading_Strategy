@@ -1,0 +1,12 @@
+/**
+ * Numeric functions and number helpers
+ */
+export declare class NumberUtil {
+    /**
+     * Constrain a value to a minimum and maximum (if outside bounds, clip to bounds
+     * @param value
+     * @param min
+     * @param max
+     */
+    static constrain(value: number, min: number, max: number): number;
+}

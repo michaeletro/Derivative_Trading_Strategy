@@ -1,0 +1,24 @@
+/**
+ * Creates function to generate stock data
+ * @param STEP
+ * @param RANDOM_MIN
+ * @param RANDOM_MAX
+ */
+export declare const getStocksDataFactory: (STEP: number, RANDOM_MIN: number, RANDOM_MAX: number) => (unixTimestamp: number, close: number) => {
+    xValue: number;
+    openValue: number;
+    highValue: number;
+    lowValue: number;
+    closeValue: number;
+};
+declare class PriceBar {
+    readonly xValue: number;
+    readonly openValue: number;
+    readonly highValue: number;
+    readonly lowValue: number;
+    readonly closeValue: number;
+    readonly volume: number;
+    constructor(xValue: number, openValue: number, highValue: number, lowValue: number, closeValue: number, volume: number);
+}
+export declare const getNextRandomPriceBarFactory: (startDateTimestamp: number, candleIntervalMinutes: number, simulateDateGap: boolean, startPrice: number) => (requestUpdate?: boolean) => PriceBar;
+export {};

@@ -1,0 +1,16 @@
+import { IDeletable } from "../../Core/IDeletable";
+import { EDrawingTypes } from "./constants";
+/**
+ * Defines the interface to a Brush, used for drawing filled areas, polygons and rectangles on {@link IRenderContext2D}
+ */
+export interface IBrush2D extends IDeletable {
+    /**
+     * Gets the type of the brush. See {@link EDrawingTypes} for list of values
+     */
+    getBrushType(): EDrawingTypes;
+    /**
+     * Allows setting an opacity override for the pen. This will be applied the next time the pen is used to draw
+     * @param opacity An opacity number from 0..1
+     */
+    setOpacity(opacity: number): void;
+}

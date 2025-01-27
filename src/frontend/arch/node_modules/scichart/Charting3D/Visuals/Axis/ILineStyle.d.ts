@@ -1,0 +1,22 @@
+import { TArgb } from "../../../utils/parseColor";
+/**
+ * An interface to define the style of gridlines on 3D Chart axis
+ */
+export interface ILineStyle {
+    /**
+     * Gets or sets the line stroke as an ARGB value
+     */
+    stroke: TArgb;
+    /**
+     * Gets or sets the stroke thickness in world coordinates
+     */
+    strokeThickness: number;
+    /**
+     * When this {@link ILineStyle} is drawing an axis tick, the start value is used to determine the tick length start
+     */
+    start: number;
+    /**
+     * When this {@link ILineStyle} is drawing an axis tick, the start value is used to determine the tick length end
+     */
+    end: number;
+}

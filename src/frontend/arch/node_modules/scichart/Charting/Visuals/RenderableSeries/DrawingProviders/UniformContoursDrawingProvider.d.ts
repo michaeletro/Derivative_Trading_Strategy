@@ -1,0 +1,37 @@
+import { TSciChart } from "../../../../types/TSciChart";
+import { WebGlRenderContext2D } from "../../../Drawing/WebGlRenderContext2D";
+import { RenderPassData } from "../../../Services/RenderPassData";
+import { UniformContoursRenderableSeries } from "../UniformContoursRenderableSeries";
+import { BaseSeriesDrawingProvider } from "./BaseSeriesDrawingProvider";
+/**
+ * Used internally - a drawing provider performs drawing for a {@link UniformContoursDrawingProvider} using
+ * our WebAssembly WebGL rendering engine
+ */
+export declare class UniformContoursDrawingProvider extends BaseSeriesDrawingProvider<UniformContoursRenderableSeries> {
+    private heightsTextureCache;
+    private heightData;
+    private paletteTexture;
+    /**
+     * Creates an instance of the {@link UniformContoursRenderableSeries}
+     * @param webAssemblyContext The {@link TSciChart | SciChart 2D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param parentSeries the parent {@link UniformContoursDrawingProvider} which this drawing provider is attached to
+     */
+    constructor(webAssemblyContext: TSciChart, parentSeries: UniformContoursRenderableSeries);
+    /**
+     * @inheritDoc
+     */
+    delete(): void;
+    /**
+     * @inheritDoc
+     */
+    onSeriesPropertyChange(propertyName: string): void;
+    /**
+     * @inheritDoc
+     */
+    draw(renderContext: WebGlRenderContext2D, renderPassData: RenderPassData): void;
+    private drawContours;
+    private computeHeightMap;
+    private createPaletteTexture;
+    private getDefaultColorMap;
+}

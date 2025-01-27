@@ -1,0 +1,9 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ECursorStyle = void 0;
+var ECursorStyle;
+(function (ECursorStyle) {
+    ECursorStyle["NS"] = "ns-resize";
+    ECursorStyle["EW"] = "ew-resize";
+    ECursorStyle["Defalut"] = "auto";
+})(ECursorStyle = exports.ECursorStyle || (exports.ECursorStyle = {}));

@@ -1,0 +1,21 @@
+import { NumberRange } from "../../../../Core/NumberRange";
+import { TSciChart } from "../../../../types/TSciChart";
+import { TSciChart3D } from "../../../../types/TSciChart3D";
+import { DeltaCalculator } from "./DeltaCalculator";
+/**
+ * The NumericDeltaCalculator is respinsible for calculating {@link AxisCore.minorDelta} and {@link AxisCore.majorDelta} on
+ * {@link NumericAxis} types.
+ */
+export declare class NumericDeltaCalculator extends DeltaCalculator {
+    private webAssemblyContext;
+    /**
+     * Creates an instance of the {@link NumericDeltaCalculator}
+     * @param webAssemblyContext The {@link TSciChart | SciChart 2D WebAssembly Context} or {@link TSciChart2D | SciChart 2D WebAssembly Context}
+     * containing native methods and access to our WebGL2 Engine and WebAssembly numerical methods
+     */
+    constructor(webAssemblyContext: TSciChart | TSciChart3D);
+    /**
+     * @inheritDoc
+     */
+    getDeltaFromRange(min: number, max: number, minorsPerMajor: number, maxTicks: number): NumberRange;
+}

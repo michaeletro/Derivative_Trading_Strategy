@@ -1,0 +1,8 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PROPERTY = void 0;
+var PROPERTY;
+(function (PROPERTY) {
+    PROPERTY["FILL"] = "Fill";
+    PROPERTY["SIZE"] = "Size";
+})(PROPERTY = exports.PROPERTY || (exports.PROPERTY = {}));

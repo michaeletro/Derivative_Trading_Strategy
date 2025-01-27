@@ -1,0 +1,6 @@
+import { HitTestInfo } from "../../Visuals/RenderableSeries/HitTest/HitTestInfo";
+import { IRenderableSeries } from "../../Visuals/RenderableSeries/IRenderableSeries";
+import { SeriesInfo } from "./SeriesInfo";
+export declare class XySeriesInfo extends SeriesInfo {
+    constructor(renderableSeries: IRenderableSeries, hitTestInfo: HitTestInfo);
+}

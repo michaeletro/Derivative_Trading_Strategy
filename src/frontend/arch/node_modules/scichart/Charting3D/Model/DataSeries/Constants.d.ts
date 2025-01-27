@@ -1,0 +1,3 @@
+export declare enum PROPERTY {
+    DATA_SERIES = "DATA_SERIES"
+}

@@ -1,0 +1,20 @@
+import { CanvasTexture } from "../TextureManager/CanvasTexture";
+/**
+ * Defines the interface to set of Sprite Canvas Textures, where {@link ISpriteTextures.spriteTexture} is used for
+ * normal presentation of a point on the SciChart Surface. The two other are used for presentation of a point
+ * when its appearance, either Stroke Color or Fill Color (or both), is overridden by a Palette Provider.
+ */
+export interface ISpriteTextures {
+    /**
+     * Sprite Canvas Textures used for normal presentation of a point.
+     */
+    spriteTexture: CanvasTexture;
+    /**
+     * Stroke Mask used for presentation of a point, when its Stroke Color is overridden by a Point Marker.
+     */
+    strokeMask: CanvasTexture;
+    /**
+     * Fill Mask used for presentation of a point, when its Fill Color is overridden by a Point Marker.
+     */
+    fillMask: CanvasTexture;
+}

@@ -1,0 +1,1 @@
+export declare const hasAllProperties: (obj: any, props: string[]) => boolean;

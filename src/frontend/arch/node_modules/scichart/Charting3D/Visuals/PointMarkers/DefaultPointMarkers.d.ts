@@ -1,0 +1,157 @@
+import { TSciChart3D, TSRIndexedMesh, TSRTexture } from "../../../types/TSciChart3D";
+import { BaseMeshPointMarker3D } from "./BaseMeshPointMarker3D";
+import { BasePointMarker3D, EMarkerType, IBasePointMarker3DOptions } from "./BasePointMarker3D";
+import { BaseTexturePointMarker3D } from "./BaseTexturePointMarker3D";
+/**
+ * The {@link SpherePointMarker3D} adds a 3D Sphere to each XYZ point in a 3D Scatter or Bubble series
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class SpherePointMarker3D extends BaseMeshPointMarker3D {
+    /**
+     * Creates an instance of {@link SpherePointMarker3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get pointsMesh(): TSRIndexedMesh;
+}
+/**
+ * The {@link CubePointMarker3D} adds a 3D Cube or Box to each XYZ point in a 3D Scatter or Bubble series
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class CubePointMarker3D extends BaseMeshPointMarker3D {
+    /**
+     * Creates an instance of {@link CubePointMarker3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get pointsMesh(): TSRIndexedMesh;
+}
+/**
+ * The {@link PyramidPointMarker3D} adds a 3D Pyramid to each XYZ point in a 3D Scatter or Bubble series
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class PyramidPointMarker3D extends BaseMeshPointMarker3D {
+    /**
+     * Creates an instance of {@link PyramidPointMarker3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get pointsMesh(): TSRIndexedMesh;
+}
+/**
+ * The {@link CylinderPointMarker3D} adds a 3D Cylinder to each XYZ point in a 3D Scatter or Bubble series
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class CylinderPointMarker3D extends BaseMeshPointMarker3D {
+    /**
+     * Creates an instance of {@link CylinderPointMarker3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get pointsMesh(): TSRIndexedMesh;
+}
+/**
+ * @summary The {@link PixelPointMarker3D} adds a single pixel to each XYZ point in a 3D Scatter or Bubble series.
+ * This is useful for high-performance point-clouds e.g. LiDAR visualisation which requires millions of data-points in 3D.
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class PixelPointMarker3D extends BasePointMarker3D {
+    /**
+     * Creates an instance of {@link PixelPointMarker3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get markerType(): EMarkerType;
+}
+/**
+ * @summary The {@link QuadPointMarker} renders a flat billboarded textured-quad to each XYZ point in a 3D Scatter or Bubble series.
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class QuadPointMarker extends BaseTexturePointMarker3D {
+    /**
+     * Creates an instance of {@link QuadPointMarker}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get pointsTexture(): TSRTexture;
+}
+/**
+ * @summary The {@link EllipsePointMarker3D} renders a flat billboarded textured ellipse to each XYZ point in a 3D Scatter or Bubble series.
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class EllipsePointMarker3D extends BaseTexturePointMarker3D {
+    /**
+     * Creates an instance of {@link EllipsePointMarker3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get pointsTexture(): TSRTexture;
+}
+/**
+ * @summary The {@link TrianglePointMarker3D} renders a flat billboarded textured triangle to each XYZ point in a 3D Scatter or Bubble series.
+ * @remarks See related class {@link ScatterRenderableSeries3D} which renders a {@link BasePointMarker3D} at
+ * each Xyz point in an {@link XyzDataSeries3D} Data Series.
+ */
+export declare class TrianglePointMarker3D extends BaseTexturePointMarker3D {
+    /**
+     * Creates an instance of {@link TrianglePointMarker3D}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing native methods and
+     * access to our WebGL2 Engine and WebAssembly numerical methods
+     * @param options Optional parameters of type {@link IBasePointMarker3DOptions} used to configure the point-marker
+     * @protected
+     */
+    constructor(webAssemblyContext: TSciChart3D, options?: IBasePointMarker3DOptions);
+    /**
+     * @inheritDoc
+     */
+    get pointsTexture(): TSRTexture;
+}

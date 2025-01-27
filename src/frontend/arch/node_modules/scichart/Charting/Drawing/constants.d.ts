@@ -1,0 +1,13 @@
+/**
+ * Gets the type for Brushes, Pens
+ */
+export declare enum EDrawingTypes {
+    /**
+     * Defines a brush for use with SciChart's WebAssembly WebGL engine
+     */
+    WasmBrush = "WasmBrush",
+    /**
+     * Defines a pen for use with SciChart's WebAssembly WebGL engine
+     */
+    WasmPen = "WasmPen"
+}

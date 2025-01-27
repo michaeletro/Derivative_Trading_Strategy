@@ -1,0 +1,31 @@
+/**
+ * Defines the Clipping rule for {@link https://www.scichart.com/javascript-chart-features | Javascript 3D Chart} Axis
+ * @remarks
+ * Set Clipping rule on the {@link AxisBase3D.negativeSideClipping} and {@link AxisBase3D.positiveSideClipping}
+ */
+export declare enum EAxisSideClipping {
+    /**
+     * Default {@link https://www.scichart.com/javascript-chart-features | Javascript 3D Chart} Axis clipping is
+     * {@link AxisCore.visibleRange} for X and Z Axis, and None for Y Axis
+     * @remarks
+     * Data from {@link https://www.scichart.com/javascript-chart-features | 3D Javascript Chart} types can spill
+     * out beyond the confines of the Axis for the YAxis (up/down)
+     * but be clipped to the {@link AxisCore.visibleRange} for the Z/X Axis
+     */
+    Default = 0,
+    /**
+     * 3D Axis Clipping is disabled
+     * @remarks
+     * Data from {@link https://www.scichart.com/javascript-chart-features | 3D Javascript Chart}
+     * types can spill out beyond the confines of the Axis.
+     */
+    None = 1,
+    /**
+     * RenderableSeries are clipped by {@link AxisCore.visibleRange}
+     * @remarks
+     * If a {@link https://www.scichart.com/javascript-chart-features | Javascript Chart} type such as a
+     * 3D Scatter or 3D Surface mesh plot are plotted on this axis,
+     * the data will be clipped to be invisible outside the {@link AxisCore.visibleRange}
+     */
+    VisibleRange = 2
+}

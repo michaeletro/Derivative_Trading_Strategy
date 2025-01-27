@@ -1,0 +1,5 @@
+/**
+ * returns true if the number is a real number (not NAN, not Infinite)
+ * @param number
+ */
+export declare function isRealNumber(number: number): boolean;

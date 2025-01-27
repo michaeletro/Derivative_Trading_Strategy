@@ -1,0 +1,17 @@
+import { TGradientStop } from "../types/TGradientStop";
+import { Point } from "./Point";
+/**
+ * A class used to define gradients by a number of gradient stops, with a start and end point
+ */
+export declare class GradientParams {
+    readonly startPoint: Point;
+    readonly endPoint: Point;
+    readonly gradientStops: readonly TGradientStop[];
+    /**
+     * @description Creates gradient brush params.
+     * @param startPoint x and y values should be from 0 to 1, 0 - start of the viewRect and 1 - end of the viewRect
+     * @param endPoint x and y values should be from 0 to 1
+     * @param gradientStops 2 or more gradient stop point with color
+     */
+    constructor(startPoint: Point, endPoint: Point, gradientStops: TGradientStop[]);
+}

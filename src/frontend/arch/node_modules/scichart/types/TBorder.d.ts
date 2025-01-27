@@ -1,0 +1,11 @@
+/**
+ * A Border applied to the series viewport, axes or the entire chart surface
+ */
+export declare type TBorder = {
+    border?: number;
+    borderLeft?: number;
+    borderRight?: number;
+    borderBottom?: number;
+    borderTop?: number;
+    color?: string;
+};

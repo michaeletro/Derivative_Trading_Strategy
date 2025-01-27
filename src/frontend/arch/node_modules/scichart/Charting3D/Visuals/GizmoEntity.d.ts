@@ -1,0 +1,28 @@
+import { ESceneEntityType } from "../../types/SceneEntityType";
+import { SCRTXyzGizmoEntity, TSciChart3D } from "../../types/TSciChart3D";
+import { BaseSceneEntity3D } from "./Primitives/BaseSceneEntity3D";
+/**
+ * The {@link GizmoEntity} renders a 3D X-Y-Z axis in the bottom left of the chart.
+ * @remarks Added automatically by the {@link SciChart3DSurface} and may be enabled or
+ * disabled by setting the {@link SciChart3DSurface.enableGizmo} property
+ */
+export declare class GizmoEntity extends BaseSceneEntity3D<SCRTXyzGizmoEntity> {
+    /**
+     * @inheritDoc
+     */
+    readonly type: ESceneEntityType;
+    /**
+     * Creates an instance of the {@link GizmoEntity}
+     * @param webAssemblyContext The {@link TSciChart3D | SciChart 3D WebAssembly Context} containing
+     * native methods and access to our WebGL2 WebAssembly Drawing Engine
+     */
+    constructor(webAssemblyContext: TSciChart3D);
+    /**
+     * Gets or sets whether the Gizmo is enabled
+     */
+    get enableGizmo(): boolean;
+    /**
+     * Gets or sets whether the Gizmo is enabled
+     */
+    set enableGizmo(isEnabled: boolean);
+}

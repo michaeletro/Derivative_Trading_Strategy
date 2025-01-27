@@ -1,0 +1,14 @@
+/**
+ * List of values for ZoomState in SciChart
+ */
+export declare enum EZoomState {
+    /**
+     * ZoomStates is at extents. This is if the user has called zoomExtents() on the {@link SciChartSurface},
+     * or, the user has double clicked on the {@link ZoomExtentsModifier}
+     */
+    AtExtents = 0,
+    /**
+     * User has initiated a Zoom operation
+     */
+    UserZooming = 1
+}

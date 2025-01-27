@@ -1,0 +1,7 @@
+export declare enum PROPERTY {
+    IS_HIDDEN = "IS_HIDDEN",
+    X1 = "X1",
+    X2 = "X2",
+    Y1 = "Y1",
+    Y2 = "Y2"
+}

@@ -1,0 +1,8 @@
+import { SCRTBrush, TSciChart } from "../../../types/TSciChart";
+/**
+ * Helper function to create a {@link SCRTBrush} native solid color brushes
+ * @param webAssemblyContext The {@link TSciChart | SciChart 2D WebAssembly Context} containing native methods and
+ * access to our WebGL2 Engine and WebAssembly numerical methods
+ * @param htmlColorCode Html color code in the format "#fff", "#ff0000", "rgba(255,255,0,1)", "#11333333"
+ */
+export declare const createSolidBrush: (wasmContext: TSciChart, htmlColorCode: string, opacity: number) => SCRTBrush;

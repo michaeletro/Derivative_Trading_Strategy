@@ -1,0 +1,13 @@
+/**
+ * A Gradient stop applied to gradients on lines, fills thoughout SciChart
+ */
+export declare type TGradientStop = {
+    /**
+     * The gradient offset. Allowable values are in the range 0 to 1
+     */
+    offset: number;
+    /**
+     * The gradient stop color as an HTML color code
+     */
+    color: string;
+};

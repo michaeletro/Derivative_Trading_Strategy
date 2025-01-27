@@ -1,0 +1,11 @@
+import { TGradientStop } from "./TGradientStop";
+export declare enum EColorMapMode {
+    Interpolated = 0,
+    Stepped = 1
+}
+export declare type TLinearColorMap = {
+    Mode: EColorMapMode;
+    GradientStops: TGradientStop[];
+    Minimum: number;
+    Maximum: number;
+};

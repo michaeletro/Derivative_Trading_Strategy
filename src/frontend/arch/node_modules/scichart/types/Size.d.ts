@@ -1,0 +1,23 @@
+/**
+ * Defines a Size type with Width, Height
+ */
+export declare class Size {
+    /**
+     * The static Empty size returns a Size with Width=0, Height=0
+     */
+    static readonly EMPTY: Size;
+    /**
+     * Gets or sets the Hidth
+     */
+    readonly width: number;
+    /**
+     * Gets or sets the Height
+     */
+    readonly height: number;
+    /**
+     * Creates an instance of the Size with specified width and height
+     * @param width
+     * @param height
+     */
+    constructor(width: number, height: number);
+}

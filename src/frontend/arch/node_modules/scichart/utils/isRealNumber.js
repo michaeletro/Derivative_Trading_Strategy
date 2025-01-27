@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isRealNumber = void 0;
+/**
+ * returns true if the number is a real number (not NAN, not Infinite)
+ * @param number
+ */
+function isRealNumber(number) {
+    return !isNaN(number) && isFinite(number) && number !== Number.MAX_VALUE && number !== Number.MIN_VALUE;
+}
+exports.isRealNumber = isRealNumber;

@@ -1,0 +1,46 @@
+{
+  "name": "scichart",
+  "description": "Fast WebGL JavaScript Charting Library and Framework",
+  "homepage": "https://www.scichart.com",
+  "version": "3.5.711",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "keywords": [
+    "Chart",
+    "Charts",
+    "Data",
+    "Graph",
+    "Graphs",
+    "Plot",
+    "Plotting",
+    "DataVisualization",
+    "WebGL",
+    "Realtime",
+    "Webassembly",
+    "Data",
+    "Dataviz",
+    "Dashboard",
+    "Visualization",
+    "3D",
+    "Fast",
+    "Fastest",
+    "Best",
+    "BigData",
+    "Performance",
+    "Plotly",
+    "plotly.js",
+    "Chartjs",
+    "chart.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abtsoftware/scichart.js.examples"
+  },
+  "bugs": "https://github.com/ABTSoftware/SciChart.JS.Examples/issues",
+  "scripts": {},
+  "author": "SciChart Ltd",
+  "license": "https://www.scichart.com/scichart-eula",
+  "devDependencies": {
+    "typescript": "^4.4.4"
+  }
+}

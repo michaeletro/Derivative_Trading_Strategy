@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.EZoomState = void 0;
+/**
+ * List of values for ZoomState in SciChart
+ */
+var EZoomState;
+(function (EZoomState) {
+    /**
+     * ZoomStates is at extents. This is if the user has called zoomExtents() on the {@link SciChartSurface},
+     * or, the user has double clicked on the {@link ZoomExtentsModifier}
+     */
+    EZoomState[EZoomState["AtExtents"] = 0] = "AtExtents";
+    /**
+     * User has initiated a Zoom operation
+     */
+    EZoomState[EZoomState["UserZooming"] = 1] = "UserZooming";
+})(EZoomState = exports.EZoomState || (exports.EZoomState = {}));
