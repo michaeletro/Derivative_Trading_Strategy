@@ -1,11 +1,11 @@
-#ifndef DATABASECLASS_H
-#define DATABASECLASS_H
+#ifndef DataBaseClass_H
+#define DataBaseClass_H
 
+#include <sqlite3.h>
 #include <string>
 #include <vector>
-#include <sqlite3.h>
 
-// Define the AssetData structure
+// Struct to store asset data
 struct AssetData {
     int id;
     std::string ticker;
@@ -17,21 +17,33 @@ struct AssetData {
     double volume;
 };
 
-class DatabaseClass {
+class DataBaseClass {
 public:
-    DatabaseClass(const std::string& db_path);
-    ~DatabaseClass();
+    // Constructor & Destructor
+    explicit DataBaseClass(const std::string& db_path);
+    ~DataBaseClass();
 
-    // Fetch asset data from the database
+    // Fetch all asset data from the database
     std::vector<AssetData> fetchAssetData();
 
-    // Add asset data to the database
+    // Insert new asset data into the database
     bool addAssetData(const std::string& ticker, const std::string& date, double open_price, double close_price,
                       double high_price, double low_price, double volume);
 
+    // Execute a raw SQL query (used internally)
+    bool executeQuery(const std::string& query);
+
+    // Execute arbitrary SQL (throw exception on failure)
+    void executeSQL(const std::string& sql);
+
+    // Insert asset data with exception handling
+    void insertAssetData(const std::string& ticker, const std::string& date, double open, double close, double high, double low, double volume);
+
+    // Query asset data for a specific ticker
+    std::vector<std::vector<std::string>> queryAssetData(const std::string& ticker);
+
 private:
     sqlite3* db;
-    bool executeQuery(const std::string& query);
 };
 
-#endif // DATABASECLASS_H
+#endif // DataBaseClass_H

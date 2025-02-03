@@ -6,15 +6,15 @@
 #include <memory>
 
 struct APIResult {
-    int64_t timestamp; // Numeric timestamp for calculations
-    double open_price;
-    double close_price;
-    double highest_price;
-    double lowest_price;
-    double volume;
-    double volume_weighted_price;
-    int num_transactions;
-    std::string date; // For display purposes
+    int64_t timestamp = 0; // Numeric timestamp for calculations
+    double open_price = 0.0;
+    double close_price = 0.0;
+    double highest_price = 0.0;
+    double lowest_price = 0.0;
+    double volume = 0.0;
+    double volume_weighted_price = 0.0;
+    int num_transactions = 0;
+    std::string date = ""; // For display purposes
 };
 
 // TimeSeriesClass inherits from APIConnection
