@@ -61,7 +61,7 @@ layout = html.Div(
             className="mt-3 text-center glass-card p-3",
             children=[
                 html.Button("📡 Fetch Data", id="fetch-data-btn", className="modern-button"),
-                html.Div(id="server-response", className="mt-3 fs-5 fade-in text-center"),
+                html.Div(id="server-response", className="mt-3 fs-5 fade-in"),
             ],
             style={"maxWidth": "100%", "flexGrow": 0, "maxHeight":"100%"}  # Prevents it from expanding
         ),

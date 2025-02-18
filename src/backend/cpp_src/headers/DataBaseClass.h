@@ -18,32 +18,51 @@ struct AssetData {
 };
 
 class DataBaseClass {
-public:
-    // Constructor & Destructor
-    explicit DataBaseClass(const std::string& db_path);
-    ~DataBaseClass();
+    
+    private:
+        sqlite3* db;
+        std::string dbPath;
+        std::string csvPath;
 
-    // Fetch all asset data from the database
-    std::vector<AssetData> fetchAssetData();
+    public:
+        // Constructor & Destructor
+        DataBaseClass(const std::string& db_path, const std::string& csv_backup);
+        ~DataBaseClass();
 
-    // Insert new asset data into the database
-    bool addAssetData(const std::string& ticker, const std::string& date, double open_price, double close_price,
-                      double high_price, double low_price, double volume);
 
-    // Execute a raw SQL query (used internally)
-    bool executeQuery(const std::string& query);
+        // Database Operations
+        bool executeQuery(const std::string& query);
+        bool addAssetData(const std::string& ticker,
+                          const std::string& date,
+                          double open_price,
+                          double close_price,
+                          double high_price,
+                          double low_price,
+                          double volume);
+        std::vector<AssetData> fetchAssetData();
 
-    // Execute arbitrary SQL (throw exception on failure)
-    void executeSQL(const std::string& sql);
+        // CSV Backup & Restore
+        void exportToCSV(const std::string& csvFile);
+        void importFromCSV(const std::string& csvFile);
 
-    // Insert asset data with exception handling
-    void insertAssetData(const std::string& ticker, const std::string& date, double open, double close, double high, double low, double volume);
+        // Utility Functions
+        bool isDatabaseEmpty();
+        bool fileExists(const std::string& filename);
 
-    // Query asset data for a specific ticker
-    std::vector<std::vector<std::string>> queryAssetData(const std::string& ticker);
+        // Execute arbitrary SQL (throw exception on failure)
+        void executeSQL(const std::string& sql);
 
-private:
-    sqlite3* db;
+        // Insert asset data with exception handling
+        void insertAssetData(const std::string& ticker,
+                             const std::string& date,
+                             double open,
+                             double close,
+                             double high,
+                             double low,
+                             double volume);
+
+        // Query asset data for a specific ticker
+        std::vector<std::vector<std::string>> queryAssetData(const std::string& ticker);
 };
 
 #endif // DataBaseClass_H

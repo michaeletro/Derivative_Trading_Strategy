@@ -1,12 +1,25 @@
 #include <crow_all.h>
+#include <csignal>
 #include "DataBaseClass.h"
+
+const std::string DB_FILE = "quant_data.db";
+const std::string CSV_FILE = "backup_data.csv";
+
+// ✅ Declare `db` globally (No need for capture)
+DataBaseClass db(DB_FILE, CSV_FILE);  
+
+// ✅ Graceful shutdown handler
+void handleShutdown(int signum) {
+    std::cout << "🔴 Server shutting down. Exporting data to CSV..." << std::endl;
+    db.exportToCSV(CSV_FILE);
+    exit(signum);
+}
 
 int main() {
     crow::SimpleApp app;
-    DataBaseClass db("quant_data.db");
 
     // Route to fetch asset data
-    CROW_ROUTE(app, "/api/asset_data").methods(crow::HTTPMethod::GET)
+    CROW_ROUTE(app, "/api/asset_data")
     ([&db]() {
         auto results = db.fetchAssetData();
         crow::json::wvalue response;
@@ -32,6 +45,33 @@ int main() {
 
         return response;
     });
+
+    CROW_ROUTE(app, "/api/asset_data/<string>")
+        .methods(crow::HTTPMethod::GET)
+        ([&db](const crow::request& req, crow::response& res, std::string ticker) {
+            auto results = db.queryAssetData(ticker);
+
+            if (results.empty()) {
+                res.code = 404;
+                res.body = "No data found for ticker: " + ticker;
+                res.end();
+                return;
+            }
+
+                crow::json::wvalue response;
+         
+                // Create a JSON array to hold the asset data
+                std::vector<crow::json::wvalue> asset_data_array;
+
+            for (const auto& entry : results) {
+                crow::json::wvalue asset_data;
+                std::cout << entry[0] << " " << entry[1] << " " << entry[2] << " " << entry[3] << " " << entry[4] << " " << entry[5] << std::endl;
+            }
+
+            return 0;
+        });
+
+
 
     // Route to insert new asset data
     CROW_ROUTE(app, "/api/add_asset")
@@ -59,6 +99,8 @@ int main() {
         }
     });
 
-    // Start the server
+    signal(SIGINT, handleShutdown); // Handle Ctrl+C
     app.port(8080).multithreaded().run();
+
+    return 0;
 }

@@ -14,12 +14,16 @@ EXECUTABLE = $(BIN_DIR)/server
 all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
-	mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $(EXECUTABLE) $(LDFLAGS)  # Ensure -lsqlite3 is at the end
+	@echo "🔗 Linking $@..."
+	@mkdir -p $(BIN_DIR)
+	@$(CXX) $(CXXFLAGS) $(OBJECTS) -o $(EXECUTABLE) $(LDFLAGS)  # Ensure -lsqlite3 is at the end
+	@echo "✅ Linked $@."
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-	mkdir -p $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
+	@echo "🏗️ Compiling $<..."
+	@mkdir -p $(OBJ_DIR)
+	@$(CXX) $(CXXFLAGS) -c $< -o $@
+	@echo "✅ Compiled $< to $@."
 clean:
-	rm -rf $(OBJ_DIR) $(BIN_DIR)
+	@rm -rf $(OBJ_DIR) $(BIN_DIR)
+	@echo "🗑️ Cleaned up build files."

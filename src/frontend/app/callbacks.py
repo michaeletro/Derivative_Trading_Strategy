@@ -25,8 +25,10 @@ def register_callbacks(app):
             # Parse JSON response
             data = response.json()
 
+            print("Fetched Data:", data)  # Debugging Log
+
             # 🔥 Handle the "No Data Available" case with fixed height
-            if "data" not in data or not data["data"]:
+            if "asset_data" not in data or not data["asset_data"]:
                 return html.Div(
                     className="no-data-container fade-in",  # Keeps the height stable
                     children=[
@@ -36,8 +38,8 @@ def register_callbacks(app):
                 )
 
             # Convert JSON data into an HTML table
-            table_header = [html.Thead(html.Tr([html.Th(col) for col in data["data"][0].keys()]))]
-            table_body = [html.Tbody([html.Tr([html.Td(str(entry[col])) for col in entry]) for entry in data["data"]])]
+            table_header = [html.Thead(html.Tr([html.Th(col) for col in data["asset_data"][0].keys()]))]
+            table_body = [html.Tbody([html.Tr([html.Td(str(entry[col])) for col in entry]) for entry in data["asset_data"]])]
 
             table = html.Table(children=table_header + table_body, className="data-table")
 
