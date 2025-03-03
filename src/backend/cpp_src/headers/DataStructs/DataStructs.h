@@ -2,6 +2,7 @@
 #define DATASTRUCTS_H
 
 #include <string>
+#include <cstdint>
 
 //Struct to store query parameters for API Request
 
@@ -34,10 +35,13 @@ enum class RestAPIQueryType {
     DAILYOPENCLOSE,
     DIVIDENDSV3,
     EXCHANGES,
-    GROUPEDAILY;
+    GROUPEDAILY,
     IPOS,
     LASTTRADE,
+    LASTTRADECRYPTOPAIR,
     LASTQUOTE,
+    LASTQUOTECURRENCYPAIR,
+    REALTIMECURRENCYCONVERSION,
     MARKETHOLIDAYS,
     MARKETSTATUS,
     OPTIONSCONTRACT,
@@ -49,6 +53,9 @@ enum class RestAPIQueryType {
     SNAPSHOTSGAINERSLOSERS,
     SNAPSHOTSTICKER,
     SNAPSHOTSUNIVERSALSNAPSHOT,
+    SNAPSHOTSOPTIONCONTRACT,
+    SNAPSHOTSOPTIONCHAIN,
+    SNAPSHOTSUNIVERSALSNAPSHOT,
     STOCKSPLITSV3,
     STOCKFINANCIALSVX,
     TECHNICALINDICATORS,
@@ -59,38 +66,9 @@ enum class RestAPIQueryType {
     TICKERTYPES,
     TRADES
 }
-// ✅ Define `endpointMap` outside any function (Global Static)
-const std::unordered_map<RestAPIQueryType, std::string> endpointMap = {
-    {RestAPIQueryType::AGGREGATES, "/v2/aggs/ticker/"},
-    {RestAPIQueryType::GROUPEDDAILY, "/v2/aggs/grouped/locale/"},
-    {RestAPIQueryType::DAILYOPENCLOSE, "/v1/open-close/"},
-    {RestAPIQueryType::PREVIOUSCLOSE, "/v2/aggs/ticker/"},
-    {RestAPIQueryType::TRADES, "/v3/trades/"},
-    {RestAPIQueryType::LASTTRADE, "/v2/last/trade/"},
-    {RestAPIQueryType::QUOTES, "/v3/quotes/"},
-    {RestAPIQueryType::LASTQUOTE, "/v2/last/"},
-    {RestAPIQueryType::SNAPSHOTSALLTICKERS, "/v2/snapshot/locale/"},
-    {RestAPIQueryType::SNAPSHOTSGAINERSLOSERS, "/v2/snapshot/locale/"},
-    {RestAPIQueryType::SNAPSHOTSTICKER, "/v2/snapshot/locale/"},
-    {RestAPIQueryType::SNAPSHOTSUNIVERSALSNAPSHOT, "/v3/snapshot?ticker.any_of="},
-    {RestAPIQueryType::TICKERS, "/v3/reference/tickers?active="},
-    {RestAPIQueryType::TICKERDETAILSV3, "/v3/reference/tickers/"},
-    {RestAPIQueryType::TICKEREVENTS, "/vx/reference/tickers/"},
-    {RestAPIQueryType::TICKERNEWS, "/v2/reference/news?limit="},
-    {RestAPIQueryType::TICKERTYPES, "/v3/reference/tickers/types?asset_class="},
-    {RestAPIQueryType::MARKETHOLIDAYS, "/v1/marketstatus/upcoming?apikey="},
-    {RestAPIQueryType::MARKETSTATUS, "/v1/marketstatus/now?apikey="},
-    {RestAPIQueryType::STOCKSPLITSV3, "/v3/reference/splits?limit="},
-    {RestAPIQueryType::DIVIDENDSV3, "/v3/reference/dividends?limit="},
-    {RestAPIQueryType::STOCKFINANCIALSVX, "/vX/reference/financials?limit="},
-    {RestAPIQueryType::CONDITIONS, "/v3/reference/conditions?asset_class="},
-    {RestAPIQueryType::EXCHANGES, "/v3/reference/exchanges?asset_class="},
-    {RestAPIQueryType::RELATEDCOMPANIES, "/v1/related-companies/"},
-    {RestAPIQueryType::IPOS, "/vX/reference/ipos?limit="},
-};
 
 // Declare EndPoint Map as extern
-extern const std::unordered_map<RestAPIQueryType, std::string> endpointMap;
+extern const std::unordered_map<RestAPIQueryType, std::string> firstEndPointMap;
 
 enum class WebSocketQueryType {
     NONE,
@@ -99,13 +77,13 @@ enum class WebSocketQueryType {
     FAIRMARKETVALUE,
     QUOTES,
     TRADES
-}
+};
 
 struct QueryData {
     // Asset Type and Types of Query To Make
     QueryAsset asset_type = QueryAsset::NONE;
-    RestAPIQueryType rest_api_query_type = RestAPIQueryType::None;
-    WebSocketQueryType qeb_socket_query_tye = WebSocketQueryType::None;
+    RestAPIQueryType rest_api_query_type = RestAPIQueryType::NONE;
+    WebSocketQueryType qeb_socket_query_tye = WebSocketQueryType::NONE;
 
     // Standard Query Parameters with predefined types
     std::string base_url = "https://api.polygon.io/";
