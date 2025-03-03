@@ -56,12 +56,21 @@ template<typename T, typename... Types>
 struct is_any : std::disjunction<std::is_same<T, Types>...> {};
 
 
-template<typename T>
-std::string APIStringGenerator::SecondPartGeneration(T QueryAssetType){
+template<typename T1, typename T2>
+std::string APIStringGenerator::SecondPartGeneration(T1 QueryAssetType, T1 AssetType){
     std::ostringstream stream;
 
-    if constexpr (std::is_same<T,  RestAPIQueryType::GROUPEDDAILY>) {
-        stream << 
+    if constexpr(std::is_same<T1, RestAPIQueryType::GROUPEDDAILY> &&
+         is_any<T2, QueryAsset::FOREX, QueryAsset::STOCKS, QueryAsset::CRYPTO>) {
+        if constexpr(std::is_same<T2, QueryAsset::CRYPTO>){
+            stream << "global/market/fx/";
+        } else if constexpr(std::is_same<T2, QueryAsset::FOREX>){
+            stream << "global/market/crypto/";
+        } else {
+            stream << "us/market/stocks/";
+        }
+    } else {
+        return "";
     }
 }
 
