@@ -1,21 +1,32 @@
-#ifndef OPTION_CLASS_H
-#define OPTION_CLASS_H
+#ifndef OPTION_H
+#define OPTION_H
 
-#include "AssetClass.h"
+#include "Asset.h"
+#include <cmath>
 
-class OptionClass : public AssetClass {
-protected:
-    void validateParameters() const override;
+class Option : public Asset {
+private:
+    double strike_price;
+    std::string expiry_date;
+    bool is_call;  // true for call, false for put
 
 public:
-    OptionClass(const std::string& asset_name, const std::string& start_date = "2023-01-09",
-                const std::string& end_date = "", const std::string& time_multiplier = "1",
-                const std::string& time_span = "day", const std::string& sort = "asc",
-                const std::string& api_key = "YOUR_API_KEY", int limit = 5000,
-                bool adjusted = true, bool debug = true);
-    virtual ~OptionClass() = default;
+    Option(std::string t, std::string d, double o, double c, double h, double l, double v, 
+           double sp, std::string exp, bool call)
+        : Asset(std::move(t), std::move(d), o, c, h, l, v), 
+          strike_price(sp), expiry_date(std::move(exp)), is_call(call) {}
 
-    void fetchOptionData();
+    // ✅ Calculate Intrinsic Value
+    double calculateIntrinsicValue() const;
+
+    // ✅ Calculate Time Value
+    double calculateTimeValue(double market_price) const;
+
+    // ✅ Calculate Option Greeks (Delta)
+    double calculateDelta(double volatility, double interest_rate, double time_to_expiry) const;
+
+    // ✅ Print Option Details
+    void print() const override;
 };
 
-#endif // OPTION_CLASS_H
+#endif // OPTION_H

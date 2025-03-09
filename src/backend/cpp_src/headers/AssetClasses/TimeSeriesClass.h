@@ -1,38 +1,38 @@
-#ifndef TIMESERIESCLASS_H
-#define TIMESERIESCLASS_H
+#ifndef TIMESERIES_H
+#define TIMESERIES_H
 
-#include "APIConnectionClass.h"
 #include <vector>
-#include <memory>
+#include <iostream>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
+#include "../DataBase/DataBaseClass.h"
+#include "../Assets/Asset.h"
 
-struct APIResult {
-    int64_t timestamp = 0; // Numeric timestamp for calculations
-    double open_price = 0.0;
-    double close_price = 0.0;
-    double highest_price = 0.0;
-    double lowest_price = 0.0;
-    double volume = 0.0;
-    double volume_weighted_price = 0.0;
-    int num_transactions = 0;
-    std::string date = ""; // For display purposes
+template <typename T>
+class TimeSeries {
+private:
+    std::vector<T> data;
+
+public:
+    TimeSeries() = default;
+
+    void addAsset(const T& asset) { data.push_back(asset); }
+    void addAsset(T&& asset) { data.push_back(std::move(asset)); }
+
+    void loadFromDatabase(DataBaseClass* db, const std::string& ticker, 
+                          const std::string& startDate = "", const std::string& endDate = "", 
+                          int limit = 1000, bool ascending = true);
+
+    // ✅ Time Series Calculations
+    double calculateAverageClosingPrice() const;
+    double calculateVolatility() const;
+    double findMaxClose() const;
+    double findMinClose() const;
+    double calculateMovingAverage(int period) const;
+
+    void sortByDate(bool ascending = true);
+    void printTimeSeries() const;
 };
 
-// TimeSeriesClass inherits from APIConnection
-class TimeSeriesClass : public APIConnection {
-    protected:
-        std::vector<APIResult> time_series_data; // Parsed time-series data
-    public:
-        TimeSeriesClass(const std::string& asset_name, const std::string& start_date,
-                        const std::string& end_date, const std::string& time_multiplier,
-                        const std::string& time_span, const std::string& sort,
-                        const std::string& api_key, int limit, bool adjusted, bool debug);
-
-        void validateResponse(const rapidjson::Document& response) const override;
-
-        rapidjson::Value::Array fetchTimeSeriesData(); // Fetches and parses the data
-        void printTimeSeriesData() const; // Prints the data to the console
-        void createNewCSV(const std::string& filename) const;
-        void writeToCSV(const std::string& filename) const; // Exports data to CSV
-};
-
-#endif // TIMESERIESCLASS_H
+#endif // TIMESERIES_H

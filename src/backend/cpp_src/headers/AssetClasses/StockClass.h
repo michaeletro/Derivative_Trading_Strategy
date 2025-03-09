@@ -1,18 +1,28 @@
-#ifndef STOCK_CLASS_H
-#define STOCK_CLASS_H
+#ifndef STOCK_H
+#define STOCK_H
 
-#include "AssetClass.h"
+#include "Asset.h"
 
-class StockClass : public AssetClass {
+class Stock : public Asset {
+private:
+    double dividend_yield = 0.0;
+
 public:
-    StockClass(const std::string& asset_name, const std::string& start_date = "2023-01-09",
-               const std::string& end_date = "", const std::string& time_multiplier = "1",
-               const std::string& time_span = "day", const std::string& sort = "asc",
-               const std::string& api_key = "YOUR_API_KEY", int limit = 5000,
-               bool adjusted = true, bool debug = true);
-    virtual ~StockClass() = default;
+    Stock(std::string t, std::string d, double o, double c, double h, double l, double v)
+        : Asset(std::move(t), std::move(d), o, c, h, l, v) {}
 
-    void fetchStockData();
+    void setDividendYield(double yield) { dividend_yield = yield; }
+    double getDividendYield() const { return dividend_yield; }
+
+    double calculateDividendPayout(double shares_owned) const {
+        return (dividend_yield / 100.0) * shares_owned * close_price;
+    }
+
+    void print() const override {
+        std::cout << "📈 Stock: ";
+        Asset::print();
+        std::cout << " | Dividend Yield: " << dividend_yield << "%\n";
+    }
 };
 
-#endif // STOCK_CLASS_H
+#endif // STOCK_H

@@ -1,72 +1,84 @@
-#include "../../headers/AssetClasses/TimeSeriesClass.h"
-#include <iostream>
-#include <fstream>
-#include <stdexcept>
+#include "../../headers/TimeSeries/TimeSeries.h"
 
-TimeSeriesClass::TimeSeriesClass(
-    const std::string& asset_name,
-    const std::string& start_date,
-    const std::string& end_date,
-    const std::string& time_multiplier,
-    const std::string& time_span,
-    const std::string& sort,
-    const std::string& api_key,
-    int limit,
-    bool adjusted,
-    bool debug)
-    : APIConnection(asset_name, start_date, end_date, time_multiplier, time_span, sort, api_key, limit, adjusted, debug) {}
+// ✅ Load Data from Database
+template <typename T>
+void TimeSeries<T>::loadFromDatabase(DataBaseClass* db, const std::string& ticker, 
+                                     const std::string& startDate, const std::string& endDate, 
+                                     int limit, bool ascending) {
+    if (!db) {
+        std::cerr << "❌ Error: Database connection is null!\n";
+        return;
+    }
 
-void TimeSeriesClass::validateResponse(const rapidjson::Document& response) const {
-    if (!response.HasMember("results") || !response["results"].IsArray()) {
-        throw std::runtime_error("Invalid JSON response: Missing or invalid 'results' array.");
+    auto results = db->queryAssetData(ticker, startDate, endDate, limit, ascending);
+    for (const auto& row : results) {
+        data.push_back(T(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
     }
 }
 
-rapidjson::Value::Array TimeSeriesClass::fetchTimeSeriesData() {
-    // Fetch API data using APIConnection
-    rapidjson::Document response = fetchAPIData();
+// ✅ Calculate Average Closing Price
+template <typename T>
+double TimeSeries<T>::calculateAverageClosingPrice() const {
+    if (data.empty()) return 0.0;
+    return std::accumulate(data.begin(), data.end(), 0.0, 
+        [](double sum, const T& asset) { return sum + asset.getClosePrice(); }) / data.size();
+}
 
-    // Validate response
-    validateResponse(response);
+// ✅ Find Maximum Closing Price
+template <typename T>
+double TimeSeries<T>::findMaxClose() const {
+    if (data.empty()) return 0.0;
+    return std::max_element(data.begin(), data.end(), 
+        [](const T& a, const T& b) { return a.getClosePrice() < b.getClosePrice(); })->getClosePrice();
+}
 
-    // Return the "results" array
-    if (response.HasMember("results") && response["results"].IsArray()) {
-        return response["results"].GetArray();
-    } else {
-        throw std::runtime_error("API response does not contain a valid 'results' field.");
+// ✅ Find Minimum Closing Price
+template <typename T>
+double TimeSeries<T>::findMinClose() const {
+    if (data.empty()) return 0.0;
+    return std::min_element(data.begin(), data.end(), 
+        [](const T& a, const T& b) { return a.getClosePrice() < b.getClosePrice(); })->getClosePrice();
+}
+
+// ✅ Calculate Volatility (Standard Deviation of Closing Prices)
+template <typename T>
+double TimeSeries<T>::calculateVolatility() const {
+    if (data.size() < 2) return 0.0;
+
+    double avg = calculateAverageClosingPrice();
+    double variance = std::accumulate(data.begin(), data.end(), 0.0,
+        [avg](double sum, const T& asset) {
+            double diff = asset.getClosePrice() - avg;
+            return sum + diff * diff;
+        }) / data.size();
+
+    return std::sqrt(variance);
+}
+
+// ✅ Calculate Moving Average (Simple Moving Average)
+template <typename T>
+double TimeSeries<T>::calculateMovingAverage(int period) const {
+    if (data.size() < period) return 0.0;
+
+    double sum = 0.0;
+    for (size_t i = data.size() - period; i < data.size(); ++i) {
+        sum += data[i].getClosePrice();
+    }
+
+    return sum / period;
+}
+
+// ✅ Print Time Series Data
+template <typename T>
+void TimeSeries<T>::printTimeSeries() const {
+    std::cout << "\n📊 Time Series Data (" << data.size() << " records):\n";
+    for (const auto& asset : data) {
+        asset.print();
     }
 }
 
-void TimeSeriesClass::printTimeSeriesData() const {
-    for (const auto& entry : time_series_data) {
-        std::cout << "Timestamp: " << entry.timestamp
-                  << ", Open: " << entry.open_price
-                  << ", Close: " << entry.close_price
-                  << ", High: " << entry.highest_price
-                  << ", Low: " << entry.lowest_price
-                  << ", Volume: " << entry.volume
-                  << ", VWAP: " << entry.volume_weighted_price
-                  << std::endl;
-    }
-}
-
-void TimeSeriesClass::writeToCSV(const std::string& filename) const {
-    std::ofstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("Unable to open file: " + filename);
-    }
-
-    file << "Timestamp,Open,Close,High,Low,Volume,VWAP,Transactions\n";
-    for (const auto& record : time_series_data) {
-        file << record.timestamp << ","
-             << record.open_price << ","
-             << record.close_price << ","
-             << record.highest_price << ","
-             << record.lowest_price << ","
-             << record.volume << ","
-             << record.volume_weighted_price << ","
-             << record.num_transactions << "\n";
-    }
-
-    file.close();
-}
+// ✅ Explicit Instantiations
+template class TimeSeries<Stock>;
+template class TimeSeries<Option>;
+template class TimeSeries<Crypto>;
+template class TimeSeries<Forex>;

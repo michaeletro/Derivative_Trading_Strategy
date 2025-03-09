@@ -1,35 +1,37 @@
-#ifndef ASSET_CLASS_H
-#define ASSET_CLASS_H
+#ifndef ASSET_H
+#define ASSET_H
 
-#include "TimeSeriesClass.h"
 #include <string>
-#include <filesystem>
-#include <vector>
+#include <iostream>
 
+class Asset {
+protected:
+    std::string ticker;
+    std::string date;
+    double open_price, close_price, high_price, low_price, volume;
 
-class AssetClass : public TimeSeriesClass {
-    protected:
-        std::vector<APIResult> asset_data; // Store time series data
+public:
+    Asset(std::string t, std::string d, double o, double c, double h, double l, double v)
+        : ticker(std::move(t)), date(std::move(d)), open_price(o), close_price(c), 
+          high_price(h), low_price(l), volume(v) {}
 
-    public:
-        AssetClass(const std::string& asset_name, const std::string& start_date = "2023-01-09",
-                const std::string& end_date = "", const std::string& time_multiplier = "1",
-                const std::string& time_span = "day", const std::string& sort = "asc",
-                const std::string& api_key = "YOUR_API_KEY", int limit = 5000,
-                bool adjusted = true, bool debug = true);
-        virtual ~AssetClass() = default;
+    virtual ~Asset() = default;
 
-        std::vector<APIResult> fetchAssetData();
-        void validateResponse(const rapidjson::Document& response) const override;
+    virtual void print() const {
+        std::cout << "📊 " << ticker << " | " << date
+                  << " | Open: " << open_price << " | Close: " << close_price
+                  << " | High: " << high_price << " | Low: " << low_price
+                  << " | Volume: " << volume << "\n";
+    }
 
-        // Operations on Assets
-        std::string getAssetName() const; // Returns the name of the asset
-        double getCurrentValue() const; // Calculates the current value of the asset
-        bool operator==(const AssetClass& other) const; // Compare two AssetClass objects for
-
-        // Methods for handling CSV files
-        void writeToCSV(const std::string& file_name) const;   // Append to an existing file or create if it doesn't exist
-        void createNewCSV(const std::string& file_name) const; // Always create a new file
+    // ✅ Getters
+    std::string getTicker() const { return ticker; }
+    std::string getDate() const { return date; }
+    double getOpenPrice() const { return open_price; }
+    double getClosePrice() const { return close_price; }
+    double getHighPrice() const { return high_price; }
+    double getLowPrice() const { return low_price; }
+    double getVolume() const { return volume; }
 };
 
-#endif // ASSET_CLASS_H
+#endif // ASSET_H

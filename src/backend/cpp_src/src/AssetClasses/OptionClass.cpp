@@ -1,32 +1,32 @@
-#include "../../headers/AssetClasses/OptionClass.h"
+#include "../../headers/Assets/Option.h"
 #include <iostream>
+#include <cmath>
 
-// Constructor
-OptionClass::OptionClass(const std::string& asset_name, const std::string& start_date,
-                         const std::string& end_date, const std::string& time_multiplier,
-                         const std::string& time_span, const std::string& sort,
-                         const std::string& api_key, int limit, bool adjusted, bool debug)
-    : AssetClass(asset_name, start_date, end_date, time_multiplier, time_span, sort, api_key,
-                 limit, adjusted, debug) {}
-
-// Validate Parameters
-void OptionClass::validateParameters() const {
-    AssetClass::validateParameters(); // Call parent validation
-
-    // Validate that asset_name has the "O:" prefix for options
-    if (asset_name.find("O:") != 0) {
-        throw std::invalid_argument("Invalid asset name for OptionClass. Expected prefix 'O:'.");
-    }
-
-    if (debug) {
-        std::cout << "OptionClass parameters validated successfully." << std::endl;
-    }
+// ✅ Calculate Intrinsic Value
+double Option::calculateIntrinsicValue() const {
+    double intrinsic = is_call ? std::max(0.0, close_price - strike_price) 
+                               : std::max(0.0, strike_price - close_price);
+    return intrinsic;
 }
 
-// Fetch Option Data
-void OptionClass::fetchOptionData() {
-    fetchAssetData(); // Reuse AssetClass fetch logic
-    if (debug) {
-        std::cout << "Option data fetched successfully." << std::endl;
-    }
+// ✅ Calculate Time Value
+double Option::calculateTimeValue(double market_price) const {
+    return market_price - calculateIntrinsicValue();
+}
+
+// ✅ Calculate Delta (Approximation using Black-Scholes)
+double Option::calculateDelta(double volatility, double interest_rate, double time_to_expiry) const {
+    double d1 = (log(close_price / strike_price) + (interest_rate + 0.5 * volatility * volatility) * time_to_expiry) /
+                (volatility * sqrt(time_to_expiry));
+    
+    return is_call ? 0.5 * (1 + erf(d1 / sqrt(2)))  // Call Delta
+                   : -0.5 * (1 + erf(-d1 / sqrt(2))); // Put Delta
+}
+
+// ✅ Print Option Info
+void Option::print() const {
+    std::cout << "📜 Option (" << (is_call ? "Call" : "Put") << "): ";
+    Asset::print();
+    std::cout << " | Strike: " << strike_price << " | Expiry: " << expiry_date 
+              << " | Intrinsic: " << calculateIntrinsicValue() << "\n";
 }
