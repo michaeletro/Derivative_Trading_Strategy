@@ -1,4 +1,4 @@
-#include "OptionClass.h"
+#include "../../headers/AssetClasses/OptionClass.h"
 #include <iostream>
 
 // Constructor

@@ -29,9 +29,6 @@ void APIConnection::validateParameters() const {
     if (query.asset_name.empty()) {
         throw std::invalid_argument("❌ Asset name cannot be empty.");
     }
-    if (query.time_multiplier.empty() || !std::all_of(query.time_multiplier.begin(), query.time_multiplier.end(), ::isdigit)) {
-        throw std::invalid_argument("❌ Time multiplier must be numeric.");
-    }
     if (query.time_span != "minute" && query.time_span != "hour" && query.time_span != "day" &&
         query.time_span != "week" && query.time_span != "month") {
         throw std::invalid_argument("❌ Invalid time span.");
@@ -68,18 +65,16 @@ void APIConnection::validateResponse(const rapidjson::Document& response) const 
 rapidjson::Document APIConnection::fetchAPIData() const {
     validateParameters(); // Validate parameters before API call
     
-    std::string url = buildURL();
-    if (debug) {
+    std::string url = APIStringGenerator::generateURL(query);
+
+    if (query.debug) {
         std::cout << "Generated URL: " << url << std::endl;
-        std::cout << url << std::endl;
     }
 
     CURL* curl = curl_easy_init();
     if (!curl) {
         throw std::runtime_error("Failed to initialize CURL.");
     }
-
-
 
     std::ostringstream response_stream;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -103,7 +98,7 @@ rapidjson::Document APIConnection::fetchAPIData() const {
     }
 
     // Debug raw JSON response
-    if (debug) {
+    if (query.debug) {
         std::cout << "Raw JSON response: " << response_stream.str() << std::endl;
     }
 

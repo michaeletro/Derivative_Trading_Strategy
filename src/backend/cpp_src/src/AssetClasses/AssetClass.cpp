@@ -1,4 +1,4 @@
-#include "AssetClass.h"
+#include "../../headers/AssetClasses/AssetClass.h"
 #include <fstream>
 #include <iostream>
 #include <filesystem>

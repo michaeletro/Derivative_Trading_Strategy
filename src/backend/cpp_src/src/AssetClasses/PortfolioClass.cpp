@@ -1,4 +1,4 @@
-#include "PortfolioClass.h"
+#include "../../headers/AssetClasses/PortfolioClass.h"
 #include <algorithm>
 #include <stdexcept>
 #include <iostream>

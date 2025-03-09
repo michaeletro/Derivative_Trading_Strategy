@@ -1,4 +1,4 @@
-#include "TimeSeriesClass.h"
+#include "../../headers/AssetClasses/TimeSeriesClass.h"
 #include <iostream>
 #include <fstream>
 #include <stdexcept>

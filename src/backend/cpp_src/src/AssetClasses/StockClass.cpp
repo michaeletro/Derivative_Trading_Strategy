@@ -1,4 +1,4 @@
-#include "StockClass.h"
+#include "../../headers/AssetClasses/StockClass.h"
 #include <iostream>
 
 // Constructor

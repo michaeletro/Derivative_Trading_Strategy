@@ -1,6 +1,6 @@
-#include <crow_all.h>
+#include "../../headers/Utilities/crow_all.h"
 #include <csignal>
-#include "DataBaseClass.h"
+#include "../../headers/DataBase/DataBaseClass.h"
 
 const std::string DB_FILE = "quant_data.db";
 const std::string CSV_FILE = "backup_data.csv";

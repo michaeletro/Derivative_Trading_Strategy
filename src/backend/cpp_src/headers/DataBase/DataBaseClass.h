@@ -4,7 +4,7 @@
 #include <sqlite3.h>
 #include <string>
 #include <vector>
-#include "DataStructs/DataStructs.h"
+#include "../DataStructs/DataStructs.h"
 
 class DataBaseClass {
     
