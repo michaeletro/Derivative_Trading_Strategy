@@ -1,13 +1,8 @@
 📜 README: High-Performance Financial Data Engine in C++
-
 🚀 Financial Data Engine
-
 This project is a high-performance financial data processing engine built in C++, designed for real-time market data retrieval, storage, and analysis. It incorporates object-oriented programming (OOP), template metaprogramming, multithreading, and network communication protocols to handle high-frequency financial data efficiently.
 
-⸻
-
 🔥 Key Features
-
 ✅ HTTP Network Requests – Fetch real-time financial data from APIs
 ✅ WebSocket Support – Stream live market data in real-time (In Progress)
 ✅ Database Integration (SQLite) – Store and retrieve historical asset data
@@ -17,11 +12,13 @@ This project is a high-performance financial data processing engine built in C++
 ✅ Risk-Neutral Pricing – Convert empirical distributions to risk-neutral measures
 ✅ Monte Carlo Simulation – Model portfolio growth and risk scenarios
 ✅ Portfolio Optimization – Uses Markowitz Efficient Frontier for asset allocation
-
-⸻
+✅ SQL Prepared Statements – Secure and efficient database transactions
+✅ Automated CSV Backup & Restore – Ensures persistence of market data
 
 📂 Project Structure
-
+pgsql
+Copy
+Edit
 📁 Derivative_Trading_Strategy
 │── 📁 src
 │   ├── 📁 backend
@@ -69,117 +66,108 @@ This project is a high-performance financial data processing engine built in C++
 │── 📁 bin
 │── 📄 main.cpp
 │── 📄 Makefile
+🗄️ Database Schema
+The financial data is stored in SQLite3 with the following schema:
 
-
-
-⸻
-
+📌 asset_data Table (Stores historical price data)
+sql
+Copy
+Edit
+CREATE TABLE IF NOT EXISTS asset_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_type TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,
+    open_price REAL NOT NULL,
+    close_price REAL NOT NULL,
+    high_price REAL NOT NULL,
+    low_price REAL NOT NULL,
+    volume REAL NOT NULL
+);
+Stores historical price data for stocks, options, forex, and cryptocurrencies.
+📌 portfolio Table (Tracks portfolio holdings)
+sql
+Copy
+Edit
+CREATE TABLE IF NOT EXISTS portfolio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id INTEGER NOT NULL,
+    weight REAL NOT NULL,
+    FOREIGN KEY(asset_id) REFERENCES asset_data(id)
+);
+Tracks portfolio asset allocation and weights.
+📌 option_contracts Table (Stores derivatives data)
+sql
+Copy
+Edit
+CREATE TABLE IF NOT EXISTS option_contracts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    expiry_date TEXT NOT NULL,
+    strike_price REAL NOT NULL,
+    option_type TEXT CHECK(option_type IN ('CALL', 'PUT')) NOT NULL,
+    implied_volatility REAL NOT NULL,
+    FOREIGN KEY(ticker) REFERENCES asset_data(ticker)
+);
+Stores option contract details such as strike price, expiry, and volatility.
 🔧 Installation & Setup
-
 📌 Prerequisites
-
 Ensure you have the following installed:
-	•	C++17+ (or later)
-	•	SQLite3
-	•	cURL library (libcurl)
-	•	Eigen (for matrix computations)
-	•	CMake (optional for build system)
 
+C++17+ (or later)
+SQLite3
+cURL library (libcurl)
+Eigen (for matrix computations)
+CMake (optional for build system)
 📌 Build Instructions
-
 1️⃣ Clone the Repository
-
+bash
+Copy
+Edit
 git clone https://github.com/your-repo/Derivative_Trading_Strategy.git
 cd Derivative_Trading_Strategy
-
 2️⃣ Install Dependencies (Ubuntu/Linux)
-
+bash
+Copy
+Edit
 sudo apt update
 sudo apt install g++ libsqlite3-dev libcurl4-openssl-dev cmake
-
 3️⃣ Compile the Project Using Makefile
-
+bash
+Copy
+Edit
 make
-
 Alternatively, using CMake:
 
+bash
+Copy
+Edit
 mkdir build
 cd build
 cmake ..
 make
-
 4️⃣ Run the Executable
-
+bash
+Copy
+Edit
 ./bin/api_client
-
-
-
-⸻
-
-🚀 Usage Guide
-
-1️⃣ Running an API Request
-
-#include "APIConnectionClass.h"
-
-int main() {
-    QueryData query;
-    query.asset_name = "AAPL";
-    query.rest_api_query_type = RestAPIQueryType::DAILYOPENCLOSE;
-    query.api_key = "your_api_key";
-
-    APIConnection api(query);
-    rapidjson::Document data = api.fetchAPIData();
-}
-
-2️⃣ Adding Assets to a Portfolio
-
-Portfolio portfolio;
-portfolio.addAsset(std::make_shared<Stock>("AAPL", "2024-03-10", 185.0, 190.0, 195.0, 180.0, 72000000), 0.4);
-portfolio.optimizePortfolio();
-portfolio.displayPortfolio();
-
-3️⃣ Fetching Historical Data from Database
-
-DataBaseClass db("financial_data.db", "backup.csv");
-auto asset_data = db.fetchAssetData();
-
-4️⃣ Running a Monte Carlo Simulation
-
-std::vector<double> future_values = monteCarloPortfolioGrowth(100000, 0.1, 0.2, 252, 10000);
-std::cout << "Expected Portfolio Value: $" << future_values[5000] << std::endl;
-
-
-
-⸻
-
 📈 Features in Development
-	•	📡 WebSocket integration (for real-time trading data)
-	•	⚡ Parallel computing (for faster financial modeling)
-	•	🧠 Machine Learning-based Risk Models
-	•	🔀 Dynamic Asset Allocation Strategies
-	•	🔮 Monte Carlo Greeks Estimation (Δ, Γ, 𝜎, etc.)
-	•	📊 Data Visualization via Python Integration
-
-⸻
-
+📡 WebSocket integration (for real-time trading data)
+⚡ Parallel computing (for faster financial modeling)
+🧠 Machine Learning-based Risk Models
+🔀 Dynamic Asset Allocation Strategies
+🔮 Monte Carlo Greeks Estimation (Δ, Γ, 𝜎, etc.)
+📊 Data Visualization via Python Integration
 🤝 Contributing
-
 Contributions are welcome! To contribute:
-	1.	Fork the repository.
-	2.	Create a new feature branch.
-	3.	Commit your changes and submit a PR.
 
-⸻
-
+Fork the repository.
+Create a new feature branch.
+Commit your changes and submit a PR.
 📜 License
-
 MIT License © 2024 Your Name
 
-⸻
-
 📩 Contact
-
 For questions or collaboration, reach out at:
 📧 your.email@example.com
 🔗 LinkedIn
