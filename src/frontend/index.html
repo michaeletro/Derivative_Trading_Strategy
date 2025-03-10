@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeZone - Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="script.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>📈 TradeZone</h1>
+        <nav>
+            <a href="index.html" class="active">Dashboard</a>
+            <a href="portfolio.html">Portfolio</a>
+            <a href="market.html">Market</a>
+            <a href="leaderboard.html">Leaderboard</a>
+            <a href="settings.html">Settings</a>
+            <a href="3DMarketChart.html">Settings</a>
+        </nav>
+        <button id="dark-mode-toggle">🌙</button>
+    </header>
+
+    <main>
+        <div class="container">
+            <section id="market-feed" class="glass">
+                <h2>📊 Live Market Prices</h2>
+                <div id="market-container"></div>
+            </section>
+
+            <section id="xp-progress" class="glass">
+                <h2>🔥 Trading XP</h2>
+                <div class="xp-bar">
+                    <div class="xp-fill" style="width: 40%;">40%</div>
+                </div>
+                <p>Level: <span id="level">1</span></p>
+            </section>
+            <section class="glass">
+                <h2>💰 Portfolio Summary</h2>
+                <p>Total Value: $<span id="total-value">0.00</span></p>
+                <p>Total Profit/Loss: $<span id="total-pl">0.00</span></p>
+                <p>Number of Trades: <span id="trade-count">0</span></p>
+            </section>
+            <section class = chart glass>
+                <h2>📈 Portfolio Performance</h2>
+                <canvas id="portfolio-chart"></canvas>
+                <script>
+                    const ctx = document.getElementById('portfolio-chart').getContext('2d');
+                    const portfolioChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: ['January', 'February', 'March', 'April', 'May', 'June'],
+                            datasets: [{
+                                label: 'Portfolio Value',
+                                data: [1200, 1500, 1800, 2000, 2200, 2500],
+                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                yAxes: [{
+                                    ticks: {
+                                        beginAtZero: true
+                                    }
+                                }]
+                            }
+                        }
+                    });
+                </script>
+            </section>
+        </div>     
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+
+</body>
+</html>

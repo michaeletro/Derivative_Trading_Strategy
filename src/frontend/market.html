@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeZone - Market</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="script.js"></script>
+    <script defer src="market.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    
+</head>
+<body>
+
+    <header>
+        <h1>📈 TradeZone Market</h1>
+        <nav>
+            <a href="index.html">Dashboard</a>
+            <a href="portfolio.html">Portfolio</a>
+            <a href="market.html" class="active">Market</a>
+            <a href="leaderboard.html">Leaderboard</a>
+            <a href="settings.html">Settings</a>
+        </nav>
+        <button id="dark-mode-toggle">🌙</button>
+    </header>
+
+    <main>
+        <div class="container">
+            <section id="market-feed" class="glass">
+                <h2>📊 Live Market Prices</h2>
+                <div id="market-container"></div>
+            </section>
+            <section class="glass">
+                <h2>🔥 Trading XP</h2>
+                <div class="xp-bar">
+                    <div class="xp-fill" id="xp-progress" style="width: 40%;">40%</div>
+                </div>
+                <p>Level: <span id="level">1</span></p>
+            </section>
+            <section class="glass">
+                <h2>💰 Portfolio Summary</h2>
+                <p>Total Value: $<span id="total-value">0.00</span></p>
+                <p>Total Profit/Loss: $<span id="total-pl">0.00</span></p>
+                <p>Number of Trades: <span id="trade-count">0</span></p>
+            </section>
+            <section class="glass">
+                <h2>⚙️ Render Market Data</h2>
+                <button onclick="renderMarketData()">Render Market Data</button>
+                <section id="market-data-container">
+                    <h3>Market Data</h3>
+                    <div id="market-data"></div>
+                </section>
+                <section buystock="true">
+                    <h3>Buy Stock</h3>
+                    <form id="buy-stock-form">
+                        <label for="stock-symbol">Stock Symbol:</label>
+                        <input type="text" id="stock-symbol" required>
+                        <label for="stock-quantity">Quantity:</label>
+                        <input type="number" id="stock-quantity" required>
+                        <button type="submit">Buy</button>
+                    </form>
+                </section>
+                <section sellstock="true">
+                    <h3>Sell Stock</h3>
+                    <form id="sell-stock-form">
+                        <label for="stock-symbol-sell">Stock Symbol:</label>
+                        <input type="text" id="stock-symbol-sell" required>
+                        <label for="stock-quantity-sell">Quantity:</label>
+                        <input type="number" id="stock-quantity-sell" required>
+                        <button type="submit">Sell</button>
+                    </form>
+                </section>
+            </section>
+            </section>
+            <section class="glass">
+                <h2>📈 Top Gainers</h2>
+                <ul id="top-gainers-list"></ul>
+                <section class="glass">
+                    <h2>📉 Top Losers</h2>
+                    <ul id="top-losers-list"></ul>
+                    <script src="market.js"></script>
+                    <script>
+                        // Load market data
+                        document.getElementById('market-container').innerHTML = localStorage.getItem('marketData') || 'No market data available.';
+                    </script>
+            </section>
+            <section class="glass">
+                <h2>📉 Top Losers</h2>
+                <ul id="top-losers-list"></ul>
+            </section>
+            <section class="glass">
+                <h2>🔔 Alerts</h2>
+                <p>Set up alerts for price changes and news.</p>
+            </section>
+            <section class="glass">
+                <h2>💡 Market Insights</h2>
+                <p>Stay updated with the latest market trends and insights.</p>
+            </section>
+        </section>
+        <section class="glass">
+            <h2>📈 Market News</h2>
+            <div id="news-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📊 Market Analysis</h2>
+            <div id="analysis-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Trends</h2>
+            <div id="trends-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Sentiment</h2>
+            <div id="sentiment-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Calendar</h2>
+            <div id="calendar-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Tools</h2>
+            <div id="tools-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Data</h2>
+            <div id="data-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Research</h2>
+            <div id="research-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Signals</h2>
+            <div id="signals-container"></div>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Alerts</h2>
+            <div id="alerts-container"></div>
+        </section>
+        <script src="market.js"></script>
+        <script>
+            // Load market data
+            document.getElementById('market-container').innerHTML = localStorage.getItem('marketData') || 'No market data available.';
+        </script>
+        <script>
+            // Save market data
+            function saveMarketData() {
+                const marketData = document.getElementById('market-container').innerHTML;
+                localStorage.setItem('marketData', marketData);
+            }
+            saveMarketData();
+        </script>
+        <script>
+            // Load trading preferences
+            document.getElementById('default-order-type').value = localStorage.getItem('defaultOrderType') || 'market';
+        </script>
+        <script>
+            // Save trading preferences
+            function saveTradingPreferences() {
+                const defaultOrderType = document.getElementById('default-order-type').value;
+                localStorage.setItem('defaultOrderType', defaultOrderType);
+                alert('Trading preferences saved!');
+            }
+        </script>
+        <script>
+            // Load market data
+            const marketData = JSON.parse(localStorage.getItem('marketData')) || [];
+            const totalValue = marketData.reduce((acc, item) => acc + item.value, 0);
+            const totalPL = marketData.reduce((acc, item) => acc + item.pl, 0);
+            const tradeCount = marketData.length;
+
+            document.getElementById('total-value').textContent = totalValue.toFixed(2);
+            document.getElementById('total-pl').textContent = totalPL.toFixed(2);
+            document.getElementById('trade-count').textContent = tradeCount;
+        </script>
+        <script>
+            // Load top gainers and losers
+            const topGainers = marketData.filter(item => item.change > 0).sort((a, b) => b.change - a.change).slice(0, 5);
+            const topLosers = marketData.filter(item => item.change < 0).sort((a, b) => a.change - b.change).slice(0, 5);
+
+            const topGainersList = document.getElementById('top-gainers-list');
+            const topLosersList = document.getElementById('top-losers-list');
+
+            topGainers.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = `${item.name}: ${item.price} (${item.change}%)`;
+                topGainersList.appendChild(li);
+            });
+
+            topLosers.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = `${item.name}: ${item.price} (${item.change}%)`;
+                topLosersList.appendChild(li);
+            });
+        </script>
+        <script>
+            // Load alerts
+            const alerts = JSON.parse(localStorage.getItem('alerts')) || [];
+            const alertsContainer = document.getElementById('alerts-container');
+
+            alerts.forEach(alert => {
+                const div = document.createElement('div');
+                div.textContent = `${alert.name}: ${alert.message}`;
+                alertsContainer.appendChild(div);
+            });
+        </script>
+        <script>
+            // Save alerts
+            function saveAlerts() {
+                const alerts = [];
+                document.querySelectorAll('#alerts-container div').forEach(div => {
+                    const [name, message] = div.textContent.split(': ');
+                    alerts.push({ name, message });
+                });
+                localStorage.setItem('alerts', JSON.stringify(alerts));
+            }
+            saveAlerts();
+        </script>
+        <script>
+            // Dark mode toggle
+            const darkModeToggle = document.getElementById('dark-mode-toggle');
+            darkModeToggle.addEventListener('click', () => {
+                document.body.classList.toggle('dark-mode');
+                localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+            });
+            if (localStorage.getItem('darkMode') === 'true') {
+                document.body.classList.add('dark-mode');
+            }
+        </script>
+        <script>
+            // Save market settings
+            function saveMarketSettings() {
+                const marketSettings = {
+                    darkMode: document.body.classList.contains('dark-mode'),
+                    notifications: document.getElementById('toggle-notifications').checked
+                };
+                localStorage.setItem('marketSettings', JSON.stringify(marketSettings));
+                alert('Market settings saved!');
+            }
+        </script>
+        <script>
+            // Load market settings
+            const marketSettings = JSON.parse(localStorage.getItem('marketSettings')) || {};
+            document.getElementById('toggle-notifications').checked = marketSettings.notifications || false;
+        </script>
+    </div>
+
+    </main>
+    <script src="market.js"></script>
+
+</body>
+</html>

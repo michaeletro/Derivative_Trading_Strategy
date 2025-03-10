@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - TradeZone</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="settings.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>⚙️ Settings</h1>
+        <nav>
+            <a href="index.html">Dashboard</a>
+            <a href="portfolio.html">Portfolio</a>
+            <a href="market.html">Market</a>
+            <a href="leaderboard.html">Leaderboard</a>
+            <a href="settings.html" class="active">Settings</a>
+        </nav>
+        <button id="dark-mode-toggle">🌙</button>
+    </header>
+
+    <main class="container">
+        <section class="glass">
+            <h2>💡 Preferences</h2>
+            <label>
+                Dark Mode 
+                <input type="checkbox" id="toggle-dark-mode">
+            </label>
+            <label>
+                Notifications 
+                <input type="checkbox" id="toggle-notifications">
+            </label>
+            <button onclick="saveSettings()">Save Changes</button>
+            <script>
+                // Load settings
+                document.getElementById('toggle-dark-mode').checked = localStorage.getItem('darkMode') === 'true';
+                document.getElementById('toggle-notifications').checked = localStorage.getItem('notifications') === 'true';
+                </script>
+                <script>
+                // Save settings
+                function saveSettings() {
+                    const darkMode = document.getElementById('toggle-dark-mode').checked;
+                    const notifications = document.getElementById('toggle-notifications').checked;
+                    localStorage.setItem('darkMode', darkMode);
+                    localStorage.setItem('notifications', notifications);
+                    alert('Settings saved!');
+                }
+            </script>
+        </section>
+        <section class="glass">
+            <h2>🔒 Account</h2>
+            <p>Manage your account settings here.</p>
+            <button onclick="logout()">Logout</button>
+            <script>
+                function logout() {
+                    // Perform logout logic
+                    alert('Logged out successfully!');
+                }
+            </script>
+        </section>
+        <section class="glass">
+            <h2>🔔 Alerts</h2>
+            <p>Set up alerts for price changes and news.</p>
+            <label>
+                Price Alert 
+                <input type="checkbox" id="toggle-price-alert">
+            </label>
+            <label>
+                News Alert 
+                <input type="checkbox" id="toggle-news-alert">
+            </label>
+            <button onclick="saveAlerts()">Save Alerts</button>
+            <script>
+                // Load alerts
+                document.getElementById('toggle-price-alert').checked = localStorage.getItem('priceAlert') === 'true';
+                document.getElementById('toggle-news-alert').checked = localStorage.getItem('newsAlert') === 'true';
+                </script>
+                <script>
+                // Save alerts
+                function saveAlerts() {
+                    const priceAlert = document.getElementById('toggle-price-alert').checked;
+                    const newsAlert = document.getElementById('toggle-news-alert').checked;
+                    localStorage.setItem('priceAlert', priceAlert);
+                    localStorage.setItem('newsAlert', newsAlert);
+                    alert('Alerts saved!');
+                }
+            </script>
+        </section>
+        <section class="glass">
+            <h2>📈 Portfolio Settings</h2>
+            <label>
+                Show only friends
+                <input type="checkbox" id="toggle-friends-only">
+            </label>
+            <button onclick="savePortfolioSettings()">Save Changes</button>
+            <script>
+                // Load portfolio settings
+                document.getElementById('toggle-friends-only').checked = localStorage.getItem('friendsOnly') === 'true';
+                </script>
+                <script>
+                // Save portfolio settings
+                function savePortfolioSettings() {
+                    const friendsOnly = document.getElementById('toggle-friends-only').checked;
+                    localStorage.setItem('friendsOnly', friendsOnly);
+                    alert('Portfolio settings saved!');
+                }
+            </script>
+        </section>
+        <section class="glass">
+            <h2>📊 Trading Preferences</h2>
+            <label>
+                Default Order Type
+                <select id="default-order-type">
+                    <option value="market">Market</option>
+                    <option value="limit">Limit</option>
+                </select>
+            </label>
+            <button onclick="saveTradingPreferences()">Save Preferences</button>
+            <script>
+                // Load trading preferences
+                document.getElementById('default-order-type').value = localStorage.getItem('defaultOrderType') || 'market';
+                </script>
+                <script>
+                // Save trading preferences
+                function saveTradingPreferences() {
+                    const defaultOrderType = document.getElementById('default-order-type').value;
+                    localStorage.setItem('defaultOrderType', defaultOrderType);
+                    alert('Trading preferences saved!');
+                }
+            </script>
+        </section>
+        <section class="glass">
+            <h2>📈 Market Insights</h2>
+            <p>Stay updated with the latest market trends and insights.</p>
+        </section>
+        <section class="glass">
+            <h2>📈 Portfolio Insights</h2>
+            <p>Stay updated with the latest trends and insights from your portfolio.</p>
+        </section>
+    </main>
+</body>
+</html>

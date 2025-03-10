@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaderboard - TradeZone</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="leaderboard.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>🏆 Leaderboard</h1>
+        <nav>
+            <a href="index.html">Dashboard</a>
+            <a href="portfolio.html">Portfolio</a>
+            <a href="market.html">Market</a>
+            <a href="leaderboard.html" class="active">Leaderboard</a>
+            <a href="settings.html">Settings</a>
+            <script>
+                // Load dark mode setting
+                if (localStorage.getItem('darkMode') === 'true') {
+                    document.body.classList.add('dark-mode');
+                }
+            </script>
+
+        </nav>
+        <button id="dark-mode-toggle">🌙</button>
+    </header>
+
+    <main class="container">
+        <section class="glass">
+            <h2>Top Traders</h2>
+            <ul id="leaderboard-list"></ul>
+        </section>
+        <section class="glass">
+            <h2>Friends</h2>
+            <ul id="friends-list"></ul>
+            
+        </section>
+        <section class="glass">
+            <h2>My Friends</h2>
+            <ul id="my-friends-list"></ul>
+            <script >
+                // Load friends data
+                function loadFriends() {
+                    // Fetch friends data from server
+                    fetch('https://api.example.com/friends')
+                        .then(response => response.json())
+                        .then(data => {
+                            const friendsList = document.getElementById('friends-list');
+                            friendsList.innerHTML = '';
+                            data.forEach(friend => {
+                                const li = document.createElement('li');
+                                li.textContent = `${friend.name} - ${friend.rank}`;
+                                friendsList.appendChild(li);
+                            });
+                        });
+                }
+                loadFriends();
+            </script>
+        </section>
+        <section class="glass">
+            <h2>My Trades</h2>
+            <ul id="my-trades-list"></ul>  
+        </section>
+        <section class="glass">
+            <h2>Your Rank</h2>
+            <p id="your-rank">Loading...</p>
+        </section>
+        <section class="glass">
+            <h2>Leaderboard Settings</h2>
+            <label>
+                Show only friends
+                <input type="checkbox" id="toggle-friends-only">
+            </label>
+            <button onclick="saveLeaderboardSettings()">Save Changes</button>
+        </section>
+        <section class="glass">
+            <h2>Leaderboard Insights</h2>
+            <p>Stay updated with the latest trends and insights from the leaderboard.</p>
+        </section>
+    </section>
+    </main>
+        <script>
+            // Load leaderboard settings
+            document.getElementById('toggle-friends-only').checked = localStorage.getItem('friendsOnly') === 'true';
+        </script>
+        <script>
+            // Save leaderboard settings
+            function saveLeaderboardSettings() {
+                const friendsOnly = document.getElementById('toggle-friends-only').checked;
+                localStorage.setItem('friendsOnly', friendsOnly);
+                alert('Leaderboard settings saved!');
+            }
+        </script>
+        <script>
+            // Load leaderboard data
+            function loadLeaderboard() {
+                // Fetch leaderboard data from server
+                fetch('https://api.example.com/leaderboard')
+                    .then(response => response.json())
+                    .then(data => {
+                        const leaderboardList = document.getElementById('leaderboard-list');
+                        leaderboardList.innerHTML = '';
+                        data.forEach(trader => {
+                            const li = document.createElement('li');
+                            li.textContent = `${trader.name} - ${trader.rank}`;
+                            leaderboardList.appendChild(li);
+                        });
+                    });
+            }
+            loadLeaderboard();
+        </script>
+        <script>
+            // Load friends data
+            function loadFriends() {
+                // Fetch friends data from server
+                fetch('https://api.example.com/friends')
+                    .then(response => response.json())
+                    .then(data => {
+                        const friendsList = document.getElementById('friends-list');
+                        friendsList.innerHTML = '';
+                        data.forEach(friend => {
+                            const li = document.createElement('li');
+                            li.textContent = `${friend.name} - ${friend.rank}`;
+                            friendsList.appendChild(li);
+                        });
+                    });
+            }
+            loadFriends();
+        </script>
+        <script>
+            // Load my friends data
+            function loadMyFriends() {
+                // Fetch my friends data from server
+                fetch('https://api.example.com/my-friends')
+                    .then(response => response.json())
+                    .then(data => {
+                        const myFriendsList = document.getElementById('my-friends-list');
+                        myFriendsList.innerHTML = '';
+                        data.forEach(friend => {
+                            const li = document.createElement('li');
+                            li.textContent = `${friend.name} - ${friend.rank}`;
+                            myFriendsList.appendChild(li);
+                        });
+                    });
+            }
+            loadMyFriends();
+        </script>
+        <script>
+            // Load my trades data
+            function loadMyTrades() {
+                // Fetch my trades data from server
+                fetch('https://api.example.com/my-trades')
+                    .then(response => response.json())
+                    .then(data => {
+                        const myTradesList = document.getElementById('my-trades-list');
+                        myTradesList.innerHTML = '';
+                        data.forEach(trade => {
+                            const li = document.createElement('li');
+                            li.textContent = `${trade.symbol} - ${trade.profit}`;
+                            myTradesList.appendChild(li);
+                        });
+                    });
+            }
+            loadMyTrades();
+        </script>
+        <script>
+            // Load your rank
+            function loadYourRank() {
+                // Fetch your rank from server
+                fetch('https://api.example.com/your-rank')
+                    .then(response => response.json())
+                    .then(data => {
+                        const yourRank = document.getElementById('your-rank');
+                        yourRank.textContent = `Your rank is ${data.rank}`;
+                    });
+            }
+            loadYourRank();
+        </script>
+        <script>
+            // Dark mode toggle
+            const darkModeToggle = document.getElementById('dark-mode-toggle');
+            darkModeToggle.addEventListener('click', () => {
+                document.body.classList.toggle('dark-mode');
+                localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+            });
+            if (localStorage.getItem('darkMode') === 'true') {
+                document.body.classList.add('dark-mode');
+            }
+        </script>
+        <script>
+            // Load leaderboard settings
+            document.getElementById('toggle-friends-only').checked = localStorage.getItem('friendsOnly') === 'true';
+        </script>
+        <script>
+            // Save leaderboard settings
+            function saveLeaderboardSettings() {
+                const friendsOnly = document.getElementById('toggle-friends-only').checked;
+                localStorage.setItem('friendsOnly', friendsOnly);
+                alert('Leaderboard settings saved!');
+            }
+        </script>
+
+    </section>
+    </main>
+
+</body>
+</html>
