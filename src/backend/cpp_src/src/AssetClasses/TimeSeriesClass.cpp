@@ -11,22 +11,20 @@ void TimeSeries<T>::loadFromDatabase(DataBaseClass* db, const std::string& ticke
     }
 
     auto results = db->queryAssetData(ticker, startDate, endDate, limit, ascending);
-    for (const auto& row : results) {
-        if constexpr (std::is_same_v<T, std::shared_ptr<Stock>>) {
-            data.push_back(std::make_shared<Stock>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
-        } 
-        else if constexpr (std::is_same_v<T, std::shared_ptr<Option>>) {
-            data.push_back(std::make_shared<Option>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume, row.strike_price, row.implied_volatility, row.option_type, row.is_call));
-        } 
-        else if constexpr (std::is_same_v<T, std::shared_ptr<Crypto>>) {
-            data.push_back(std::make_shared<Crypto>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
-        } 
-        else if constexpr (std::is_same_v<T, std::shared_ptr<Forex>>) {
-            data.push_back(std::make_shared<Forex>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
-        } 
-        else {
-            static_assert(!sizeof(T), "Unsupported asset type in TimeSeries.");
+
+    // ✅ Fix: Ensure valid asset type before inserting into TimeSeries
+    if constexpr (std::is_same_v<T, std::shared_ptr<Stock>> ||
+                  std::is_same_v<T, std::shared_ptr<Option>> ||
+                  std::is_same_v<T, std::shared_ptr<Crypto>> ||
+                  std::is_same_v<T, std::shared_ptr<Forex>>) {
+        for (const auto& row : results) {
+            data.push_back(std::make_shared<typename T::element_type>(
+                row.ticker, row.date, row.open_price, row.close_price, 
+                row.high_price, row.low_price, row.volume
+            ));
         }
+    } else {
+        static_assert(dependent_false<T>::value, "❌ Unsupported asset type in TimeSeries.");
     }
 }
 
@@ -89,7 +87,6 @@ void TimeSeries<T>::printTimeSeries() const {
 }
 
 // ✅ Explicit Instantiations
-template class TimeSeries<std::shared_ptr<Asset>>;
 template class TimeSeries<std::shared_ptr<Stock>>;
 template class TimeSeries<std::shared_ptr<Option>>;
 template class TimeSeries<std::shared_ptr<Crypto>>;

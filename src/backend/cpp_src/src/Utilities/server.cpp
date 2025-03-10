@@ -2,6 +2,7 @@
 #include <csignal>
 #include "../../headers/DataBase/DataBaseClass.h"
 
+/*
 const std::string DB_FILE = "quant_data.db";
 const std::string CSV_FILE = "backup_data.csv";
 
@@ -104,3 +105,4 @@ int main() {
 
     return 0;
 }
+*/

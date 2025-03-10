@@ -149,13 +149,12 @@ std::vector<AssetData> DataBaseClass::fetchAssetData() {
     return results;
 }
 
-bool DataBaseClass::addAssetData(const std::string& ticker, const std::string& date, double open_price, double close_price,
-                                 double high_price, double low_price, double volume) {
+bool DataBaseClass::addAssetData(const AssetData& asset) {
     std::ostringstream oss;
     oss << "INSERT INTO asset_data (ticker, date, open_price, close_price, high_price, low_price, volume) "
-        << "VALUES ('" << ticker << "', '" << date << "', " << open_price << ", " << close_price << ", "
-        << high_price << ", " << low_price << ", " << volume << ");";
-    return executeQuery(oss.str());
+        << "VALUES ('" << asset.ticker << "', '" << asset.date << "', " << asset.open_price << ", " << asset.close_price << ", "
+        << asset.high_price << ", " << asset.low_price << ", " << asset.volume << ");";    
+        return executeQuery(oss.str());
 }
 
 bool DataBaseClass::executeQuery(const std::string& query) {
@@ -176,60 +175,47 @@ void DataBaseClass::executeSQL(const std::string& sql) {
         throw std::runtime_error("SQL Error: " + error);
     }
 }
+std::vector<AssetData> DataBaseClass::queryAssetData(const std::string& ticker, const std::string& startDate,
+    const std::string& endDate, int limit, bool ascending) const {
+    std::vector<AssetData> results;
+    std::string query = "SELECT ticker, date, open, close, high, low, volume FROM assets WHERE ticker = ?";
 
-std::vector<std::vector<std::string>> DataBaseClass::queryAssetData(const std::string& ticker) {
-    std::vector<std::vector<std::string>> results;  // ✅ Declare results at the start
-    std::string sql = "SELECT * FROM asset_data WHERE ticker = ?;";
-    sqlite3_stmt* stmt;
+    if (!startDate.empty()) query += " AND date >= ?";
+    if (!endDate.empty()) query += " AND date <= ?";
 
-    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        std::cerr << "❌ Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
-        return results;  // Return empty vector on failure
-    }
+    query += " ORDER BY date " + std::string(ascending ? "ASC" : "DESC") + " LIMIT ?;";
 
-    // ✅ Bind the ticker value
-    sqlite3_bind_text(stmt, 1, ticker.c_str(), -1, SQLITE_STATIC);
-
-    // ✅ Execute and fetch results
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        std::vector<std::string> row;
-        for (int i = 0; i < sqlite3_column_count(stmt); i++) {
-            const char* col_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
-            row.push_back(col_text ? col_text : "NULL");  // Handle NULL values
-        }
-        results.push_back(row);  // ✅ Ensure results is available
-    }
-
-    sqlite3_finalize(stmt);
-    return results;  // ✅ Return results at the end
-}
-
-std::vector<std::vector<std::string>> DataBaseClass::queryAssetData(const std::string& ticker, const std::string& startDate,
-                                          const std::string& endDate, int limit = 1000, bool ascending = true){
-    std::vector<std::vector<std::string>> results;
-    std::string sql = "SELECT * FROM asset_data WHERE ticker = ? AND date BETWEEN ? AND ? "
-                      "ORDER BY date " + std::string(ascending ? "ASC" : "DESC") + " LIMIT ?;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        std::cerr << "❌ Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
-        return results;
+    std::cerr << "Error: Failed to prepare SQL statement.\n";
+    return results;
     }
-    sqlite3_bind_text(stmt, 1, ticker.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_test(stmt, 2, startDate.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, endDate.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, limit);
 
-    while(sqlite3_step(stmt) == SQLITE_ROW) {
+    int paramIndex = 1;
+    sqlite3_bind_text(stmt, paramIndex++, ticker.c_str(), -1, SQLITE_STATIC);
+    if (!startDate.empty()) sqlite3_bind_text(stmt, paramIndex++, startDate.c_str(), -1, SQLITE_STATIC);
+    if (!endDate.empty()) sqlite3_bind_text(stmt, paramIndex++, endDate.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, paramIndex++, limit);
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
         AssetData data;
-        data.ticker= reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));;
+        data.id = sqlite3_column_int(stmt, 0);
+        data.ticker = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
         data.date = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-        data.open_price = sqlite3_column_double(stmt, 3);
-        data.close_price = sqlite3_column_double(stmt, 4);
-        data.high_price = sqlite3_column_double(stmt, 5);
-        data.low_price = sqlite3_column_double(stmt, 6);
-        data.volume = sqlite3_column_douuble(stmt, 7);
+        data.open_price = static_cast<float>(sqlite3_column_double(stmt, 3));
+        data.close_price = static_cast<float>(sqlite3_column_double(stmt, 4));
+        data.high_price = static_cast<float>(sqlite3_column_double(stmt, 5));
+        data.low_price = static_cast<float>(sqlite3_column_double(stmt, 6));
+        data.volume = sqlite3_column_int64(stmt, 7);  // ✅ Corrected from `sqlite3_column_double`
+        data.strike_price = static_cast<float>(sqlite3_column_double(stmt, 8));
+        data.implied_volatility = static_cast<float>(sqlite3_column_double(stmt, 9));
+        data.option_type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10));
+        data.is_call = sqlite3_column_int(stmt, 11) == 1;
+        data.expiry_date = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 12));
+
         results.push_back(data);
     }
+
     sqlite3_finalize(stmt);
     return results;
 }

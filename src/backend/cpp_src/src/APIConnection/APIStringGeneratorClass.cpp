@@ -39,61 +39,79 @@ std::string APIStringGenerator::RestAPIQueryTypeGenerate(const QueryData& query)
         case 1:
             api_path_appended << APIStringGenerator::string_locale_append(query) << query.start_date << "?adjusted=" <<
             query.adjusted << "&apiKey=" << query.api_key;
+            break;
         case 2:
             api_path_appended << APIStringGenerator::string_asset_append(query) << "/" << query.date_of_interest <<
              "?adjusted" << query.adjusted << "&apiKey=" << query.api_key;
+             break;
         case 3:
             api_path_appended << APIStringGenerator::string_asset_append(query) << "/prev?adjusted" << query.adjusted
             << "&apiKey=" << query.api_key;
+            break;
         case 4:
             api_path_appended << APIStringGenerator::string_asset_append(query) << "/limit=" << query.limit <<
              "&apiKey=" << query.api_key;
+             break;
         case 5:
             api_path_appended << APIStringGenerator::string_asset_append(query) << "?apiKey=" << query.api_key;
+            break;
         // Last Trade Crypto Pair
         case 6:
             api_path_appended << query.asset_name.substr(0,3) << "/" << query.asset_name.substr(3,3) << "?apiKey=" << query.api_key;
+            break;
         case 7:
             api_path_appended << APIStringGenerator::string_asset_append(query) << "/limit=" << query.limit
             << "&apiKey=" << query.api_key;
+            break;
         case 8:
             api_path_appended << APIStringGenerator::string_asset_append(query) << "?apiKey=" << query.api_key;
+            break;
         // Last Quote Currency Pair
         case 9:
             api_path_appended << query.asset_name.substr(0,3) << "/" << query.asset_name.substr(3,3) << "?apiKey=" << query.api_key;
+            break;
         // Real Time Currency Conversion
         case 10:
             api_path_appended << query.asset_name.substr(0,3) << "/" << query.asset_name.substr(3,3) << "?amount=" <<
             query.amount_currency << "&apiKey=" << query.api_key;
+            break;
         //  Snapshots Option Contract
         case 11:
             api_path_appended << query.asset_ticker << "/" << query.asset_name << "?apiKey=" << query.api_key;
+            break;
         // Snapshots Option Chain
         case 12:
             api_path_appended << query.asset_ticker << "?limit=" << query.limit << "&apiKey=" << query.api_key;
+            break;
         // Snapshots Universal Snapshots
         case 13:
+            break;
             // Implement Logic to handle the portfolio class
         // Does not work for FX
         case 14:
             api_path_appended << APIStringGenerator::string_locale_append(query) << "tickers?"<< query.asset_name
             << "&apiKey=" << query.api_key;
+            break;
         // Ticker Events
         case 15:
             api_path_appended << APIStringGenerator::string_locale_append(query) << query.gainers_losers << "?apiKey=" <<
             query.api_key; 
+            break;
         case 16:
             api_path_appended << APIStringGenerator::string_locale_append(query) << "tickers/"
             << APIStringGenerator::string_asset_append(query) <<"?apiKey=" <<
             query.api_key; 
+            break;
         case 17:
             api_path_appended << APIStringGenerator::string_asset_append(query) << query.asset_name << query.limit << "?apiKey=" <<
             query.api_key; 
+            break;
         // Still Need to develop support for the other 17 API requests
         default:
             api_path_appended << APIStringGenerator::string_asset_append(query) << "range/" << query.time_multiplier << "/" << 
             query.time_span << "/" << query.start_date << "/" << query.end_date << "?adjusted" << query.adjusted << "&sort="
-            << query.sort << "&apiKey=" << query.api_key;;
+            << query.sort << "&apiKey=" << query.api_key;
+            break;
     }    
     return api_path_appended.str();
 

@@ -1,83 +1,147 @@
 #include "../../headers/AssetClasses/PortfolioClass.h"
-#include <random>
-#include <algorithm>
+#include <iostream>
+#include <Eigen/Dense>
 
-// ✅ Add Asset Series to Portfolio
-void Portfolio::addAssetSeries(const TimeSeries<std::shared_ptr<Asset>>& series, double weight) {
+// ✅ Add entire time series to portfolio
+void Portfolio::addStockSeries(const TimeSeries<std::shared_ptr<Stock>>& series, double weight) {
+    stock_series = series;
     for (const auto& asset : series.getData()) {
-        portfolio_series.addAsset(asset);
         asset_weights[asset->getTicker()] = weight;
     }
 }
-// ✅ Compute Portfolio Expected Return from Time-Series
+
+void Portfolio::addOptionSeries(const TimeSeries<std::shared_ptr<Option>>& series, double weight) {
+    option_series = series;
+    for (const auto& asset : series.getData()) {
+        asset_weights[asset->getTicker()] = weight;
+    }
+}
+
+void Portfolio::addCryptoSeries(const TimeSeries<std::shared_ptr<Crypto>>& series, double weight) {
+    crypto_series = series;
+    for (const auto& asset : series.getData()) {
+        asset_weights[asset->getTicker()] = weight;
+    }
+}
+
+void Portfolio::addForexSeries(const TimeSeries<std::shared_ptr<Forex>>& series, double weight) {
+    forex_series = series;
+    for (const auto& asset : series.getData()) {
+        asset_weights[asset->getTicker()] = weight;
+    }
+}
+
+/*
+// ✅ Compute expected return using all time series
 double Portfolio::computeExpectedReturn() const {
     double total_return = 0.0;
-    for (const auto& asset : portfolio_series.getData()) {
-        total_return += asset_weights.at(asset->getTicker()) * asset->getExpectedReturn();
-    }
+
+    auto compute_return = [&](const auto& series) {
+        for (const auto& asset : series.getData()) {
+            total_return += asset_weights.at(asset->getTicker()) * asset->getExpectedReturn();
+        }
+    };
+
+    compute_return(stock_series);
+    compute_return(option_series);
+    compute_return(crypto_series);
+    compute_return(forex_series);
+
     return total_return;
 }
 
-// ✅ Compute Rolling Portfolio Volatility
-double Portfolio::computeVolatility(int rolling_window) const {
-    int n = portfolio_series.size();
-    if (n < rolling_window) return 0.0;
+// ✅ Compute volatility using covariance across time series
+double Portfolio::computeVolatility() const {
+    int num_assets = stock_series.getSize() + option_series.getSize() + crypto_series.getSize() + forex_series.getSize();
+    
+    Eigen::MatrixXd cov_matrix(num_assets, num_assets);
+    Eigen::VectorXd weights(num_assets);
+    int index = 0;
 
-    Eigen::MatrixXd cov_matrix(n, n);
-    Eigen::VectorXd weights(n);
+    auto fill_matrices = [&](const auto& series) {
+        for (int i = 0; i < series.getSize(); i++) {
+            auto asset_i = series.getAsset(i);
+            weights(index) = asset_weights.at(asset_i->getTicker());
 
-    for (int i = 0; i < n; ++i) {
-        weights(i) = asset_weights.at(portfolio_series[i]->getTicker());
-        for (int j = 0; j < n; ++j) {
-            cov_matrix(i, j) = portfolio_series[i]->computeCovariance(*portfolio_series[j]);
+            for (int j = 0; j < series.getSize(); j++) {
+                auto asset_j = series.getAsset(j);
+                cov_matrix(index, j) = asset_i->computeCovariance(*asset_j);
+            }
+            index++;
         }
-    }
+    };
 
-    return std::sqrt(weights.transpose() * cov_matrix * weights);
+    fill_matrices(stock_series);
+    fill_matrices(option_series);
+    fill_matrices(crypto_series);
+    fill_matrices(forex_series);
+
+    double portfolio_variance = weights.transpose() * cov_matrix * weights;
+    return std::sqrt(portfolio_variance);
 }
 
-// ✅ Compute Sharpe Ratio with Rolling Volatility
-double Portfolio::computeSharpeRatio(int rolling_window) const {
-    double expected_return = computeExpectedReturn();
-    double volatility = computeVolatility(rolling_window);
-    return (expected_return - risk_free_rate) / volatility;
-}
-
-// ✅ Optimize Portfolio Weights using Markowitz MPT
+// ✅ Optimize portfolio weights using time series data
 void Portfolio::optimizePortfolio() {
-    int n = portfolio_series.size();
-    Eigen::MatrixXd cov_matrix(n, n);
-    Eigen::VectorXd returns(n);
-    Eigen::VectorXd weights(n);
+    int num_assets = stock_series.getSize() + option_series.getSize() + crypto_series.getSize() + forex_series.getSize();
 
-    for (int i = 0; i < n; ++i) {
-        returns(i) = portfolio_series[i]->getExpectedReturn();
-        weights(i) = asset_weights.at(portfolio_series[i]->getTicker());
-        for (int j = 0; j < n; ++j) {
-            cov_matrix(i, j) = portfolio_series[i]->computeCovariance(*portfolio_series[j]);
+    Eigen::VectorXd expected_returns(num_assets);
+    Eigen::MatrixXd cov_matrix(num_assets, num_assets);
+    int index = 0;
+
+    auto fill_matrices = [&](const auto& series) {
+        for (int i = 0; i < series.getSize(); i++) {
+            auto asset_i = series.getAsset(i);
+            expected_returns(index) = asset_i->getExpectedReturn();
+
+            for (int j = 0; j < series.getSize(); j++) {
+                auto asset_j = series.getAsset(j);
+                cov_matrix(index, j) = asset_i->computeCovariance(*asset_j);
+            }
+            index++;
         }
-    }
+    };
 
-    Eigen::VectorXd optimal_weights = cov_matrix.inverse() * returns;
-    optimal_weights /= optimal_weights.sum(); // Normalize weights
+    fill_matrices(stock_series);
+    fill_matrices(option_series);
+    fill_matrices(crypto_series);
+    fill_matrices(forex_series);
 
-    for (int i = 0; i < n; ++i) {
-        asset_weights[portfolio_series[i]->getTicker()] = optimal_weights(i);
-    }
+    // Solve for optimal weights using quadratic programming
+    Eigen::VectorXd optimal_weights = cov_matrix.inverse() * expected_returns;
+    optimal_weights /= optimal_weights.sum(); // Normalize weights to sum to 1
+
+    index = 0;
+    auto assign_weights = [&](const auto& series) {
+        for (int i = 0; i < series.getSize(); i++) {
+            auto asset = series.getAsset(i);
+            asset_weights[asset->getTicker()] = optimal_weights(index);
+            index++;
+        }
+    };
+
+    assign_weights(stock_series);
+    assign_weights(option_series);
+    assign_weights(crypto_series);
+    assign_weights(forex_series);
 }
 
-// ✅ Load Portfolio Time-Series from Database
-void Portfolio::loadFromDatabase() {
-    std::cout << "🔄 Loading portfolio data from database..." << std::endl;
-    // Load historical time-series of assets
-}
-
-// ✅ Display Portfolio Summary
+// ✅ Display portfolio asset weights and expected return
 void Portfolio::displayPortfolio() const {
-    std::cout << "📊 Portfolio Summary:\n";
-    for (const auto& asset : portfolio_series.getData()) {
-        std::cout << "✅ " << asset->getTicker() << " | Weight: " << asset_weights.at(asset->getTicker()) * 100 
-                  << "% | Expected Return: " << asset->getExpectedReturn() << "\n";
-    }
-    std::cout << "⚡ Sharpe Ratio: " << computeSharpeRatio(30) << "\n";
+    std::cout << "Portfolio Composition:\n";
+
+    auto print_series = [&](const auto& series) {
+        for (const auto& asset : series.getData()) {
+            std::cout << asset->getTicker() << ": " << (asset_weights.at(asset->getTicker()) * 100)
+                      << "% | Expected Return: " << asset->getExpectedReturn() << "\n";
+        }
+    };
+
+    print_series(stock_series);
+    print_series(option_series);
+    print_series(crypto_series);
+    print_series(forex_series);
+
+    std::cout << "Portfolio Expected Return: " << computeExpectedReturn() << "\n";
+    std::cout << "Portfolio Volatility: " << computeVolatility() << "\n";
 }
+*/

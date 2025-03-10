@@ -1,12 +1,9 @@
-#ifndef PORTFOLIO_H
-#define PORTFOLIO_H
+#ifndef PORTFOLIOCLASS_H
+#define PORTFOLIOCLASS_H
 
 #include <unordered_map>
 #include <memory>
-#include <iostream>
-#include <Eigen/Dense>
 #include "TimeSeriesClass.h"
-#include "AssetClass.h"
 #include "StockClass.h"
 #include "OptionClass.h"
 #include "CryptoClass.h"
@@ -14,22 +11,26 @@
 
 class Portfolio {
 private:
-    std::unordered_map<std::string, double> asset_weights;
-    double risk_free_rate = 0.02;
+    std::unordered_map<std::string, double> asset_weights;  // Stores asset tickers and their weights
+
+    TimeSeries<std::shared_ptr<Stock>> stock_series;
+    TimeSeries<std::shared_ptr<Option>> option_series;
+    TimeSeries<std::shared_ptr<Crypto>> crypto_series;
+    TimeSeries<std::shared_ptr<Forex>> forex_series;
 
 public:
-    TimeSeries<std::shared_ptr<Asset>> portfolio_series;  // ✅ Now properly recognized
-
     Portfolio() = default;
 
-    void addAssetSeries(const TimeSeries<std::shared_ptr<Asset>>& series, double weight);
+    // ✅ Add entire TimeSeries instead of individual assets
+    void addStockSeries(const TimeSeries<std::shared_ptr<Stock>>& series, double weight);
+    void addOptionSeries(const TimeSeries<std::shared_ptr<Option>>& series, double weight);
+    void addCryptoSeries(const TimeSeries<std::shared_ptr<Crypto>>& series, double weight);
+    void addForexSeries(const TimeSeries<std::shared_ptr<Forex>>& series, double weight);
 
-    double computeExpectedReturn() const;
-    double computeVolatility(int rolling_window) const;
-    double computeSharpeRatio(int rolling_window) const;
-    void optimizePortfolio();
-    void loadFromDatabase();
-    void displayPortfolio() const;
+    // double computeExpectedReturn() const;
+    // double computeVolatility() const;
+    // void optimizePortfolio();
+    // void displayPortfolio() const;
 };
 
-#endif // PORTFOLIO_H
+#endif // PORTFOLIOCLASS_H

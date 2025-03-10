@@ -29,16 +29,16 @@ public:
     bool insertAssetData(const std::vector<AssetData>& assets);
     bool deleteAssetData(const std::string& ticker, const std::string& date);
     std::vector<AssetData> fetchAssetData();
-    std::vector<AssetData> queryAssetData(const std::string& ticker);
+    //std::vector<AssetData> queryAssetData(const std::string& ticker);
     std::vector<AssetData> queryAssetData(const std::string& ticker,
                                           const std::string& startDate,
                                           const std::string& endDate, 
                                           int limit = 1000, 
-                                          bool ascending = true);
+                                          bool ascending = true) const;
 
     // 🔹 CSV Backup & Restore
-    void exportToCSV();
-    void importFromCSV();
+    void exportToCSV(const std::string& csvFile);
+    void importFromCSV(const std::string& csvFile);
 };
 
 #endif // DATABASECLASS_H
