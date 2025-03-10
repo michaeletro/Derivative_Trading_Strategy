@@ -1,12 +1,11 @@
 #include <iostream>
-#include "APIConnection/APIConnectionClass.h"
-#include "APIConnection/APIStringGeneratorClass.h"
+#include "../headers/APIConnection/APIConnectionClass.h"
 
 int main() {
     // ✅ Create QueryData object
     // ✅ Create a `QueryData` instance with real API parameters
     QueryData query = {
-        QueryAsset::STOCKS,           // Asset Type
+        QueryAsset::STOCKS,           // Asset jmghn Type
         RestAPIQueryType::AGGREGATES,     // API Query Type
         WebSocketQueryType::NONE,     // WebSocket Query Type (not used)
         "https://api.polygon.io",    // Base API URL

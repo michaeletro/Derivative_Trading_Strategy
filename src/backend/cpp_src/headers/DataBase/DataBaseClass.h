@@ -30,6 +30,11 @@ public:
     bool deleteAssetData(const std::string& ticker, const std::string& date);
     std::vector<AssetData> fetchAssetData();
     std::vector<AssetData> queryAssetData(const std::string& ticker);
+    std::vector<AssetData> queryAssetData(const std::string& ticker,
+                                          const std::string& startDate,
+                                          const std::string& endDate, 
+                                          int limit = 1000, 
+                                          bool ascending = true);
 
     // 🔹 CSV Backup & Restore
     void exportToCSV();

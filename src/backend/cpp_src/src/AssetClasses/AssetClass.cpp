@@ -1,4 +1,4 @@
-#include "../../headers/Assets/Asset.h"
+#include "../../headers/AssetClasses/AssetClass.h"
 
 // ✅ Print Asset Data
 void Asset::print() const {

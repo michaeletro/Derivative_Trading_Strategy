@@ -18,6 +18,12 @@ struct AssetData {
     float high_price;
     float low_price;
     uint64_t volume;
+    float strike_price = 100.00;
+    float implied_volatility = 0.00;
+    std::string option_type = "call";
+    bool is_call = true;
+    std::string expiry_date = "2024-01-09";
+
 };
 
 // Enum to specify different query types
@@ -161,7 +167,7 @@ constexpr std::string_view getEndPoint(RestAPIQueryType query_type) {
 };
 
 constexpr int getEndPointIndex(RestAPIQueryType query_type){
-    for (short i = 0; i < firstEndPointMap.size(); i++){
+    for (long unsigned int i = 0; i < firstEndPointMap.size(); i++){
         if (firstEndPointMap[i].type == query_type){
             return i;
         }

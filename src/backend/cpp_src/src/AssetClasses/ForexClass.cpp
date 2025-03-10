@@ -1,4 +1,4 @@
-#include "../../headers/Assets/Forex.h"
+#include "../../headers/AssetClasses/ForexClass.h"
 
 // ✅ Print Forex Data
 void Forex::print() const {

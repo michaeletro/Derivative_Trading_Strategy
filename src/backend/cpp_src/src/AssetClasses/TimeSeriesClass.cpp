@@ -1,4 +1,4 @@
-#include "../../headers/TimeSeries/TimeSeries.h"
+#include "../../headers/AssetClasses/TimeSeriesClass.h"
 
 // ✅ Load Data from Database
 template <typename T>
@@ -12,7 +12,21 @@ void TimeSeries<T>::loadFromDatabase(DataBaseClass* db, const std::string& ticke
 
     auto results = db->queryAssetData(ticker, startDate, endDate, limit, ascending);
     for (const auto& row : results) {
-        data.push_back(T(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
+        if constexpr (std::is_same_v<T, std::shared_ptr<Stock>>) {
+            data.push_back(std::make_shared<Stock>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
+        } 
+        else if constexpr (std::is_same_v<T, std::shared_ptr<Option>>) {
+            data.push_back(std::make_shared<Option>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume, row.strike_price, row.implied_volatility, row.option_type, row.is_call));
+        } 
+        else if constexpr (std::is_same_v<T, std::shared_ptr<Crypto>>) {
+            data.push_back(std::make_shared<Crypto>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
+        } 
+        else if constexpr (std::is_same_v<T, std::shared_ptr<Forex>>) {
+            data.push_back(std::make_shared<Forex>(row.ticker, row.date, row.open_price, row.close_price, row.high_price, row.low_price, row.volume));
+        } 
+        else {
+            static_assert(!sizeof(T), "Unsupported asset type in TimeSeries.");
+        }
     }
 }
 
@@ -21,7 +35,7 @@ template <typename T>
 double TimeSeries<T>::calculateAverageClosingPrice() const {
     if (data.empty()) return 0.0;
     return std::accumulate(data.begin(), data.end(), 0.0, 
-        [](double sum, const T& asset) { return sum + asset.getClosePrice(); }) / data.size();
+        [](double sum, const T& asset) { return sum + asset->getClosePrice(); }) / data.size();
 }
 
 // ✅ Find Maximum Closing Price
@@ -29,7 +43,7 @@ template <typename T>
 double TimeSeries<T>::findMaxClose() const {
     if (data.empty()) return 0.0;
     return std::max_element(data.begin(), data.end(), 
-        [](const T& a, const T& b) { return a.getClosePrice() < b.getClosePrice(); })->getClosePrice();
+        [](const T& a, const T& b) { return a->getClosePrice() < b->getClosePrice(); })->get()->getClosePrice();
 }
 
 // ✅ Find Minimum Closing Price
@@ -37,34 +51,31 @@ template <typename T>
 double TimeSeries<T>::findMinClose() const {
     if (data.empty()) return 0.0;
     return std::min_element(data.begin(), data.end(), 
-        [](const T& a, const T& b) { return a.getClosePrice() < b.getClosePrice(); })->getClosePrice();
+        [](const T& a, const T& b) { return a->getClosePrice() < b->getClosePrice(); })->get()->getClosePrice();
 }
 
-// ✅ Calculate Volatility (Standard Deviation of Closing Prices)
+// ✅ Calculate Volatility
 template <typename T>
 double TimeSeries<T>::calculateVolatility() const {
     if (data.size() < 2) return 0.0;
-
     double avg = calculateAverageClosingPrice();
     double variance = std::accumulate(data.begin(), data.end(), 0.0,
         [avg](double sum, const T& asset) {
-            double diff = asset.getClosePrice() - avg;
+            double diff = asset->getClosePrice() - avg;
             return sum + diff * diff;
         }) / data.size();
 
     return std::sqrt(variance);
 }
 
-// ✅ Calculate Moving Average (Simple Moving Average)
+// ✅ Calculate Moving Average
 template <typename T>
 double TimeSeries<T>::calculateMovingAverage(int period) const {
-    if (data.size() < period) return 0.0;
-
+    if (static_cast<size_t>(period) > data.size()) return 0.0;
     double sum = 0.0;
-    for (size_t i = data.size() - period; i < data.size(); ++i) {
-        sum += data[i].getClosePrice();
+    for (size_t i = data.size() - period; i < data.size(); i++) {
+        sum += data[i]->getClosePrice();
     }
-
     return sum / period;
 }
 
@@ -73,12 +84,13 @@ template <typename T>
 void TimeSeries<T>::printTimeSeries() const {
     std::cout << "\n📊 Time Series Data (" << data.size() << " records):\n";
     for (const auto& asset : data) {
-        asset.print();
+        asset->print();
     }
 }
 
 // ✅ Explicit Instantiations
-template class TimeSeries<Stock>;
-template class TimeSeries<Option>;
-template class TimeSeries<Crypto>;
-template class TimeSeries<Forex>;
+template class TimeSeries<std::shared_ptr<Asset>>;
+template class TimeSeries<std::shared_ptr<Stock>>;
+template class TimeSeries<std::shared_ptr<Option>>;
+template class TimeSeries<std::shared_ptr<Crypto>>;
+template class TimeSeries<std::shared_ptr<Forex>>;

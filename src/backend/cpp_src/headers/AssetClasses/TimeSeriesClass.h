@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cmath>
 #include "../DataBase/DataBaseClass.h"
-#include "../Assets/Asset.h"
 
 template <typename T>
 class TimeSeries {
@@ -33,6 +32,12 @@ public:
 
     void sortByDate(bool ascending = true);
     void printTimeSeries() const;
+
+    // ✅ Getter for Time Series Data
+    const std::vector<T>& getData() const { return data; }
 };
+
+// ✅ Now include Portfolio after defining TimeSeries
+#include "PortfolioClass.h"
 
 #endif // TIMESERIES_H

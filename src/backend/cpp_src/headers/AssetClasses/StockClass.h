@@ -1,7 +1,7 @@
 #ifndef STOCK_H
 #define STOCK_H
 
-#include "Asset.h"
+#include "AssetClass.h"
 
 class Stock : public Asset {
 private:
@@ -18,11 +18,7 @@ public:
         return (dividend_yield / 100.0) * shares_owned * close_price;
     }
 
-    void print() const override {
-        std::cout << "📈 Stock: ";
-        Asset::print();
-        std::cout << " | Dividend Yield: " << dividend_yield << "%\n";
-    }
+    void print() const override;
 };
 
 #endif // STOCK_H

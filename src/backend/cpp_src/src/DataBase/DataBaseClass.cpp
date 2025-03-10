@@ -203,3 +203,33 @@ std::vector<std::vector<std::string>> DataBaseClass::queryAssetData(const std::s
     sqlite3_finalize(stmt);
     return results;  // ✅ Return results at the end
 }
+
+std::vector<std::vector<std::string>> DataBaseClass::queryAssetData(const std::string& ticker, const std::string& startDate,
+                                          const std::string& endDate, int limit = 1000, bool ascending = true){
+    std::vector<std::vector<std::string>> results;
+    std::string sql = "SELECT * FROM asset_data WHERE ticker = ? AND date BETWEEN ? AND ? "
+                      "ORDER BY date " + std::string(ascending ? "ASC" : "DESC") + " LIMIT ?;";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "❌ Failed to prepare statement: " << sqlite3_errmsg(db) << std::endl;
+        return results;
+    }
+    sqlite3_bind_text(stmt, 1, ticker.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_test(stmt, 2, startDate.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, endDate.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, limit);
+
+    while(sqlite3_step(stmt) == SQLITE_ROW) {
+        AssetData data;
+        data.ticker= reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));;
+        data.date = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        data.open_price = sqlite3_column_double(stmt, 3);
+        data.close_price = sqlite3_column_double(stmt, 4);
+        data.high_price = sqlite3_column_double(stmt, 5);
+        data.low_price = sqlite3_column_double(stmt, 6);
+        data.volume = sqlite3_column_douuble(stmt, 7);
+        results.push_back(data);
+    }
+    sqlite3_finalize(stmt);
+    return results;
+}
