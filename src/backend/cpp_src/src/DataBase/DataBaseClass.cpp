@@ -175,6 +175,12 @@ void DataBaseClass::executeSQL(const std::string& sql) {
         throw std::runtime_error("SQL Error: " + error);
     }
 }
+std::vector<AssetData> DataBaseClass::queryAssetData(const std::string& ticker){
+    // Implement Logic to handle the portfolio class
+    std::cout << "❌ Error: queryAssetData with ticker not implemented yet." << ticker << std::endl;
+    return std::vector<AssetData>();
+    //return std::vector<AssetData>();
+}
 std::vector<AssetData> DataBaseClass::queryAssetData(const std::string& ticker, const std::string& startDate,
     const std::string& endDate, int limit, bool ascending) const {
     std::vector<AssetData> results;
@@ -196,7 +202,7 @@ std::vector<AssetData> DataBaseClass::queryAssetData(const std::string& ticker, 
     if (!startDate.empty()) sqlite3_bind_text(stmt, paramIndex++, startDate.c_str(), -1, SQLITE_STATIC);
     if (!endDate.empty()) sqlite3_bind_text(stmt, paramIndex++, endDate.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_int(stmt, paramIndex++, limit);
-    
+
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         AssetData data;
         data.id = sqlite3_column_int(stmt, 0);

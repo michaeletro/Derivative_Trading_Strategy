@@ -29,7 +29,7 @@ public:
     bool insertAssetData(const std::vector<AssetData>& assets);
     bool deleteAssetData(const std::string& ticker, const std::string& date);
     std::vector<AssetData> fetchAssetData();
-    //std::vector<AssetData> queryAssetData(const std::string& ticker);
+    std::vector<AssetData> queryAssetData(const std::string& ticker);
     std::vector<AssetData> queryAssetData(const std::string& ticker,
                                           const std::string& startDate,
                                           const std::string& endDate, 
