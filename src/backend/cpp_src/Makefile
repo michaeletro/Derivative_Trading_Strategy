@@ -1,6 +1,7 @@
 # Compiler
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -Iheaders -Isrc -I/usr/include/eigen3
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -Iheaders -Isrc -I/usr/include/eigen3 -I/usr/include/websocketpp -DCROW_ENABLE_BOOST -I/usr/include/boost
+CXXFLAGS += -DCROW_ENABLE_BOOST -I/usr/include/boost
 
 # Directories
 SRC_DIR = src
@@ -9,7 +10,10 @@ BIN_DIR = bin
 INCLUDE_DIR = headers
 
 # Libraries
-LIBS = -lsqlite3 -lcurl
+LIBS = -lsqlite3 -lcurl -lboost_system -lpthread -lboost_thread
+LIBS += -lssl -lcrypto -lboost_filesystem -lboost_system -L/usr/local/lib
+CPPFLAGS += -I/usr/include/websocketpp
+
 
 # Find all .cpp files in subdirectories
 SRCS = $(shell find $(SRC_DIR) -name "*.cpp")
