@@ -32,7 +32,7 @@ document.addEventListener("DOMContentLoaded", function () {
         let price = 100;
         for (let i = 0; i < count; i++) {
             let open = price;
-            let close = open + (Math.random() * 100 - 50);
+            let close = open + (Math.random() * 20 - 5);
             let high = Math.max(open, close) + Math.random()*20;
             let low = Math.min(open, close) - Math.random() *20;
             data.push({ open, close, high, low });

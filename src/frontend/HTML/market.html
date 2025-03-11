@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TradeZone - Market</title>
-    <link rel="stylesheet" href="styles.css">
-    <script defer src="script.js"></script>
-    <script defer src="market.js"></script>
+    <link rel="stylesheet" href="../CSS/styles.css">
+    <script defer src="../JavaScript/script.js"></script>
+    <script defer src="../JavaScript/market.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
@@ -77,27 +77,8 @@
             </section>
             <section class="glass">
                 <h2>📈 Top Gainers</h2>
-                <ul id="top-gainers-list"></ul>
-                <section class="glass">
-                    <h2>📉 Top Losers</h2>
-                    <ul id="top-losers-list"></ul>
-                    <script src="market.js"></script>
-                    <script>
-                        // Load market data
-                        document.getElementById('market-container').innerHTML = localStorage.getItem('marketData') || 'No market data available.';
-                    </script>
-            </section>
-            <section class="glass">
                 <h2>📉 Top Losers</h2>
-                <ul id="top-losers-list"></ul>
-            </section>
-            <section class="glass">
-                <h2>🔔 Alerts</h2>
-                <p>Set up alerts for price changes and news.</p>
-            </section>
-            <section class="glass">
-                <h2>💡 Market Insights</h2>
-                <p>Stay updated with the latest market trends and insights.</p>
+                <ul id="top-gainers-list"></ul>
             </section>
         </section>
         <section class="glass">
