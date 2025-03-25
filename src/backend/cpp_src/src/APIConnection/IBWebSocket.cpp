@@ -42,18 +42,18 @@ void IBWebSocket::close() {
     }
 }
 
-void IBWebSocket::onOpen(connection_hdl hdl) {
+void IBWebSocket::onOpen([[maybe_unused]] connection_hdl hdl) {
     std::cout << "WebSocket Connection Established ✅" << std::endl;
 }
 
-void IBWebSocket::onMessage(connection_hdl hdl, client::message_ptr msg) {
+void IBWebSocket::onMessage([[maybe_unused]] connection_hdl hdl, client::message_ptr msg) {
     std::cout << "Received message: " << msg->get_payload() << std::endl;
 }
 
-void IBWebSocket::onClose(connection_hdl hdl) {
+void IBWebSocket::onClose([[maybe_unused]] connection_hdl hdl) {
     std::cout << "WebSocket Connection Closed ❌" << std::endl;
 }
 
-void IBWebSocket::onFail(connection_hdl hdl) {
+void IBWebSocket::onFail([[maybe_unused]] connection_hdl hdl) {
     std::cout << "WebSocket Connection Failed ❌" << std::endl;
 }
