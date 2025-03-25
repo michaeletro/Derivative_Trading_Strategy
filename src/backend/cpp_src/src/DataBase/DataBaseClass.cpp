@@ -23,8 +23,10 @@ DataBaseClass::DataBaseClass(const std::string& db_path, const std::string& csv_
         return;
     }
 
-    // Create table if it doesn't exist
-    executeQuery("CREATE TABLE IF NOT EXISTS asset_data (id INTEGER PRIMARY KEY, ticker TEXT, date TEXT, open_price REAL, close_price REAL, high_price REAL, low_price REAL, volume REAL);");
+    std::cout << "✅ Database opened successfully." << std::endl;
+
+
+
 
     if (!dbExists || isDatabaseEmpty()) {
         std::cout << "🔄 Restoring database from CSV: " << csv_backup << std::endl;
@@ -45,8 +47,12 @@ DataBaseClass::~DataBaseClass() {
 }
 
 bool DataBaseClass::isDatabaseEmpty() {
-    std::string query = "SELECT COUNT(*) FROM asset_data;";
+    std::string query = "SELECT COUNT(*) FROM assets;";
     sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "❌ Error preparing SQL statement: " << sqlite3_errmsg(db) << std::endl;
+        return true; // Assume empty if error occurs
+    }
 
     if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -156,33 +162,92 @@ bool DataBaseClass::addAssetData(const AssetData& asset) {
         << asset.high_price << ", " << asset.low_price << ", " << asset.volume << ");";    
         return executeQuery(oss.str());
 }
-
+bool DataBaseClass::insertAssetData(const std::vector<AssetData>& assets) {
+    for (const auto& asset : assets) {
+        if (!addAssetData(asset)) {
+            std::cerr << "❌ Error inserting asset data: " << asset.ticker << std::endl;
+            return false;
+        }
+    }
+    return true;
+}
+bool DataBaseClass::deleteAssetData(const std::string& ticker, const std::string& date) {
+    std::ostringstream oss;
+    oss << "DELETE FROM asset_data WHERE ticker = '" << ticker << "' AND date = '" << date << "';";
+    return executeQuery(oss.str());
+}
 bool DataBaseClass::executeQuery(const std::string& query) {
     char* errMsg = nullptr;
     if (sqlite3_exec(db, query.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "SQL error: " << errMsg << std::endl;
+        std::cerr << "❌ SQL Error: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         return false;
     }
     return true;
 }
 
-void DataBaseClass::executeSQL(const std::string& sql) {
+bool DataBaseClass::createTables() {
+    const std::string assetTable = R"(
+        CREATE TABLE IF NOT EXISTS asset_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            asset_type TEXT NOT NULL,
+            name TEXT,
+            exchange TEXT,
+            sector TEXT,
+            UNIQUE(ticker, id)
+        );
+    )";
+
+    const std::string stockTable = R"(
+        CREATE TABLE IF NOT EXISTS stock_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT,
+            open_price REAL,
+            close_price REAL,
+            high_price REAL,
+            low_price REAL,
+            volume INTEGER,
+            FOREIGN KEY(stock_id) REFERENCES asset_data(asset_id)
+        );
+    )";
+
+    const std::string optionTable = R"(
+        CREATE TABLE IF NOT EXISTS option_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            option_id INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            date TEXT,
+            strike_price REAL,
+            open_price REAL,
+            close_price REAL,
+            high_price REAL,
+            low_price REAL,
+            option_type TEXT,
+            is_call INTEGER,
+            expiry_date TEXT,
+            FOREIGN KEY(option_id) REFERENCES asset_data(asset_id)
+        );
+    )";
+
+    return executeSQL(assetTable) && executeSQL(stockTable) && executeSQL(optionTable);
+}
+bool DataBaseClass::executeSQL(const std::string& sql) {
     char* errMsg = nullptr;
     if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::string error = errMsg;
+        std::cerr << "❌ SQL Error: " << errMsg << std::endl;
         sqlite3_free(errMsg);
-        throw std::runtime_error("SQL Error: " + error);
+        return false;
     }
+    return true;
 }
-std::vector<AssetData> DataBaseClass::queryAssetData(const std::string& ticker){
-    // Implement Logic to handle the portfolio class
-    std::cout << "❌ Error: queryAssetData with ticker not implemented yet." << ticker << std::endl;
-    return std::vector<AssetData>();
-    //return std::vector<AssetData>();
-}
-std::vector<AssetData> DataBaseClass::queryAssetData(const std::string& ticker, const std::string& startDate,
-    const std::string& endDate, int limit, bool ascending) const {
+
+std::vector<AssetData> DataBaseClass::queryAssetData(
+    const std::string& ticker,
+    const std::string& startDate,
+    const std::string& endDate, int limit, bool ascending) const 
+    {
     std::vector<AssetData> results;
     std::string query = "SELECT ticker, date, open, close, high, low, volume FROM assets WHERE ticker = ?";
 
