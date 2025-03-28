@@ -19,8 +19,8 @@ void TimeSeries<T>::loadFromDatabase(DataBaseClass* db, const std::string& ticke
                   std::is_same_v<T, std::shared_ptr<Forex>>) {
         for (const auto& row : results) {
             data.push_back(std::make_shared<typename T::element_type>(
-                row.ticker, row.date, row.open_price, row.close_price, 
-                row.high_price, row.low_price, row.volume
+                row.ticker//, row.date, row.open_price, row.close_price, 
+                //row.high_price, row.low_price, row.volume
             ));
         }
     } else {

@@ -49,6 +49,8 @@ DataBaseClass::~DataBaseClass() {
 bool DataBaseClass::isDatabaseEmpty() {
     std::string query = "SELECT COUNT(*) FROM assets;";
     sqlite3_stmt* stmt;
+    // This is a simple check to see if the database is empty by counting rows in the assets table.
+    // If the table doesn't exist, we assume the database is empty.
     if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
         std::cerr << "❌ Error preparing SQL statement: " << sqlite3_errmsg(db) << std::endl;
         return true; // Assume empty if error occurs
@@ -65,33 +67,130 @@ bool DataBaseClass::isDatabaseEmpty() {
     return true;
 }
 
-void DataBaseClass::exportToCSV(const std::string& csvFile) {
-    std::ofstream file(csvFile);
+void DataBaseClass::exportToCSV(const std::string& csvFile, 
+    [[maybe_unused]] const std::string& db_path, 
+    [[maybe_unused]] const std::string& table_name,
+    [[maybe_unused]] const std::string& date_start,
+    [[maybe_unused]] const std::string& date_end) {
+    // Check if the database is open
+    if (db == nullptr) {
+        std::cerr << "❌ Database is not open!" << std::endl;
+        return;
+    }
+    // Check if the CSV file already exists
+    std::ofstream file(csvFile);    
+    // Check if the file opened successfully for writing 
+    // If not, print an error message and return
+    // This is important to ensure that the file is created or overwritten correctly.
     if (!file.is_open()) {
         std::cerr << "❌ Error opening CSV file for writing!" << std::endl;
         return;
     }
 
-    file << "ticker,date,open_price,close_price,high_price,low_price,volume\n";
+    // Write the header line to the CSV file 
+    // This is important to ensure that the CSV file has a proper header for readability.
+    // The header line contains the names of the columns in the database.
+    // This is important for readability and to ensure that the CSV file can be easily understood.
 
-    std::string query = "SELECT ticker, date, open_price, close_price, high_price, low_price, volume FROM asset_data;";
+    std::ostringstream query;
+    // Depending on the table name, we will select different columns to export
+    // This is important to ensure that we only export the relevant data for the specified table.
+    // The table name is passed as a parameter to the function, allowing for flexibility in exporting different tables.
+    // The query is constructed using a string stream to allow for easy concatenation of strings.
+    switch (table_name) {
+        case "asset_data":
+            query << "SELECT id,ticker,asset_type,name,exchange,sector\n";
+            break;
+        case "stock_data":
+            query << "SELECT id,ticker,date,open_price,close_price,high_price,low_price,volume\n";
+            break;
+        case "option_data":
+            query << "SELECT id,ticker,asset_name,date,strike_price,open_price,close_price,high_price,low_price,option_type,is_call,expiry_date \n";
+            break;
+        case constant expression:
+            /* code */
+            break;
+        default:
+            std::cerr << "❌ Invalid table name!" << std::endl;
+            file.close();
+            return;
+        // This is important to ensure that we are selecting the correct data from the database.
+    }
+    
+    // Construct the SQL query to select data from the specified table
+    std::string combined_query << query << "FROM " << table_name << "\n";
+    // Depending on the table name, we will add different WHERE clauses to filter the data
+    // This is important to ensure that we only export the relevant data for the specified date range.
+    switch (table_name) {
+        case "stock_data":
+            combined_query << "WHERE date > '" << date_start << "' AND date < '" << date_end << "';";
+            break;
+        case "option_data":
+            combined_query << "WHERE date > '" << date_start << "' AND date < '" << date_end << "';";
+            break;
+        case constant expression:
+            /* code */
+            break;
+        default:
+            combined_query << ";";
+            break;
+    }
+    
+    // Prepare the SQL statement
     sqlite3_stmt* stmt;
 
-    if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+    // This is important to ensure that the SQL statement is prepared correctly before executing it.
+    if (sqlite3_prepare_v2(db, combined_query.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            file << sqlite3_column_text(stmt, 0) << ","
-                 << sqlite3_column_text(stmt, 1) << ","
-                 << sqlite3_column_double(stmt, 2) << ","
-                 << sqlite3_column_double(stmt, 3) << ","
-                 << sqlite3_column_double(stmt, 4) << ","
-                 << sqlite3_column_double(stmt, 5) << ","
-                 << sqlite3_column_double(stmt, 6) << "\n";
+            file << sqlite3_column_int(stmt, 0) << ","
+                 << sqlite3_column_text(stmt, 1) << ",";
+            // Depending on the table name, we will write different columns to the CSV file
+            // This is important to ensure that we are exporting the correct data to the CSV file.
+            // The columns are written in the same order as they are selected in the SQL query.
+            switch (table_name) {
+                case "asset_data":
+                    file << sqlite3_column_text(stmt, 2) << ","
+                         << sqlite3_column_text(stmt, 3) << ","
+                         << sqlite3_column_text(stmt, 4) << ","
+                         << sqlite3_column_text(stmt, 5) << "\n";
+                    break;
+                case "stock_data":
+                    file << sqlite3_column_int64(stmt, 2) << ","
+                         << sqlite3_column_double(stmt, 3) << ","
+                         << sqlite3_column_double(stmt, 4) << ","
+                         << sqlite3_column_double(stmt, 5) << ","
+                         << sqlite3_column_double(stmt, 6) << ","
+                         << sqlite3_column_int64(stmt, 7) << "\n";
+                    break;
+                case "option_data":
+                    file << sqlite3_column_text(stmt, 2) << ","
+                         << sqlite3_column_int64(stmt, 3) << ","
+                         << sqlite3_column_double(stmt, 4) << ","
+                         << sqlite3_column_double(stmt, 5) << ","
+                         << sqlite3_column_double(stmt, 6) << ","
+                         << sqlite3_column_double(stmt, 7) << ","
+                         << sqlite3_column_double(stmt, 8) << ","
+                         << sqlite3_column_text(stmt, 9) << ","
+                         << sqlite3_column_int(stmt, 10) << "," 
+                         << sqlite3_column_text(stmt, 11) << << "\n";
+                    break;
+                case constant expression:
+                    /* code */
+                    break;
+                default:
+                    std::cerr << "❌ Invalid table name!" << std::endl;
+                    file.close();
+                    sqlite3_finalize(stmt);
+                    return;
+            }
         }
+        // Finalize the statement to release resources
         sqlite3_finalize(stmt);
     } else {
         std::cerr << "❌ Error exporting to CSV: " << sqlite3_errmsg(db) << std::endl;
     }
-
+    // Close the file after writing
+    // This is important to ensure that all data is written to the file and resources are released.
     file.close();
     std::cout << "✅ Database exported to CSV successfully!" << std::endl;
 }
@@ -203,7 +302,7 @@ bool DataBaseClass::createTables() {
         CREATE TABLE IF NOT EXISTS stock_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL,
-            date TEXT,
+            date INTEGER,
             open_price REAL,
             close_price REAL,
             high_price REAL,
@@ -216,9 +315,9 @@ bool DataBaseClass::createTables() {
     const std::string optionTable = R"(
         CREATE TABLE IF NOT EXISTS option_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            option_id INTEGER NOT NULL,
             ticker TEXT NOT NULL,
-            date TEXT,
+            asset_name TEXT,
+            date INTEGER,
             strike_price REAL,
             open_price REAL,
             close_price REAL,
