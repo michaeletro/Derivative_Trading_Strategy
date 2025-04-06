@@ -36,6 +36,7 @@ DataBaseClass::DataBaseClass(const std::string& db_path, const std::string& csv_
     }
 }
 
+
 // Destructor
 DataBaseClass::~DataBaseClass() {
     if (db) {
