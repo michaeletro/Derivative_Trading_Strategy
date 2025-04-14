@@ -25,9 +25,6 @@ DataBaseClass::DataBaseClass(const std::string& db_path, const std::string& csv_
 
     std::cout << "✅ Database opened successfully." << std::endl;
 
-
-
-
     if (!dbExists || isDatabaseEmpty()) {
         std::cout << "🔄 Restoring database from CSV: " << csv_backup << std::endl;
         importFromCSV(csv_backup);
