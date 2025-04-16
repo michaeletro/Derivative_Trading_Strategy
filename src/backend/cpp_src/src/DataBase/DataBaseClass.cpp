@@ -54,6 +54,7 @@ bool DataBaseClass::isDatabaseEmpty() {
         return true; // Assume empty if error occurs
     }
 
+    
     if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             int count = sqlite3_column_int(stmt, 0);
