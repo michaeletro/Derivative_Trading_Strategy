@@ -6,6 +6,9 @@
 #include <numeric>
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <sstream>
+#include <ctime>
 #include "../DataBase/DataBaseClass.h"
 #include "AssetClass.h"
 
@@ -25,9 +28,9 @@ public:
     void addAsset(const T& asset) { data.push_back(asset); }
     void addAsset(T&& asset) { data.push_back(std::move(asset)); }
 
-    void loadFromDatabase(DataBaseClass* db, const std::string& ticker, 
-                          const std::string& startDate = "", const std::string& endDate = "", 
-                          int limit = 1000, bool ascending = true);
+    void loadFromDatabase(DataBaseClass* db, const std::string& table_name, const std::string& ticker, 
+        uint64_t startDate, uint64_t endDate, 
+        int limit = 1000, bool ascending = true);
 
     int size() const { return data.size(); }  // ✅ Added size() method
 
@@ -45,6 +48,7 @@ public:
     double findMaxClose() const;
     double findMinClose() const;
     double calculateMovingAverage(int period) const;
+    std::string formatDate(uint64_t date) const;
 
     void sortByDate(bool ascending = true);
     void printTimeSeries() const;

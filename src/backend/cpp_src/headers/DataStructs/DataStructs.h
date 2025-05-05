@@ -10,80 +10,103 @@
 
 // Struct to store asset data
 struct AssetData {
+    int id; // Unique identifier for the asset
     std::string ticker;
     float open_price;
     float close_price;
     float high_price;
     float low_price;
     uint64_t volume;
+    uint64_t date; // Timestamp of the data
 };
-struct StockData {
-    std::string stock_id; // Unique identifier for the stock
-    AssetData asset_data;
+struct StockData : public AssetData {
     std::string stock_name; // Name of the stock
     std::string exchange; // Exchange where the stock is listed
     std::string sector; // Sector of the stock
+
+        // Constructor that extends asset data
+    StockData(const AssetData& asset_data,
+            std::string stock_name,
+            std::string exchange,
+            std::string sector)
+     : AssetData(asset_data), 
+       stock_name(stock_name), 
+       exchange(exchange), 
+       sector(sector) {}
 };
-struct BondData {
-    std::string bond_id; // Unique identifier for the bond
-    AssetData asset_data;
+// Not Supported
+struct BondData : public AssetData {
     std::string bond_name; // Name of the bond
     std::string issuer; // Issuer of the bond
     float coupon_rate; // Coupon rate of the bond
     std::string maturity_date; // Maturity date of the bond
 };
-struct ETFData {
-    std::string etf_id; // Unique identifier for the ETF
-    AssetData asset_data;
+// Not Supported
+struct ETFData : public AssetData {
     std::string etf_name; // Name of the ETF
     std::string underlying_index; // Underlying index of the ETF
     float expense_ratio; // Expense ratio of the ETF
 };
-struct MutualFundData {
-    std::string mutual_fund_id; // Unique identifier for the mutual fund
-    AssetData asset_data;
+// Not Supported
+struct MutualFundData : public AssetData {
     std::string mutual_fund_name; // Name of the mutual fund
     std::string fund_family; // Fund family of the mutual fund
     float expense_ratio; // Expense ratio of the mutual fund
 };
-struct CommodityData {
-    std::string commodity_id; // Unique
-    AssetData asset_data;
+// Not Supported
+struct CommodityData : public AssetData {
     std::string commodity_name; // Name of the commodity
     std::string commodity_type; // Type of the commodity (e.g., gold, oil)
     float spot_price; // Current spot price of the commodity
     std::string unit; // Unit of measurement (e.g., ounces, barrels)
 };
-
-
-struct ForexData {
-    std::string forex_id; // Unique identifier for the forex pair
-    AssetData asset_data;
+struct ForexData : public AssetData {
     std::string forex_pair; // e.g., "EUR/USD"
     float exchange_rate; // Current exchange rate
+    ForexData(const AssetData& asset_data,
+        std::string forex_pair,
+        float exchange_rate)
+    : AssetData(asset_data), 
+      forex_pair(forex_pair), 
+      exchange_rate(exchange_rate){}
 };
-struct CryptoData {
-    std::string crypto_id; // Unique identifier for the cryptocurrency
-    AssetData asset_data;
+struct CryptoData : public AssetData {
     std::string crypto_symbol; // Symbol of the cryptocurrency
     float market_cap; // Market capitalization
     float circulating_supply; // Circulating supply of the cryptocurrency
+    CryptoData(const AssetData& asset_data,
+        std::string crypto_symbol,
+        float market_cap,
+        float circulating_supply)
+    : AssetData(asset_data), 
+      crypto_symbol(crypto_symbol),
+      market_cap(market_cap),
+      circulating_supply(circulating_supply){}
 };
-struct IndexData {
-    std::string index_id; // Unique identifier for the index
-    AssetData asset_data;
+struct IndexData : public AssetData {
     std::string index_name; // Name of the index
-    float index_value; // Current value of the index
+    IndexData(const AssetData& asset_data,
+        std::string index_name)
+    : AssetData(asset_data), 
+      index_name(index_name){}
 };
-struct OptionContractData {
-    std::string option_contract_id; // Unique identifier for the option contract
-    AssetData asset_data;
+struct OptionData : public AssetData {
     std::string option_symbol; // Symbol of the option contract
     std::string option_type; // "call" or "put"
-    std::string expiry_date;
-    float strike_price;
-    float implied_volatility;
-    bool is_call;
+    uint64_t expiry_date; // Expiry date of the option contract
+    float strike_price; // Strike price of the option contract
+
+    // Constructor that extends asset data
+    OptionData(const AssetData& asset_data,
+               std::string option_symbol,
+               std::string option_type,
+               uint64_t expiry_date,
+               float strike_price)
+        : AssetData(asset_data), 
+          option_symbol(option_symbol), 
+          option_type(option_type), 
+          expiry_date(expiry_date), 
+          strike_price(strike_price) {}
 };
 
 
