@@ -10,29 +10,30 @@
 
 // Struct to store asset data
 struct AssetData {
-    int id; // Unique identifier for the asset
+    int id = 0; // Unique identifier for the asset
     std::string ticker;
-    float open_price;
-    float close_price;
-    float high_price;
-    float low_price;
-    uint64_t volume;
-    uint64_t date; // Timestamp of the data
+    float open_price = 0.0F;
+    float close_price = 0.0F;
+    float high_price = 0.0F;
+    float low_price = 0.0F;
+    uint64_t volume = 0;
+    std::string date; // ISO-8601 date string (YYYY-MM-DD)
 };
+
 struct StockData : public AssetData {
     std::string stock_name; // Name of the stock
     std::string exchange; // Exchange where the stock is listed
     std::string sector; // Sector of the stock
 
-        // Constructor that extends asset data
+    StockData() = default;
     StockData(const AssetData& asset_data,
-            std::string stock_name,
-            std::string exchange,
-            std::string sector)
-     : AssetData(asset_data), 
-       stock_name(stock_name), 
-       exchange(exchange), 
-       sector(sector) {}
+              std::string stock_name,
+              std::string exchange,
+              std::string sector)
+        : AssetData(asset_data),
+          stock_name(std::move(stock_name)),
+          exchange(std::move(exchange)),
+          sector(std::move(sector)) {}
 };
 // Not Supported
 struct BondData : public AssetData {
@@ -63,6 +64,7 @@ struct CommodityData : public AssetData {
 struct ForexData : public AssetData {
     std::string forex_pair; // e.g., "EUR/USD"
     float exchange_rate; // Current exchange rate
+    ForexData() = default;
     ForexData(const AssetData& asset_data,
         std::string forex_pair,
         float exchange_rate)
@@ -74,6 +76,7 @@ struct CryptoData : public AssetData {
     std::string crypto_symbol; // Symbol of the cryptocurrency
     float market_cap; // Market capitalization
     float circulating_supply; // Circulating supply of the cryptocurrency
+    CryptoData() = default;
     CryptoData(const AssetData& asset_data,
         std::string crypto_symbol,
         float market_cap,
@@ -85,6 +88,7 @@ struct CryptoData : public AssetData {
 };
 struct IndexData : public AssetData {
     std::string index_name; // Name of the index
+    IndexData() = default;
     IndexData(const AssetData& asset_data,
         std::string index_name)
     : AssetData(asset_data), 
@@ -96,6 +100,8 @@ struct OptionData : public AssetData {
     uint64_t expiry_date; // Expiry date of the option contract
     float strike_price; // Strike price of the option contract
 
+    OptionData() = default;
+
     // Constructor that extends asset data
     OptionData(const AssetData& asset_data,
                std::string option_symbol,
@@ -103,8 +109,8 @@ struct OptionData : public AssetData {
                uint64_t expiry_date,
                float strike_price)
         : AssetData(asset_data), 
-          option_symbol(option_symbol), 
-          option_type(option_type), 
+          option_symbol(std::move(option_symbol)), 
+          option_type(std::move(option_type)), 
           expiry_date(expiry_date), 
           strike_price(strike_price) {}
 };

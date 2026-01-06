@@ -7,12 +7,13 @@
 #include <iostream>
 #include <sstream>
 #include <fstream>
+#include <filesystem>
 #include <sys/stat.h>
 
 /// @brief Checks if a file exists in the filesystem.
 /// @param filename The full path to the file.
 /// @return True if file exists, false otherwise.
-bool DataBaseClass::fileExists(const std::string& filename) {
+bool DataBaseClass::fileExists(const std::string& filename) const {
     struct stat buffer;
     return (stat(filename.c_str(), &buffer) == 0);
 }
@@ -21,18 +22,37 @@ bool DataBaseClass::fileExists(const std::string& filename) {
 /// @param db_path Path to SQLite database file.
 /// @param csv_backup Path to CSV backup to restore if DB is empty or missing.
 DataBaseClass::DataBaseClass(const std::string& db_path,
-    const std::string& asset_backup,
-    const std::string& stock_backup,
-    const std::string& option_backup) 
-    : dbPath(db_path), 
-      asset_data_path(asset_backup),
-      stock_data_path(stock_backup),
-      option_data_path(option_backup) {
+        const std::string& asset_backup,
+        const std::string& stock_backup,
+        const std::string& option_backup,
+        bool create_if_missing,
+        bool restore_from_csv) 
+        : dbPath(db_path), 
+            asset_data_path(asset_backup),
+            stock_data_path(stock_backup),
+            option_data_path(option_backup) {
 
-    if (!fileExists(dbPath)) {
+    const bool existed = fileExists(dbPath);
+    if (!existed && !create_if_missing) {
         std::cerr << "❌ Database file does not exist!" << std::endl;
         throw std::runtime_error("Database file does not exist!");
     }
+
+    // Create parent directories if needed when allowed to create new DB.
+    if (!existed && create_if_missing) {
+        const std::filesystem::path dbP(dbPath);
+        const auto parent = dbP.parent_path();
+        if (!parent.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(parent, ec);
+            if (ec) {
+                std::cerr << "❌ Failed to create DB directory: " << ec.message() << std::endl;
+                throw std::runtime_error("Failed to create DB directory");
+            }
+        }
+        std::cout << "📁 Creating database at " << dbPath << std::endl;
+    }
+
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK) {
         std::cerr << "❌ Error opening database: " << sqlite3_errmsg(db) << std::endl;
         throw std::runtime_error("Error opening database");
@@ -41,21 +61,7 @@ DataBaseClass::DataBaseClass(const std::string& db_path,
         std::cerr << "❌ Error creating tables!" << std::endl;
         throw std::runtime_error("Error creating tables");
     }
-    if (isDatabaseEmpty("asset_data")) {
-        std::cout << "📂 Restoring Asset database from CSV..." << std::endl;
-        importFromCSV(asset_data_path, "asset_data");
-        std::cout << "✅ Asset database restored from CSV successfully!" << std::endl;
-    } else if (isDatabaseEmpty("stock_data")) {
-        std::cout << "📂 Restoring Stock database from CSV..." << std::endl;
-        importFromCSV(stock_data_path, "stock_data");
-        std::cout << "✅ Stock database restored from CSV successfully!" << std::endl;
-    } else if (isDatabaseEmpty("option_data")) {
-        std::cout << "📂 Restoring Option database from CSV..." << std::endl;
-        importFromCSV(option_data_path, "option_data");
-        std::cout << "✅ Option database restored from CSV successfully!" << std::endl;
-    } else {
-        std::cout << "✅ Database is already populated." << std::endl;
-    }
+
     if (db == nullptr) {
         std::cerr << "❌ Database connection is null!" << std::endl;
         throw std::runtime_error("Database connection is null");
@@ -64,8 +70,29 @@ DataBaseClass::DataBaseClass(const std::string& db_path,
         std::cerr << "❌ Error enabling foreign keys: " << sqlite3_errmsg(db) << std::endl;
         throw std::runtime_error("Error enabling foreign keys");
     }
-    std::cout << "✅ Database initialized successfully." << std::endl;
 
+    if (restore_from_csv) {
+        if (isDatabaseEmpty("asset_data") && !asset_data_path.empty()) {
+            std::cout << "📂 Restoring Asset database from CSV..." << std::endl;
+            importFromCSV(asset_data_path, "asset_data");
+            std::cout << "✅ Asset database restored from CSV successfully!" << std::endl;
+        }
+        if (isDatabaseEmpty("stock_data") && !stock_data_path.empty()) {
+            std::cout << "📂 Restoring Stock database from CSV..." << std::endl;
+            importFromCSV(stock_data_path, "stock_data");
+            std::cout << "✅ Stock database restored from CSV successfully!" << std::endl;
+        }
+        if (isDatabaseEmpty("option_data") && !option_data_path.empty()) {
+            std::cout << "📂 Restoring Option database from CSV..." << std::endl;
+            importFromCSV(option_data_path, "option_data");
+            std::cout << "✅ Option database restored from CSV successfully!" << std::endl;
+        }
+        if (!isDatabaseEmpty("asset_data") || !isDatabaseEmpty("stock_data") || !isDatabaseEmpty("option_data")) {
+            std::cout << "✅ Database is already populated." << std::endl;
+        }
+    }
+
+    std::cout << "✅ Database initialized successfully." << std::endl;
 }
 
 /// @brief Destructor that exports the current DB state to CSV and closes the DB.
@@ -90,7 +117,7 @@ DataBaseClass::~DataBaseClass() {
 
 /// @brief Checks whether the 'assets' table in the database is empty.
 /// @return True if empty or error occurred, false otherwise.
-bool DataBaseClass::isDatabaseEmpty(const std::string& table_name) const {
+bool DataBaseClass::isDatabaseEmpty(const std::string& table_name) {
     if (table_name.empty()) {
         std::cerr << "❌ Table name is empty!" << std::endl;
         return true;
@@ -107,11 +134,10 @@ bool DataBaseClass::isDatabaseEmpty(const std::string& table_name) const {
         std::cerr << "❌ Database connection is null!" << std::endl;
         return true;
     }
-    if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK) {
-        std::cerr << "❌ Error opening database: " << sqlite3_errmsg(db) << std::endl;
-        return true;
-    }
-    std::string query = "SELECT COUNT(*) FROM " << table_name << ";";
+
+    std::ostringstream oss;
+    oss << "SELECT COUNT(*) FROM " << table_name << ";";
+    const auto query = oss.str();
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
@@ -143,71 +169,68 @@ void DataBaseClass::importFromCSV(const std::string& csvFile,
 
     while (std::getline(file, line)) {
         std::stringstream ss(line);
-        std::string query;
+        std::ostringstream query;
 
         AssetData asset;
-        std::getline(ss, asset.ticker, ',');
-        ss >> asset.open_price;
-        ss.ignore(1);  // Skip comma
-        ss >> asset.close_price;
-        ss.ignore(1);  // Skip comma
-        ss >> asset.high_price;
-        ss.ignore(1);  // Skip comma
-        ss >> asset.low_price;
-        ss.ignore(1);  // Skip comma
-        ss >> asset.volume;
-        ss.ignore(1);  // Skip comma
-        ss >> asset.date;
-        ss.ignore(1);  // Skip comma
+        std::string token;
 
-       if(table_type == "stock_data") {
-            StockData stock = StockData(asset);
+        std::getline(ss, asset.ticker, ',');
+        std::getline(ss, token, ','); asset.open_price = std::stof(token);
+        std::getline(ss, token, ','); asset.close_price = std::stof(token);
+        std::getline(ss, token, ','); asset.high_price = std::stof(token);
+        std::getline(ss, token, ','); asset.low_price = std::stof(token);
+        std::getline(ss, token, ','); asset.volume = static_cast<uint64_t>(std::stoull(token));
+        std::getline(ss, asset.date, ',');
+
+        if (table_type == "stock_data") {
+            StockData stock;
+            static_cast<AssetData&>(stock) = asset;
             std::getline(ss, stock.stock_name, ',');
             std::getline(ss, stock.exchange, ',');
             std::getline(ss, stock.sector, ',');
-            query << "INSERT INTO stock_data (ticker, open_price, close_price, high_price, low_price, volume, date, stock_name, exchange, sector) VALUES ('" 
-                << stock.ticker << "', " 
-                << stock.open_price << ", " 
-                << stock.close_price << ", " 
-                << stock.high_price << ", " 
-                << stock.low_price << ", " 
-                << stock.volume << ", " 
-                << stock.date << ", '" 
-                << stock.stock_name << "', '" 
-                << stock.exchange << "', '" 
-                << stock.sector << "');";
-                executeSQL(query);
-       } else if(table_type == "option_data") {
-            OptionData option = OptionData(asset);
+            query << "INSERT INTO stock_data (ticker, open_price, close_price, high_price, low_price, volume, date, stock_name, exchange, sector) VALUES ('"
+                  << stock.ticker << "', "
+                  << stock.open_price << ", "
+                  << stock.close_price << ", "
+                  << stock.high_price << ", "
+                  << stock.low_price << ", "
+                  << stock.volume << ", '"
+                  << stock.date << "', '"
+                  << stock.stock_name << "', '"
+                  << stock.exchange << "', '"
+                  << stock.sector << "');";
+            executeSQL(query.str());
+        } else if (table_type == "option_data") {
+            OptionData option;
+            static_cast<AssetData&>(option) = asset;
             std::getline(ss, option.option_symbol, ',');
             std::getline(ss, option.option_type, ',');
-            ss >> option.expiry_date;
-            ss.ignore(1);  // Skip comma
-            ss >> option.strike_price;
-            query << "INSERT INTO option_data (ticker, open_price, close_price, high_price, low_price, volume, date, option_symbol, option_type, expiry_date, strike_price) VALUES ('" 
-                << option.ticker << "', " 
-                << option.open_price << ", " 
-                << option.close_price << ", " 
-                << option.high_price << ", " 
-                << option.low_price << ", " 
-                << option.volume << ", " 
-                << option.date << ", '" 
-                << option.option_symbol << "', '" 
-                << option.option_type << "', " 
-                << option.expiry_date << ", " 
-                << option.strike_price << ");";
-                executeSQL(query);
-       } else {
-            query << "INSERT INTO asset_data (ticker, open_price, close_price, high_price, low_price, volume, date) VALUES ('" 
-                << asset.ticker << "', " 
-                << asset.open_price << ", " 
-                << asset.close_price << ", " 
-                << asset.high_price << ", " 
-                << asset.low_price << ", " 
-                << asset.volume << ", " 
-                << asset.date << ");";
-                executeSQL(query);
-       }
+            std::getline(ss, token, ','); option.expiry_date = std::stoull(token.empty() ? "0" : token);
+            std::getline(ss, token, ','); option.strike_price = token.empty() ? 0.0F : std::stof(token);
+            query << "INSERT INTO option_data (ticker, open_price, close_price, high_price, low_price, volume, date, option_symbol, option_type, expiry_date, strike_price) VALUES ('"
+                  << option.ticker << "', "
+                  << option.open_price << ", "
+                  << option.close_price << ", "
+                  << option.high_price << ", "
+                  << option.low_price << ", "
+                  << option.volume << ", '"
+                  << option.date << "', '"
+                  << option.option_symbol << "', '"
+                  << option.option_type << "', "
+                  << option.expiry_date << ", "
+                  << option.strike_price << ");";
+            executeSQL(query.str());
+        } else {
+            query << "INSERT INTO asset_data (ticker, open_price, close_price, high_price, low_price, volume, date) VALUES ('"
+                  << asset.ticker << "', "
+                  << asset.open_price << ", "
+                  << asset.close_price << ", "
+                  << asset.high_price << ", "
+                  << asset.low_price << ", "
+                  << asset.volume << ", '"
+                  << asset.date << "');";
+            executeSQL(query.str());
+        }
     }
 
     file.close();
@@ -286,7 +309,7 @@ bool DataBaseClass::createTables() {
             high_price REAL,
             low_price REAL,
             volume INTEGER,
-            timestamp INTEGER,
+            date TEXT,
             UNIQUE(ticker, id)
         );
     )";
@@ -300,11 +323,11 @@ bool DataBaseClass::createTables() {
             high_price REAL,
             low_price REAL,
             volume INTEGER,
-            timestamp INTEGER,
+            date TEXT,
             stock_name TEXT,
             exchange TEXT,
             sector TEXT,
-            FOREIGN KEY(id) REFERENCES asset_data(asset_id)
+            FOREIGN KEY(id) REFERENCES asset_data(id)
         );
     )";
 
@@ -317,7 +340,7 @@ bool DataBaseClass::createTables() {
             high_price REAL,
             low_price REAL,
             volume INTEGER,
-            timestamp INTEGER,
+            date TEXT,
             option_symbol TEXT,
             option_type TEXT,
             expiry_date REAL,
@@ -371,8 +394,8 @@ bool DataBaseClass::executeSQL(const std::string& sql) {
 std::vector<std::unique_ptr<AssetData>> DataBaseClass::queryData(
     const std::string& table_name,
     const std::string& ticker,
-    uint64_t startDate,
-    uint64_t endDate,
+    const std::string& startDate,
+    const std::string& endDate,
     int limit,
     bool ascending) const
 {
@@ -386,21 +409,23 @@ std::vector<std::unique_ptr<AssetData>> DataBaseClass::queryData(
 
     // 🧠 Build base query
     std::ostringstream oss;
-    if (!ticker.empty()){
-        oss << "SELECT * FROM " << table_name << " WHERE ticker = ? AND ";
-    } else {
-        oss << "SELECT * FROM " << table_name << " WHERE ";
+    oss << "SELECT * FROM " << table_name;
+
+    std::vector<std::string> conditions;
+    if (!ticker.empty()) conditions.emplace_back("ticker = ?");
+    if (!startDate.empty()) conditions.emplace_back("date >= ?");
+    if (!endDate.empty()) conditions.emplace_back("date <= ?");
+
+    if (!conditions.empty()) {
+        oss << " WHERE ";
+        for (size_t i = 0; i < conditions.size(); ++i) {
+            if (i > 0) oss << " AND ";
+            oss << conditions[i];
+        }
     }
 
-    if (!startDate.empty()) oss << " date >= ? ";
-    if (!endDate.empty()) oss << " date <= ? ";
-
-    if (startDate.empty() && endDate.empty()) {
-        oss << " ORDER BY date " << (ascending ? "ASC" : "DESC");
-    } else if (!startDate.empty() && !endDate.empty()) {
-        oss << " ORDER BY date " << (ascending ? "ASC" : "DESC");
-    }
-    oss << " LIMIT ?;";
+    oss << " ORDER BY date " << (ascending ? "ASC" : "DESC")
+        << " LIMIT ?;";
 
     std::string query = oss.str();
 
@@ -413,9 +438,9 @@ std::vector<std::unique_ptr<AssetData>> DataBaseClass::queryData(
 
     // 🎯 Bind parameters
     int paramIndex = 1;
-    sqlite3_bind_text(stmt, paramIndex++, ticker.c_str(), -1, SQLITE_STATIC);
-    if (!startDate.empty()) sqlite3_bind_text(stmt, paramIndex++, startDate.c_str(), -1, SQLITE_STATIC);
-    if (!endDate.empty()) sqlite3_bind_text(stmt, paramIndex++, endDate.c_str(), -1, SQLITE_STATIC);
+    if (!ticker.empty()) sqlite3_bind_text(stmt, paramIndex++, ticker.c_str(), -1, SQLITE_TRANSIENT);
+    if (!startDate.empty()) sqlite3_bind_text(stmt, paramIndex++, startDate.c_str(), -1, SQLITE_TRANSIENT);
+    if (!endDate.empty()) sqlite3_bind_text(stmt, paramIndex++, endDate.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, paramIndex++, limit);
 
     // 🧠 Extract data row-by-row
@@ -423,30 +448,33 @@ std::vector<std::unique_ptr<AssetData>> DataBaseClass::queryData(
         auto data = std::make_unique<AssetData>();
 
         // Common Fields
-        data.id = sqlite3_column_int(stmt, 0);
-        data.ticker = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        data.open_price = static_cast<float>(sqlite3_column_double(stmt, 2));
-        data.close_price = static_cast<float>(sqlite3_column_double(stmt, 3));
-        data.high_price = static_cast<float>(sqlite3_column_double(stmt, 4));
-        data.low_price = static_cast<float>(sqlite3_column_double(stmt, 5));
-        data.volume = sqlite3_column_int(stmt, 6);
-        data.date = sqlite3_column_int(stmt, 7);
+        data->id = sqlite3_column_int(stmt, 0);
+        data->ticker = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        data->open_price = static_cast<float>(sqlite3_column_double(stmt, 2));
+        data->close_price = static_cast<float>(sqlite3_column_double(stmt, 3));
+        data->high_price = static_cast<float>(sqlite3_column_double(stmt, 4));
+        data->low_price = static_cast<float>(sqlite3_column_double(stmt, 5));
+        data->volume = sqlite3_column_int(stmt, 6);
+        const auto* dateText = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7));
+        data->date = dateText ? std::string(dateText) : std::string();
 
         if (table_name == "stock_data") {
-            auto stock_data = std::make_unique<StockData>(data);
+            auto stock_data = std::make_unique<StockData>();
+            *static_cast<AssetData*>(stock_data.get()) = *data;
             // Stock-specific Fields
-            stock_data.stock_name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8));
-            stock_data.exchange = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
-            stock_data.sector = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10));
+            stock_data->stock_name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8));
+            stock_data->exchange = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
+            stock_data->sector = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10));
             results.push_back(std::move(stock_data));
         }
         // Option-specific Fields
         else if (table_name == "option_data") {
-            auto option_data = std::make_unique<OptionData>(data);
-            option_data.option_symbol = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8));
-            option_data.option_type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
-            option_data.expiry_date = sqlite3_column_int64(stmt, 10);
-            option_data.strike_price = static_cast<float>(sqlite3_column_double(stmt, 11));
+            auto option_data = std::make_unique<OptionData>();
+            *static_cast<AssetData*>(option_data.get()) = *data;
+            option_data->option_symbol = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8));
+            option_data->option_type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
+            option_data->expiry_date = sqlite3_column_int64(stmt, 10);
+            option_data->strike_price = static_cast<float>(sqlite3_column_double(stmt, 11));
             results.push_back(std::move(option_data));
         }
         else if (table_name == "asset_data") {
@@ -461,3 +489,7 @@ std::vector<std::unique_ptr<AssetData>> DataBaseClass::queryData(
     sqlite3_finalize(stmt);
     return results;
 }
+
+/// @brief Convenience ctor when no CSV backups are provided.
+DataBaseClass::DataBaseClass(const std::string& db_path)
+    : DataBaseClass(db_path, "", "", "", true, false) {}

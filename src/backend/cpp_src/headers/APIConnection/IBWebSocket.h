@@ -2,8 +2,10 @@
 #define IBWEBSOCKET_H
 
 #include <iostream>
+#include <atomic>
 #include <string>
 #include <thread>
+#include <websocketpp/common/asio_ssl.hpp>
 #include <websocketpp/config/asio_client.hpp>
 #include <websocketpp/client.hpp>
 
@@ -20,6 +22,8 @@ public:
     void connect(const std::string& uri);
     void sendMessage(const std::string& message);
     void close();
+    bool isConnected() const;
+    std::string getUri() const;
 
 private:
     using client = websocketpp::client<websocketpp::config::asio_tls_client>;
@@ -27,6 +31,8 @@ private:
     client wsClient;
     websocketpp::connection_hdl wsHandle;
     std::thread wsThread;
+    std::atomic<bool> connected{false};
+    std::string wsUri;
 
     void onOpen(connection_hdl hdl);
     void onMessage(connection_hdl hdl, client::message_ptr msg);

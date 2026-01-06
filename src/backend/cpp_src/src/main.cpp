@@ -63,13 +63,14 @@ void startServer() {
 int main() {
     std::cout << "\n===== 🏦 Derivative Trading Strategy API Tests =====\n";
 
+    // Uncomment tests as implementations are completed.
     //testAssetClasses();
     //testPortfolioManagement();
     //testDatabase();
     //testAPIConnection();
-    //startServer();
 
-    std::cout << "\n✅ All Tests Completed Successfully!\n";
+    // Start minimal HTTP server (health + echo routes).
+    startServer();
     return 0;
 }
 // End of main.cpp

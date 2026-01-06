@@ -1,5 +1,6 @@
-# Derivative Trading Strategy API
+# Derivative Trading Strategy
 
+<<<<<<< HEAD
 ## Comprehensive Overview
 
 Welcome to the **Derivative Trading Strategy API**, an advanced quantitative trading platform built from the ground up with **C++17** for maximum performance and reliability. This comprehensive system integrates **market data retrieval**, **portfolio optimization**, and **sophisticated risk management** capabilities, serving as a complete solution for financial engineering, algorithmic trading research, and quantitative strategy development.
@@ -418,10 +419,45 @@ GET /api/asset_data/{ticker}
 - `days` (optional): Number of days of history to include (default: 30)
 
 **Example Request:**
-```sh
-curl http://localhost:8080/api/asset_data/AAPL
-```
+=======
+A multi-surface project that currently ships a C++ Crow HTTP server backed by SQLite, basic Python ingestion utilities, a neon web dashboard prototype, and scaffolding for a SwiftUI client. This README reflects the implemented surfaces and the new Interactive Brokers (IB) connectivity hooks.
 
+## Components
+- Backend server: [src/backend/cpp_src/src/Utilities/server.cpp](src/backend/cpp_src/src/Utilities/server.cpp) exposes health, echo, asset queries, and IB WebSocket relays.
+- Data access: [src/backend/cpp_src/src/DataBase/DataBaseClass.cpp](src/backend/cpp_src/src/DataBase/DataBaseClass.cpp) manages SQLite with CSV import/export.
+- IB connectivity (experimental): [src/backend/cpp_src/headers/APIConnection/IBWebSocket.h](src/backend/cpp_src/headers/APIConnection/IBWebSocket.h) wraps a TLS WebSocket client intended for the IB Client Portal API.
+- Python ingestion: [src/backend/Arch/python_src/Utilities/API_Connection.py](src/backend/Arch/python_src/Utilities/API_Connection.py) for Polygon pulls; portfolio model in [src/backend/Arch/python_src/Financial_Products/Portfolio.py](src/backend/Arch/python_src/Financial_Products/Portfolio.py).
+- Frontend prototype: static HTML/JS/CSS under [src/frontend](src/frontend), dashboard entry at [src/frontend/HTML/index.html](src/frontend/HTML/index.html).
+- iOS app scaffold: SwiftUI views under [Michael.TradingZone/Michael.TradingZone](Michael.TradingZone/Michael.TradingZone).
+
+## Current API surface (C++)
+- GET `/health` – server and DB availability.
+- POST `/echo` – returns the posted body.
+- GET `/api/assets?ticker=TSLA&start=2024-01-01&end=2024-02-01&limit=100` – reads from `asset_data` table (SQLite).
+- GET `/ib/status` – IB WebSocket enabled/connected flags and URL.
+- POST `/ib/send` – forwards raw payloads to the IB WebSocket (for Client Portal API commands). Disabled unless IB is enabled.
+
+## Interactive Brokers integration (Client Portal API)
+This uses the IBKR Client Portal Web API WebSocket (wss) channel, not the legacy TWS socket protocol.
+
+1) Install and start the IB Client Portal gateway locally (default https/wss on 5000). Log in manually in a browser once to establish a session.
+
+2) Export environment variables before running the server:
+- `ENABLE_IB_WS=true`
+- `IB_WS_URL=wss://localhost:5000/v1/api/ws` (or your gateway host/port)
+
+3) Start the server (see below). The server will attempt a TLS WebSocket connection; self-signed certificates are accepted by default.
+
+4) Send commands via HTTP:
+>>>>>>> 90f0cda4 (Updated project README to reflect actual surfaces, document env vars, build/run steps, and add IB Client Portal WebSocket usage guidance and warnings; see README.md.)
+```sh
+curl -X POST http://localhost:8080/ib/send \
+     -H "Content-Type: application/json" \
+     -d '{"session":"abcd","topic":"smd+","id":1}'
+```
+Refer to IBKR Client Portal API docs for valid payloads (market data, orders, pings). Responses stream back to stdout for now.
+
+<<<<<<< HEAD
 **Example Response:**
 ```json
 {
@@ -440,8 +476,20 @@ curl http://localhost:8080/api/asset_data/AAPL
     "last_updated": "2024-01-15T16:00:00Z"
   }
 }
+=======
+## Build and run (C++ server)
+```sh
+cd src/backend/cpp_src
+make              # builds bin/server
+DB_PATH=quant_data.db ./bin/server
+>>>>>>> 90f0cda4 (Updated project README to reflect actual surfaces, document env vars, build/run steps, and add IB Client Portal WebSocket usage guidance and warnings; see README.md.)
 ```
+Key env vars:
+- `DB_PATH` (required): path to SQLite file.
+- `ASSET_CSV`, `STOCK_CSV`, `OPTION_CSV`: CSVs used for initial restore and shutdown export.
+- `ENABLE_IB_WS` / `IB_WS_URL`: toggle and target IB WebSocket (see above).
 
+<<<<<<< HEAD
 **With Historical Data:**
 ```sh
 curl "http://localhost:8080/api/asset_data/AAPL?include_history=true&days=7"
@@ -1618,4 +1666,23 @@ Special thanks to:
 **Built with ❤️ by the quantitative trading community**
 
 </div>
+=======
+## Python utilities
+- Polygon ingestion: [src/backend/Arch/python_src/Utilities/API_Connection.py](src/backend/Arch/python_src/Utilities/API_Connection.py) uses `apiKey` from environment (move the key out of code before use).
+- Portfolio model: [src/backend/Arch/python_src/Financial_Products/Portfolio.py](src/backend/Arch/python_src/Financial_Products/Portfolio.py) offers basic aggregation/plotting via Plotly.
+
+## Frontend
+Static dashboard prototype lives under [src/frontend](src/frontend). No build step today; open [src/frontend/HTML/index.html](src/frontend/HTML/index.html) in a browser or serve the folder with any static server. JS currently mocks data and is not wired to the backend.
+
+## Security and secrets
+- Do not commit live API keys. Move the Polygon key and any IB creds to environment variables or a secrets manager before deploying.
+- The IB relay is unauthenticated; place the service behind a gateway or add auth before exposing publicly.
+
+## Roadmap
+- Add authentication/rate limiting to HTTP routes.
+- Implement documented trading/risk/portfolio endpoints atop the DB layer.
+- Expand IB integration with typed commands, subscriptions, and order placement helpers.
+- Wire the frontend and SwiftUI client to the live API.
+- Add CI with C++/Python/JS tests and linting.
+>>>>>>> 90f0cda4 (Updated project README to reflect actual surfaces, document env vars, build/run steps, and add IB Client Portal WebSocket usage guidance and warnings; see README.md.)
 
