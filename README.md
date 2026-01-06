@@ -366,7 +366,8 @@ Stores historical price data for all asset types.
 
 ```sql
 -- Fetch historical data for a ticker
-SELECT * FROM assets 
+SELECT ticker, date, open_price, close_price, high_price, low_price, volume
+FROM assets 
 WHERE ticker = 'AAPL' 
   AND date BETWEEN '2024-01-01' AND '2024-01-31'
 ORDER BY date ASC;
