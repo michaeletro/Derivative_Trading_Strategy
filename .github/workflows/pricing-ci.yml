@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -22,11 +24,11 @@ jobs:
           python-version: '3.12'
       - name: Source snapshot (no vendor SDK, secrets, or runtime data)
         run: |
-          git archive --format=tar.gz -o research-source.tar.gz HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing
+          git archive --format=tar.gz -o "$RUNNER_TEMP/research-source.tar.gz" HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing
       - uses: actions/upload-artifact@v4
         with:
           name: research-source
-          path: research-source.tar.gz
+          path: ${{ runner.temp }}/research-source.tar.gz
           retention-days: 3
       - name: Install HTTP dependencies
         run: |

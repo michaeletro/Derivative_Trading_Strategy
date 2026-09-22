@@ -40,7 +40,10 @@ def main():
         page.locator('#pricing').screenshot(path=str(shots/'pricing-lab-desktop.png'))
         page.set_viewport_size({'width':390,'height':844})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'No mobile page overflow'
-        page.locator('#pricing').screenshot(path=str(shots/'pricing-lab-mobile.png'))
+        page.locator('a[href="#pricing"]').click()
+        page.screenshot(path=str(shots/'pricing-lab-mobile.png'))
+        page.locator('#pricing-results').scroll_into_view_if_needed()
+        page.screenshot(path=str(shots/'pricing-lab-mobile-results.png'))
         page.set_viewport_size({'width':1536,'height':1100})
         before=sum('/api/pricing/run' in c for c in calls)
         # A file may contain forged outputs: only validated model inputs are restored.
