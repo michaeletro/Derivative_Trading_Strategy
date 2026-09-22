@@ -14,8 +14,8 @@
 <a class="skip" href="#overview">Skip to workspace</a>
 <aside class="sidebar">
   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#roadmap"><span>06</span> Study roadmap</a></nav>
-  <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes.</small></div>
+  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#roadmap"><span>07</span> Study roadmap</a></nav>
+  <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes. Market observations are saved locally.</small></div>
 </aside>
 <main id="overview">
   <header class="page-heading"><div><p class="eyebrow">Interactive Brokers / Research console</p><h1>Market & positions<span>.</span></h1><p>A direct view of your broker connection. No inferred balances, no synthetic live prices.</p></div><span id="session-badge" class="badge">LOCKED</span></header>
@@ -153,7 +153,20 @@
       <p id="scenario-note" class="lab-note" role="status" aria-live="polite">Repricing does not require a Monte Carlo run or a broker connection.</p>
     </div>
   </section>
-  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">06 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
+  <section class="panel recorded-storage" id="storage" aria-labelledby="storage-title">
+    <div class="section-heading"><div><p class="eyebrow">06 / Durable observations</p><h2 id="storage-title">Recorded history</h2></div><span class="badge">LOCAL SQLITE</span></div>
+    <h3 id="storage-state">Locked</h3><p id="storage-counts">Unlock to inspect saved data.</p>
+    <p>Database: <code id="storage-path">—</code></p><p>Last backup: <code id="storage-last-backup">—</code></p>
+    <p>Updates are committed during collection. Closing this browser does not stop recording. Stop the server with Ctrl+C for a final drain and consistent backup. No automatic data deletion.</p>
+    <div class="storage-actions"><button id="storage-load" type="button" disabled>Load recorded series</button><button id="storage-series-next" type="button" class="secondary" disabled>Next series page</button><button id="storage-backup" type="button" class="secondary" disabled>Create backup now</button></div>
+    <small>Manual backup requires a disconnected broker. Same-disk backups do not protect against disk failure.</small>
+    <label for="storage-select">Recorded series</label><select id="storage-select" disabled></select>
+    <div class="storage-actions"><button id="storage-history" type="button" disabled>Read history</button><button id="storage-more" type="button" class="secondary" disabled>Next history page</button></div>
+    <p id="storage-history-note">Choose a recorded series. These are past observations, never current broker quotes.</p>
+    <p id="storage-notice" role="status" aria-live="polite"></p>
+    <div class="table-wrap"><table aria-label="Recorded time series"><thead id="storage-head"></thead><tbody id="storage-body"></tbody></table></div>
+  </section>
+  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">07 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
   <p id="build-info" class="build-info">Build identity: unlock to inspect the running server.</p>
   <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
 </main>

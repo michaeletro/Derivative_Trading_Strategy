@@ -1,3 +1,4 @@
+import {mountStorage} from './storage.mjs';
 import {mountGreeks} from './greeks.mjs';
 import {buildLabel} from './greeks-model.mjs';
 import {mountPricing} from './pricing.mjs';
@@ -7,6 +8,7 @@ const $=id=>document.getElementById(id);
 const api=createApi();
 const pricingLab=mountPricing(api,error=>lock(error.message));
 const greeksLab=mountGreeks(api,error=>lock(error.message));
+const storageLab=mountStorage(api,error=>lock(error.message));
 let unlocked=false, busy=false, current=null, currentAt=0, fresh=false, revision=0, timer;
 let session='', selected=null, pendingResolution=null, candidates=[], requestedPositions=false;
 let histories=new Map(), quoteRows=new Map(), positionSignature='';
@@ -216,6 +218,8 @@ function renderChart() {
 function render() {
   pricingLab.setAccess(unlocked);
   greeksLab.setAccess(unlocked);
+  storageLab.setAccess(unlocked);
+  storageLab.update(fresh?current?.storage:null,fresh?current?.broker?.state:null);
   text('build-info',fresh?buildLabel(current?.build,current?.broker?.mode):'Build identity: unlock or refresh to inspect the running server.');
   const broker=fresh?current?.broker:null, state=broker?.state;
   text('session-badge',!unlocked?'LOCKED':!fresh?'DATA UNAVAILABLE':broker?.simulation?'SIMULATION':'READ ONLY');

@@ -1,7 +1,7 @@
 name: Pricing lab
 on:
   push:
-    branches: [feature/pricing-simulation-lab, feature/greeks-scenario-lab]
+    branches: [feature/pricing-simulation-lab, feature/greeks-scenario-lab, feature/persistent-timeseries]
   pull_request:
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - name: Source snapshot (no vendor SDK, secrets, or runtime data)
         run: |
-          git archive --format=tar.gz -o "$RUNNER_TEMP/research-source.tar.gz" HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing tools/start_dashboard.py
+          git archive --format=tar.gz -o "$RUNNER_TEMP/research-source.tar.gz" HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing src/backend/cpp_src/storage tools/start_dashboard.py tools/restore_timeseries.py
       - uses: actions/upload-artifact@v4
         with:
           name: research-source
@@ -40,7 +40,7 @@ jobs:
           cmake --build build-pricing --parallel 2
           ctest --test-dir build-pricing --output-on-failure
       - name: Frontend rules
-        run: node --test tests/dashboard/model.test.mjs tests/pricing/model.test.mjs tests/greeks/model.test.mjs
+        run: node --test tests/dashboard/model.test.mjs tests/pricing/model.test.mjs tests/greeks/model.test.mjs tests/storage/model.test.mjs
       - name: Install browser tools
         run: |
           python -m pip install playwright==1.57.0
@@ -51,6 +51,7 @@ jobs:
         run: |
           python tests/pricing/browser_tests.py build-pricing/server
           python tests/greeks/browser_tests.py build-pricing/server
+          python tests/storage/browser_tests.py build-pricing/server
       - uses: actions/upload-artifact@v4
         if: always()
         with:

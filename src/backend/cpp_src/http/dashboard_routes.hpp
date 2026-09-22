@@ -36,6 +36,8 @@ inline void mount(crow::SimpleApp& app, int port) {
         if (name == "greeks.mjs") return serve(req, assets::greeks_mjs, "text/javascript; charset=utf-8");
         if (name == "greeks-model.mjs") return serve(req, assets::greeks_model_mjs, "text/javascript; charset=utf-8");
         if (name == "greeks.css") return serve(req, assets::greeks_css, "text/css; charset=utf-8");
+        if (name == "storage.mjs") return serve(req, assets::storage_mjs, "text/javascript; charset=utf-8");
+        if (name == "storage-model.mjs") return serve(req, assets::storage_model_mjs, "text/javascript; charset=utf-8");
         return crow::response(404, "Unknown dashboard asset");
     });
 }
