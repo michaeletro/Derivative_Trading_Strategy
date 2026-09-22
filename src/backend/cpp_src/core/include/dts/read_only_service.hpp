@@ -76,6 +76,10 @@ public:
         if (it == quotes_.end()) throw std::out_of_range("No quote received for contract");
         return it->second;
     }
+    RequestId request_history(const HistorySpec& spec, HistoryWindow window) {
+        require_broker(); spec.validate(window); return broker_->request_history(spec, window);
+    }
+    void cancel_history(RequestId id) { require_broker(); broker_->cancel_history(id); }
     RequestId request_positions() {
         require_broker();
         if (positions_.status == SnapshotStatus::Pending) throw std::logic_error("Position snapshot already pending");
@@ -112,6 +116,8 @@ private:
         contracts_.clear(); subscriptions_.clear(); quotes_.clear(); resolutions_.clear();
         positions_ = {}; staged_positions_.clear(); position_id_ = 0;
     }
+    void apply(const HistoricalBarEvent&) {} // Committed by the recording decorator.
+    void apply(const HistoricalEnd&) {}
     void apply(const ConnectionEvent& e) {
         if (e.state != ConnectionState::Ready && e.state != ConnectionState::Connecting) invalidate();
     }

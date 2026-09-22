@@ -21,6 +21,8 @@ public:
     void disconnect() noexcept override;
     ConnectionState state() const noexcept override;
     RequestId resolve(const ContractQuery&) override;
+    RequestId request_history(const HistorySpec&, HistoryWindow) override;
+    void cancel_history(RequestId) override;
     RequestId subscribe(const Contract&) override;
     bool unsubscribe(RequestId) override;
     void request_positions(RequestId) override;

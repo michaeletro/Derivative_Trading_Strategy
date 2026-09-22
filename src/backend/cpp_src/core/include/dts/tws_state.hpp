@@ -33,6 +33,35 @@ public:
         events_.emplace_back(BrokerError{0, code, message});
         events_.emplace_back(ConnectionEvent{state_});
     }
+    RequestId history(const HistorySpec& spec, HistoryWindow window, Clock::time_point now) {
+        require_ready(); spec.validate(window);
+        if (history_id_) throw std::length_error("One active native historical request permitted");
+        throttle(now); history_id_=allocate(); history_spec_=spec; history_window_=window;
+        history_deadline_=now+std::chrono::seconds(60); history_count_=0; return history_id_;
+    }
+    void historical_bar(RequestId id, const HistoricalBar& bar) {
+        if (!history_id_ || id!=history_id_) return;
+        try {
+            const auto t=bar_coordinate(history_spec_,bar);
+            if (++history_count_>1800) { finish_history("failed",-1020); return; }
+            if(t>=history_window_.start && t<history_window_.end) {
+                auto normalized=bar;
+                if(history_spec_.price_type!="TRADES") {
+                    normalized.volume.reset();normalized.wap.reset();normalized.count.reset();
+                }
+                emit(HistoricalBarEvent{id,std::move(normalized)});
+            }
+        } catch(const std::exception&) { finish_history("failed",-1021); }
+    }
+    void historical_end(RequestId id, const std::string& start, const std::string& end) {
+        if (id==history_id_ && history_id_) finish_history("complete",0,start,end);
+    }
+    void cancel_history(RequestId id) {
+        if(id==history_id_ && history_id_) finish_history("interrupted",-1022);
+    }
+    std::vector<RequestId> history_cancellations() {
+        std::vector<RequestId> out;out.swap(history_cancels_);return out;
+    }
     RequestId resolve(const ContractQuery& query, Clock::time_point now) {
         require_ready(); query.validate();
         if (resolutions_.size() >= 16) throw std::length_error("Too many contract requests");
@@ -139,6 +168,12 @@ public:
         if (code == 1100 || code == 1101 || code == 1300 || code == 502 || code == 504 || code == 326) {
             fail(code, message); return;
         }
+        if(history_id_ && id==history_id_) {
+            // Errors are request-specific. Do not infer permanent unavailability
+            // from generic HMDS/pacing/permission code 162.
+            if(code==165)finish_history("unavailable",code);
+            else if(code<2000)finish_history("failed",code);
+        }
         emit(BrokerError{id, code, message});
         if (resolutions_.erase(id)) emit(ContractsComplete{id, false});
         auto it = subscriptions_.find(id);
@@ -151,6 +186,7 @@ public:
         if (state_ == ConnectionState::Connecting && now >= deadline_) {
             fail(-1001, "TWS handshake timed out"); return;
         }
+        if(history_id_ && now>=history_deadline_)finish_history("failed",-1023);
         std::vector<RequestId> expired;
         for (const auto& item : resolutions_)
             if (now >= item.second.deadline) expired.push_back(item.first);
@@ -163,6 +199,14 @@ public:
         std::vector<BrokerEvent> out; out.swap(events_); return out;
     }
 private:
+    RequestId history_id_=0; std::size_t history_count_=0;
+    HistorySpec history_spec_; HistoryWindow history_window_; Clock::time_point history_deadline_{};
+    std::vector<RequestId> history_cancels_;
+    void finish_history(const std::string& status,int code,const std::string& start="",const std::string& end="") {
+        const auto id=history_id_;history_id_=0;
+        if(status!="complete")history_cancels_.push_back(id);
+        emit(HistoricalEnd{id,status,code,start.substr(0,64),end.substr(0,64)});
+    }
     struct Resolution { Clock::time_point deadline; std::set<ContractId> ids; };
     struct Subscription { Quote quote; int type = 0; };
     ConnectionState state_ = ConnectionState::Disconnected;
@@ -176,6 +220,7 @@ private:
     std::deque<Clock::time_point> requests_;
     void clear() noexcept {
         resolutions_.clear(); subscriptions_.clear(); events_.clear(); requests_.clear();
+        history_id_=0;history_cancels_.clear();
         position_request_ = 0; position_seen_ = false; position_valid_ = false;
         // Never reuse request IDs across connections on the same adapter.
     }

@@ -3,6 +3,7 @@
 #include "Contract.h"
 #include "Decimal.h"
 #include "DefaultEWrapper.h"
+#include "bar.h"
 #include "protobufUnix/ContractData.pb.h"
 #include "protobufUnix/ContractDataEnd.pb.h"
 #include "protobufUnix/NextValidId.pb.h"
@@ -11,6 +12,8 @@
 #include "protobufUnix/Position.pb.h"
 #include "protobufUnix/PositionEnd.pb.h"
 #include "protobufUnix/ErrorMessage.pb.h"
+#include "protobufUnix/HistoricalData.pb.h"
+#include "protobufUnix/HistoricalDataEnd.pb.h"
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -28,8 +31,7 @@ inline dts::Contract mapped_contract(ContractId id, const std::string& symbol,
     double multiplier, const std::string& expiry, double strike, const std::string& right) {
     dts::Contract out;
     out.id = id; out.symbol = symbol; out.currency = currency;
-    // SMART is our explicit routing preference when position callbacks omit it;
-    // it is not an inferred listing exchange or a claim of execution eligibility.
+    // SMART is a routing preference, not an inferred listing exchange.
     out.exchange = exchange.empty() ? "SMART" : exchange;
     if (type == "STK") { out.security_type = SecurityType::Equity; out.multiplier = 1.0; }
     else if (type == "OPT") {
@@ -53,7 +55,7 @@ inline ::Contract to_native(const dts::Contract& c) {
     c.validate();
     if (c.id > std::numeric_limits<int>::max()) throw std::invalid_argument("conId exceeds SDK range");
     ::Contract out; out.conId = static_cast<int>(c.id); out.exchange = c.exchange;
-    out.currency = c.currency; return out; // Resolved identity, not ticker guessing.
+    out.currency = c.currency; return out;
 }
 inline ::Contract to_native(const ContractQuery& q) {
     q.validate();
@@ -67,9 +69,7 @@ inline ::Contract to_native(const ContractQuery& q) {
     }
     return out;
 }
-
-// All SDK callbacks, including async connectAck, enqueue only. The owner drains
-// this mailbox from poll(); no callback accesses application state or SQLite.
+// Callback mailbox only: no SQLite, HTTP, application state or pricing here.
 class Callbacks final : public DefaultEWrapper {
 public:
     std::atomic<bool> acknowledged{false};
@@ -109,18 +109,38 @@ public:
         catch (const std::exception& e) { bad_position(e.what()); }
     }
     void positionEnd() override { post([](TwsState& s) { s.position_end(); }); }
-    void error(int id, time_t, int code, const std::string& message, const std::string&) override {
-        deliver_error(id, code, message);
+    void error(int id, time_t, int code, const std::string& message, const std::string&) override { deliver_error(id, code, message); }
+    void historicalData(TickerId id,const ::Bar& bar) override {
+        try {
+            HistoricalBar b;b.time=bar.time;b.open=bar.open;b.high=bar.high;b.low=bar.low;b.close=bar.close;
+            const auto volume=DecimalFunctions::decimalToDouble(bar.volume);
+            if(std::isfinite(volume)&&volume>=0&&volume<1e30)b.volume=DecimalFunctions::decimalToString(bar.volume);
+            const auto wap=DecimalFunctions::decimalToDouble(bar.wap);
+            if(std::isfinite(wap)&&wap>=0&&wap<1e12)b.wap=wap;
+            if(bar.count>=0)b.count=bar.count;
+            deliver_bar(static_cast<int>(id),std::move(b));
+        }catch(const std::exception&){deliver_error(static_cast<int>(id),-1021,"Invalid historical bar fields");}
     }
-    // API 10.45 may deliver protobuf callbacks instead of legacy callbacks.
-    // Handle BOTH explicitly; never assume DefaultEWrapper forwards them.
+    void historicalDataEnd(int id,const std::string& start,const std::string& end) override {
+        post([id,start=start.substr(0,64),end=end.substr(0,64)](TwsState& s){s.historical_end(static_cast<RequestId>(id),start,end);});
+    }
+    // Both callback forms are implemented; DefaultEWrapper does not forward them.
+    void historicalDataProtoBuf(const protobuf::HistoricalData& p) override {
+        if(p.historicaldatabars_size()>1800){deliver_error(p.reqid(),-1020,"Historical response exceeds bar limit");return;}
+        for(const auto& bar:p.historicaldatabars())try{
+            if(!bar.has_date()||!bar.has_open()||!bar.has_high()||!bar.has_low()||!bar.has_close())
+                throw std::invalid_argument("Missing historical OHLC fields");
+            HistoricalBar b;b.time=bar.date();b.open=bar.open();b.high=bar.high();b.low=bar.low();b.close=bar.close();
+            if(!bar.volume().empty()&&number(bar.volume())>=0&&number(bar.volume())<1e30)b.volume=bar.volume();
+            if(!bar.wap().empty()&&number(bar.wap())>=0&&number(bar.wap())<1e12)b.wap=number(bar.wap());
+            if(bar.has_barcount()&&bar.barcount()>=0)b.count=bar.barcount();
+            deliver_bar(p.reqid(),std::move(b));
+        }catch(const std::exception&){deliver_error(p.reqid(),-1021,"Invalid protobuf historical bar fields");}
+    }
+    void historicalDataEndProtoBuf(const protobuf::HistoricalDataEnd& p) override {historicalDataEnd(p.reqid(),p.startdatestr(),p.enddatestr());}
     void nextValidIdProtoBuf(const protobuf::NextValidId& p) override { nextValidId(p.orderid()); }
-    void tickPriceProtoBuf(const protobuf::TickPrice& p) override {
-        tickPrice(p.reqid(), static_cast<TickType>(p.ticktype()), p.price(), TickAttrib{});
-    }
-    void marketDataTypeProtoBuf(const protobuf::MarketDataType& p) override {
-        marketDataType(p.reqid(), p.marketdatatype());
-    }
+    void tickPriceProtoBuf(const protobuf::TickPrice& p) override { tickPrice(p.reqid(), static_cast<TickType>(p.ticktype()), p.price(), TickAttrib{}); }
+    void marketDataTypeProtoBuf(const protobuf::MarketDataType& p) override { marketDataType(p.reqid(), p.marketdatatype()); }
     void contractDataProtoBuf(const protobuf::ContractData& p) override {
         try { deliver_contract(p.reqid(), from_proto(p.contract())); }
         catch (const std::exception& e) { deliver_error(p.reqid(), -1012, e.what()); }
@@ -141,22 +161,13 @@ private:
         if (queue_.size() >= 4096) { overflow_ = true; return; }
         queue_.push_back(std::move(action));
     }
-    void deliver_contract(int id, dts::Contract c) {
-        post([id, c = std::move(c)](TwsState& s) { s.contract(static_cast<RequestId>(id), c); });
-    }
-    void deliver_position(Position p) {
-        (void)p.marked_value(0.0);
-        post([p = std::move(p)](TwsState& s) { s.position(p); });
-    }
-    void bad_position(std::string reason) {
-        post([reason = std::move(reason)](TwsState& s) { s.bad_position(reason); });
-    }
+    void deliver_bar(int id,HistoricalBar b) {b.validate();post([id,b=std::move(b)](TwsState& s){s.historical_bar(static_cast<RequestId>(id),b);});}
+    void deliver_contract(int id, dts::Contract c) { post([id, c = std::move(c)](TwsState& s) { s.contract(static_cast<RequestId>(id), c); }); }
+    void deliver_position(Position p) { (void)p.marked_value(0.0);post([p = std::move(p)](TwsState& s) { s.position(p); }); }
+    void bad_position(std::string reason) { post([reason = std::move(reason)](TwsState& s) { s.bad_position(reason); }); }
     void deliver_error(int id, int code, std::string message) {
-        // Advanced order-rejection JSON is deliberately ignored; no order support.
         if (message.size() > 1024) message.resize(1024);
-        post([id, code, message = std::move(message)](TwsState& s) {
-            s.error(id > 0 ? static_cast<RequestId>(id) : 0, code, message);
-        });
+        post([id, code, message = std::move(message)](TwsState& s) {s.error(id > 0 ? static_cast<RequestId>(id) : 0, code, message);});
     }
 };
 } // namespace dts::ibkr_detail

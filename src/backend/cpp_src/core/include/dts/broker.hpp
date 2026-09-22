@@ -1,5 +1,6 @@
 #pragma once
 #include "domain.hpp"
+#include "historical.hpp"
 #include <variant>
 #include <vector>
 
@@ -12,7 +13,7 @@ struct BrokerError { RequestId request_id; int code; std::string message; };
 struct ContractEvent { RequestId request_id; Contract contract; };
 struct ContractsComplete { RequestId request_id; bool success; };
 using BrokerEvent = std::variant<ConnectionEvent, Quote, PositionEvent,
-    PositionsComplete, BrokerError, ContractEvent, ContractsComplete>;
+    PositionsComplete, BrokerError, ContractEvent, ContractsComplete, HistoricalBarEvent, HistoricalEnd>;
 
 struct ContractQuery {
     std::string symbol;
@@ -44,6 +45,10 @@ public:
     virtual RequestId resolve(const ContractQuery&) {
         throw std::logic_error("Contract resolution is not supported by this broker");
     }
+    virtual RequestId request_history(const HistorySpec&, HistoryWindow) {
+        throw std::logic_error("Historical acquisition is not supported by this adapter");
+    }
+    virtual void cancel_history(RequestId) {}
     virtual RequestId subscribe(const Contract& contract) = 0;
     virtual bool unsubscribe(RequestId subscription_id) = 0;
     virtual void request_positions(RequestId request_id) = 0;
