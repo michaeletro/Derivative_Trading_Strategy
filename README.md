@@ -3,6 +3,15 @@
 A C++17/Python research application for a modular derivatives pricing and risk
 platform. **This is a read-only development system, not a production trading bot.**
 
+## Pricing & Simulation Lab
+
+The dashboard includes an offline European Black–Scholes–Merton / exact-GBM
+Monte Carlo lab with seeded plain/antithetic sampling, sampling-error estimates,
+convergence visualization and JSON experiment export/import. It never connects
+to a broker or prices listed American contracts. Records are files you export,
+not a server-side database. See [the pricing lab runbook](docs/pricing-lab.md)
+for assumptions, input units, reproducibility limits, tests and run commands.
+
 ## Implemented
 
 - Vendor-independent contracts, option terms, per-side quote freshness, positions,
@@ -16,7 +25,7 @@ platform. **This is a read-only development system, not a production trading bot
   tests and HTTP lifecycle/security smoke tests on GitHub Actions.
 - Existing Polygon Python ingestion, static web prototype and SwiftUI scaffold.
 
-No order-submission interface exists. Pricing/calibration, Greeks, portfolio risk
+No order-submission interface exists. Listed-contract pricing/calibration, Greeks, portfolio risk
 limits, account balances, durable live-data recording and continuous position
 reconciliation remain future increments. A validated OrderIntent is not risk
 approval. The old experimental Client Portal source is retained but no longer
