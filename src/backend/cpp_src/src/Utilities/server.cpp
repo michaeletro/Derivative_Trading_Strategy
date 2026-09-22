@@ -5,6 +5,7 @@ namespace asio = boost::asio;
 #include <dashboard_routes.hpp>
 #include <sqlite3.h>
 #include "pricing_json.hpp"
+#include "greeks_json.hpp"
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
 #ifdef DTS_WITH_IBKR
@@ -250,6 +251,25 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        CROW_ROUTE(app_, "/api/build")([this](const crow::request& req) {
+            return guarded(req, [&] { return dts::pricing::sensitivity_http::build_json(); });
+        });
+        CROW_ROUTE(app_, "/api/greeks/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                const auto request = dts::pricing::sensitivity_http::parse_greeks(object(req));
+                std::unique_lock<std::mutex> lock(pricing_mutex_, std::try_to_lock);
+                if (!lock.owns_lock()) throw std::length_error("Research calculation busy; try again explicitly later");
+                return dts::pricing::sensitivity_http::run(request);
+            });
+        });
+        CROW_ROUTE(app_, "/api/scenarios/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                const auto request = dts::pricing::sensitivity_http::parse_scenarios(object(req));
+                std::unique_lock<std::mutex> lock(pricing_mutex_, std::try_to_lock);
+                if (!lock.owns_lock()) throw std::length_error("Research calculation busy; try again explicitly later");
+                return dts::pricing::sensitivity_http::run(request);
+            });
+        });
         CROW_ROUTE(app_, "/api/pricing/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req, [&] {
                 const auto request = dts::pricing::http::parse(object(req));
@@ -271,6 +291,7 @@ private:
                 // Drain first so all displayed views share a coherent service state.
                 broker_.poll();
                 Json j; j["broker"] = status();
+                j["build"] = dts::pricing::sensitivity_http::build_json();
                 j["session_id"] = instance_ + "-" + std::to_string(broker_.generation());
                 j["positions"] = positions_json(broker_.positions(), mode_ == "mock");
                 std::vector<Json> subscriptions;

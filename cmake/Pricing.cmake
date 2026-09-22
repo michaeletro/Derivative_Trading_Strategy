@@ -1,5 +1,5 @@
 # Numerical code is independently buildable, with no HTTP, database or broker SDK.
-add_library(trading_pricing STATIC src/backend/cpp_src/pricing/pricing.cpp)
+add_library(trading_pricing STATIC src/backend/cpp_src/pricing/pricing.cpp src/backend/cpp_src/pricing/greeks.cpp)
 configure_executable(trading_pricing)
 if(NOT MSVC)
     target_compile_options(trading_pricing PRIVATE -fno-fast-math)
@@ -12,14 +12,22 @@ if(BUILD_TESTING)
     configure_executable(pricing_tests)
     target_link_libraries(pricing_tests PRIVATE trading_pricing)
     add_test(NAME pricing_tests COMMAND pricing_tests)
-    set_tests_properties(pricing_tests PROPERTIES TIMEOUT 45)
+    add_executable(greeks_tests tests/greeks_tests.cpp)
+    configure_executable(greeks_tests)
+    target_link_libraries(greeks_tests PRIVATE trading_pricing)
+    add_test(NAME greeks_tests COMMAND greeks_tests)
+    set_tests_properties(pricing_tests greeks_tests PROPERTIES TIMEOUT 45)
 endif()
 
 # A content fingerprint works even for source archives without .git metadata.
 set(pricing_fingerprints "")
 foreach(path src/backend/cpp_src/core/include/dts/pricing.hpp
              src/backend/cpp_src/pricing/pricing.cpp
-             src/backend/cpp_src/http/pricing_json.hpp cmake/Pricing.cmake)
+             src/backend/cpp_src/pricing/greeks.cpp
+             src/backend/cpp_src/pricing/simulation_detail.hpp
+             src/backend/cpp_src/core/include/dts/greeks.hpp
+             src/backend/cpp_src/http/pricing_json.hpp
+             src/backend/cpp_src/http/greeks_json.hpp cmake/Pricing.cmake)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${path}")
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${path}" digest)
     string(APPEND pricing_fingerprints "${path}:${digest}\n")
