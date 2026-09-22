@@ -1,3 +1,4 @@
+import {mountReplay} from './replay.mjs';
 import {mountHistory} from './history.mjs';
 import {mountStorage} from './storage.mjs';
 import {mountGreeks} from './greeks.mjs';
@@ -9,7 +10,8 @@ const $=id=>document.getElementById(id);
 const api=createApi();
 const pricingLab=mountPricing(api,error=>lock(error.message));
 const greeksLab=mountGreeks(api,error=>lock(error.message));
-const historyLab=mountHistory(api,error=>lock(error.message));
+const replayLab=mountReplay(api,error=>lock(error.message));
+const historyLab=mountHistory(api,error=>lock(error.message),v=>replayLab.selectDataset(v));
 const storageLab=mountStorage(api,error=>lock(error.message));
 let unlocked=false, busy=false, current=null, currentAt=0, fresh=false, revision=0, timer;
 let session='', selected=null, pendingResolution=null, candidates=[], requestedPositions=false;
@@ -226,6 +228,7 @@ function render() {
   pricingLab.setAccess(unlocked);
   greeksLab.setAccess(unlocked);
   storageLab.setAccess(unlocked);
+  replayLab.setAccess(unlocked);
   historyLab.setAccess(unlocked);historyLab.update(fresh?current?.broker.state:null);
   storageLab.update(fresh?current?.storage:null,fresh?current?.broker?.state:null);
   text('build-info',fresh?buildLabel(current?.build,current?.broker?.mode):'Build identity: unlock or refresh to inspect the running server.');

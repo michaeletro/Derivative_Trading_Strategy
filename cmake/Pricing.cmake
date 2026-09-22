@@ -51,6 +51,17 @@ if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
         endif()
     endif()
 endif()
+set(research_fingerprints "")
+foreach(path src/backend/cpp_src/core/include/dts/replay.hpp
+             src/backend/cpp_src/research/replay.cpp src/backend/cpp_src/research/sha256.cpp
+             src/backend/cpp_src/storage/src/research_store.inc
+             src/backend/cpp_src/storage/include/dts/research_schema.hpp
+             src/backend/cpp_src/http/research_json.hpp cmake/Pricing.cmake)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${path}")
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${path}" digest)
+    string(APPEND research_fingerprints "${path}:${digest}\n")
+endforeach()
+string(SHA256 research_fingerprint "${research_fingerprints}")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pricing_build.hpp.in"
                "${CMAKE_CURRENT_BINARY_DIR}/generated/pricing_build.hpp" @ONLY)

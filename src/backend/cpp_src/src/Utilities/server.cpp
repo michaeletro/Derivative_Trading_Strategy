@@ -8,6 +8,7 @@ namespace asio = boost::asio;
 #include "greeks_json.hpp"
 #include "storage_json.hpp"
 #include "history_json.hpp"
+#include "research_json.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
@@ -303,6 +304,50 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        CROW_ROUTE(app_, "/api/research/snapshots/create").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"dataset_id","start_s","end_s","name"});
+                std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Research operation busy; retry explicitly later");
+                return dts::research_http::snapshot_json(store_.create_snapshot(dts::research_http::id(j,"dataset_id"),dts::history_http::window(j),dts::research_http::name(j)));});
+        });
+        CROW_ROUTE(app_, "/api/research/snapshots/list").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{return dts::research_http::catalog(store_,object(req),true);});
+        });
+        CROW_ROUTE(app_, "/api/research/snapshots/view").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"snapshot_id"});return dts::research_http::snapshot_json(store_.snapshot(dts::research_http::id(j,"snapshot_id")));});
+        });
+        CROW_ROUTE(app_, "/api/research/snapshots/export").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"snapshot_id"});return dts::research_http::snapshot_json(store_.snapshot(dts::research_http::id(j,"snapshot_id")),true);});
+        });
+        CROW_ROUTE(app_, "/api/research/replay").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"snapshot_id","config","through_ordinal"});
+                const auto c=dts::research_http::request_config(j);const auto count=dts::research_http::bounded_integer(j,"through_ordinal",0,2000);
+                std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Research operation busy; retry explicitly later");
+                return dts::research_http::run(store_.snapshot(dts::research_http::id(j,"snapshot_id")),c,static_cast<std::size_t>(count));});
+        });
+        CROW_ROUTE(app_, "/api/research/experiments/create").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"snapshot_id","name","config"});
+                const auto c=dts::research_http::request_config(j);const auto label=dts::research_http::name(j);
+                std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Research operation busy; reconcile before repeating a save");
+                return dts::research_http::save(store_,dts::research_http::id(j,"snapshot_id"),label,c);});
+        });
+        CROW_ROUTE(app_, "/api/research/experiments/list").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{return dts::research_http::catalog(store_,object(req),false);});
+        });
+        CROW_ROUTE(app_, "/api/research/experiments/view").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"experiment_id"});return dts::research_http::experiment_json(store_.experiment(dts::research_http::id(j,"experiment_id")));});
+        });
+        CROW_ROUTE(app_, "/api/research/experiments/rerun").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"experiment_id","name"});const auto label=dts::research_http::name(j);
+                std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Research operation busy; reconcile before repeating a save");
+                const auto parent=store_.experiment(dts::research_http::id(j,"experiment_id"));
+                if(parent.engine_version!=dts::research::engine_version)throw std::logic_error("Saved engine version is incompatible with this rerun engine");
+                return dts::research_http::save(store_,parent.snapshot_id,label,dts::research_http::verified_experiment_config(parent),parent.id);});
+        });
+
         CROW_ROUTE(app_, "/api/history/datasets")([this](const crow::request& req) {
             return guarded(req,[&]{Json j;j["datasets"]=dts::history_http::rows(store_.historical_catalog());j["limit"]=200;j["recorded_not_live"]=true;return j;});
         });

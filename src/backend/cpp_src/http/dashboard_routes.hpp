@@ -41,6 +41,9 @@ inline void mount(crow::SimpleApp& app, int port) {
         if (name == "history.mjs") return serve(req, assets::history_mjs, "text/javascript; charset=utf-8");
         if (name == "history-model.mjs") return serve(req, assets::history_model_mjs, "text/javascript; charset=utf-8");
         if (name == "history.css") return serve(req, assets::history_css, "text/css; charset=utf-8");
+        if (name == "replay.mjs") return serve(req, assets::replay_mjs, "text/javascript; charset=utf-8");
+        if (name == "replay-model.mjs") return serve(req, assets::replay_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "replay.css") return serve(req, assets::replay_css, "text/css; charset=utf-8");
         return crow::response(404, "Unknown dashboard asset");
     });
 }

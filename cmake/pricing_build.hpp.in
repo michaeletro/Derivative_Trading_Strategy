@@ -1,5 +1,6 @@
 #pragma once
 namespace dts::pricing::build {
+inline constexpr const char* research_source_sha256 = "@research_fingerprint@";
 inline constexpr char application_version[] = "@PROJECT_VERSION@";
 inline constexpr char revision[] = "@pricing_revision@";
 inline constexpr char dirty[] = "@pricing_dirty@";

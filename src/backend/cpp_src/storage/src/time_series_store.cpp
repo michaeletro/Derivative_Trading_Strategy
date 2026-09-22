@@ -1,6 +1,7 @@
 #include <dts/time_series_store.hpp>
 #include <sqlite3.h>
 #include <dts/history_schema.hpp>
+#include <dts/research_schema.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -171,7 +172,7 @@ struct TimeSeriesStore::Impl {
             sqlite3_extended_result_codes(db,1);sqlite3_busy_timeout(db,1000);
             const auto appid=scalar(db,"PRAGMA application_id"),version=scalar(db,"PRAGMA user_version");
             const bool empty=scalar(db,"SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")==0;
-            if(!((appid==0&&version==0&&empty)||(appid==application_id&&(version==1||version==2))))
+            if(!((appid==0&&version==0&&empty)||(appid==application_id&&(version==1||version==2||version==3))))
                 throw std::runtime_error("Unknown recording schema: existing file was not adopted or reset");
             sql(db,"PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON;");
             // Single connection in exclusive mode: no cross-process WAL writers
@@ -209,11 +210,13 @@ PRAGMA user_version=1;
 )SQL");t.commit();
             }
             if(scalar_text(db,"PRAGMA quick_check")!="ok")throw std::runtime_error("Recording database integrity check failed; restore separately, never overwrite automatically");
-            if (version!=2) {
+            if (version<3) {
                 // Refuse an upgrade unless an existing v1 archive can be backed up.
                 // New empty databases need no pre-migration backup.
                 if(!empty) { info.run_id="migration"; backup_locked(); }
-                Transaction migration(db); sql(db,history_schema); migration.commit();
+                Transaction migration(db);
+                if(version<2) sql(db,history_schema);
+                sql(db,research_schema); migration.commit();
             }
             Transaction t(db);
             sql(db,"UPDATE history_requests SET state='interrupted',finished_ms=strftime('%s','now')*1000 WHERE state IN ('queued','pending')");
@@ -428,3 +431,5 @@ void TimeSeriesStore::close(bool acquisition_clean) {
 } // namespace dts::storage
 
 #include "history_store.inc"
+
+#include "research_store.inc"

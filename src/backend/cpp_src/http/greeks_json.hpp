@@ -36,7 +36,7 @@ inline Json build_json() {
     j["application_version"]=build::application_version; j["git_revision"]=build::revision;
     j["dirty_worktree"]=build::dirty; j["source_sha256"]=build::source_sha256;
     j["compiler"]=build::compiler; j["configuration"]=build::configuration;
-    j["pricing_engine"]=engine_version; j["sensitivity_engine"]=sensitivity_version;
+    j["pricing_engine"]=engine_version; j["sensitivity_engine"]=sensitivity_version; j["replay_engine"]="retrospective-replay-1";
     j["metadata_scope"]="configure_time; source archives may have unavailable Git revision"; return j;
 }
 inline Json envelope(const char* kind, Json request) {

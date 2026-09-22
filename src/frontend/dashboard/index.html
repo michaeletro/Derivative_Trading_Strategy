@@ -10,12 +10,13 @@
   <link rel="stylesheet" href="/dashboard/history.css">
   <link rel="stylesheet" href="/dashboard/greeks.css">
   <script type="module" src="/dashboard/app.mjs"></script>
+  <link rel="stylesheet" href="/dashboard/replay.css">
 </head>
 <body>
 <a class="skip" href="#overview">Skip to workspace</a>
 <aside class="sidebar">
   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#roadmap"><span>08</span> Study roadmap</a></nav>
+  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#replay"><span>08</span> Replay &amp; research</a><a href="#roadmap"><span>09</span> Study roadmap</a></nav>
   <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes. Market observations are saved locally.</small></div>
 </aside>
 <main id="overview">
@@ -178,7 +179,7 @@
       <label>Start (included)<input id="history-start" type="date" required></label><label>End (excluded)<input id="history-end" type="date" required></label>
       <label class="history-checkbox"><input id="history-rth" type="checkbox" checked> Regular trading hours only</label>
       <label>Request policy<select id="history-policy"><option value="saved">Saved data only — no broker request</option><option value="fetch_missing">Fetch uncovered intervals</option><option value="refresh">Refresh this interval from IBKR</option></select></label>
-      <div class="history-actions"><button id="history-request" type="submit" disabled>Load / request history</button><button id="history-cancel" type="button" class="secondary" disabled>Cancel pending downloads</button><button id="history-export" type="button" class="secondary" disabled>Export this view</button></div>
+      <div class="history-actions"><button id="history-request" type="submit" disabled>Load / request history</button><button id="history-cancel" type="button" class="secondary" disabled>Cancel pending downloads</button><button id="history-freeze" type="button" class="secondary" disabled>Select for research</button><button id="history-export" type="button" class="secondary" disabled>Export this view</button></div>
     </form>
     <p id="history-time-note"></p><p id="history-notice" role="status" aria-live="polite"></p>
     <h3 id="history-summary">No saved dataset view loaded.</h3><p id="history-conventions"></p>
@@ -187,7 +188,29 @@
     <details><summary>Numerical bars — latest 200 in this view</summary><div class="table-wrap"><table><thead><tr><th>Session date / UTC</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume (source)</th><th>Versions</th><th>Request ID</th></tr></thead><tbody id="history-rows"></tbody></table></div></details>
     <details open><summary>Request ledger — latest 200 overlapping requests</summary><div class="table-wrap"><table><thead><tr><th>ID</th><th>Start</th><th>End (excluded)</th><th>State</th><th>Received rows</th><th>Code</th></tr></thead><tbody id="history-requests"></tbody></table></div></details>
   </section>
-  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">08 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
+  <section class="panel replay-lab" id="replay" aria-labelledby="replay-title">
+    <div class="section-heading"><div><p class="eyebrow">08 / Replay &amp; research</p><h2 id="replay-title">Frozen data. Reproducible diagnostics.</h2></div><span class="badge">RETROSPECTIVE · NO TRADES</span></div>
+    <p>Freeze saved bar versions, replay only the released prefix, and compare immutable diagnostic runs. This is not point-in-time market reconstruction, implied volatility, or a strategy backtest.</p>
+    <h3>1. Freeze or reopen a dataset</h3>
+    <p id="replay-source">Choose a saved historical view, then Select for research.</p>
+    <div class="replay-grid"><label>Snapshot name<input id="replay-name" maxlength="80" value="Frozen historical study" disabled></label></div>
+    <div class="replay-actions"><button id="replay-create" disabled>Freeze latest saved response</button><button id="replay-load" class="secondary" disabled>Load snapshots</button><button id="replay-more" class="secondary" disabled>More snapshots</button><select id="replay-select" aria-label="Saved snapshot" disabled></select><button id="replay-export-snapshot" class="secondary" disabled>Export snapshot</button></div>
+    <p id="replay-manifest" class="replay-manifest"></p><p id="replay-quality-counts"></p><details><summary>Snapshot quality and interpretation</summary><div id="replay-quality" class="replay-quality"></div></details>
+    <h3>2. Release observations and inspect trailing estimates</h3>
+    <div class="replay-grid"><label>Rolling windows · return observations<input id="replay-windows" value="20,60" disabled></label><label>Annualization factor · periods / year<input id="replay-factor" type="number" min="1" max="10000000" step="any" value="252" disabled></label><label>Presentation speed<select id="replay-speed" disabled><option value="1">1 observation / tick</option><option value="5">5 observations / tick</option><option value="20">20 observations / tick</option></select></label></div>
+    <p id="replay-factor-note">Annualization is an explicit assumption, not inferred market-calendar coverage.</p>
+    <div class="replay-actions"><button id="replay-step" disabled>Step one</button><button id="replay-play" disabled>Play</button><button id="replay-pause" class="secondary" disabled>Pause</button><button id="replay-finish" class="secondary" disabled>Run to end</button><button id="replay-reset" class="secondary" disabled>Reset cursor</button></div>
+    <p id="replay-progress" role="status">0 observations released. No computation has run.</p><p id="replay-notice" class="replay-notice" role="status"></p>
+    <div class="replay-charts"><div><h3>Frozen close · released prefix</h3><canvas id="replay-price-chart" role="img" aria-label="No observations released"></canvas></div><div><h3>Trailing annualized sample volatility</h3><canvas id="replay-vol-chart" role="img" aria-label="No observations released"></canvas></div></div>
+    <p>Horizontal axis: observation ordinal, not elapsed wall time. Rolling estimates require a complete window of returns. Minute gaps reset windows; daily returns span adjacent supplied session closes. No prices are filled forward.</p>
+    <details><summary>Numerical diagnostics — latest 200 released observations</summary><div class="table-wrap"><table><thead><tr><th>Ordinal</th><th>Source period</th><th>Modeled availability</th><th>Close</th><th>Log return</th><th>Annualized vol / warm-up</th><th>Status</th></tr></thead><tbody id="replay-rows"></tbody></table></div></details>
+    <h3>3. Save and compare diagnostic runs</h3><p>Saving computes the whole snapshot with the displayed configuration, independent of the playback cursor. Rerun creates a new child record; no saved record is overwritten.</p>
+    <div class="replay-grid"><label>Experiment name<input id="experiment-name" maxlength="80" value="Trailing volatility study" disabled></label></div>
+    <div class="replay-actions"><button id="replay-save" disabled>Compute &amp; save full run</button><button id="experiment-load" class="secondary" disabled>Load experiments</button><button id="experiment-more" class="secondary" disabled>More experiments</button></div>
+    <div class="replay-grid"><label>Saved run A<select id="experiment-a" disabled></select></label><label>Saved run B<select id="experiment-b" disabled></select></label></div>
+    <div class="replay-actions"><button id="experiment-compare" disabled>Compare selected runs</button><button id="experiment-rerun" class="secondary" disabled>Rerun A configuration</button><button id="experiment-export" class="secondary" disabled>Export run A</button></div><p id="experiment-summary" role="status"></p><div class="table-wrap"><table><thead><tr><th>Property</th><th>Run A</th><th>Run B</th></tr></thead><tbody id="experiment-comparison"></tbody></table></div>
+  </section>
+  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">09 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
   <p id="build-info" class="build-info">Build identity: unlock to inspect the running server.</p>
   <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
 </main>

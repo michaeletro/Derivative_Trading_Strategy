@@ -1,7 +1,7 @@
 import {windowFromFields,validateHistory,formatHistoryTime} from './history-model.mjs';
 import {numberText} from './model.mjs';
 
-export function mountHistory(api,onAccessError){
+export function mountHistory(api,onAccessError,onResearchSelection=()=>{}){
   const $=id=>document.getElementById(id),put=(id,t)=>{$(id).textContent=t;};
   const make=(tag,text)=>{const n=document.createElement(tag);n.textContent=String(text??'—');return n;};
   let unlocked=false,busy=false,version=0,state=null,contract=null,datasets=[],query=null,result=null,timer=null;
@@ -13,6 +13,7 @@ export function mountHistory(api,onAccessError){
     $('history-policy').disabled=!unlocked||busy;
     $('history-cancel').disabled=!unlocked||busy||!result?.requests.some(r=>['queued','pending'].includes(r.state));
     $('history-export').disabled=!unlocked||busy||!result;
+    $('history-freeze').disabled=!unlocked||busy||!result?.bars.length;
   }
   function invalidate(){version++;clearTimeout(timer);timer=null;busy=false;query=null;result=null;$('history-rows').replaceChildren();$('history-requests').replaceChildren();put('history-summary','No saved dataset view loaded.');put('history-chart-note','Saved candles, not synthetic or current prices.');put('history-conventions','');put('history-gaps','');draw();controls();}
   function defaults(size){
@@ -64,6 +65,7 @@ export function mountHistory(api,onAccessError){
     if(!window.confirm('Cancel queued/in-flight historical requests for this shared server? Saved data will remain.'))return;
     work(async rev=>{await api.request('/api/history/cancel','POST',{});if(rev===version)await refresh(rev);});
   });
+  $('history-freeze').addEventListener('click',()=>{if(result)onResearchSelection(result);});
   $('history-export').addEventListener('click',()=>{
     if(!result)return;const a=document.createElement('a');const u=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
     a.href=u;a.download=`historical-dataset-${result.dataset_id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);

@@ -1,5 +1,6 @@
 #pragma once
 #include <dts/broker.hpp>
+#include <dts/replay.hpp>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -36,10 +37,14 @@ struct AssetRead {
     std::string dataset, ticker, start, end;
     int limit = 100;
 };
+struct Experiment {
+    std::int64_t id = 0, snapshot_id = 0, parent_id = 0, created_ms = 0;
+    std::string name, engine_version, config_json, result_json, result_sha256;
+};
 struct RecordedRead { std::int64_t id = 0, inserted = 0; };
 
 // One serialized SQLite connection and one recorder process per data directory.
-// No credentials, accounts, model outputs, or order data are recorded here.
+// No credentials, accounts or orders. Research runs have separate immutable tables.
 class TimeSeriesStore {
 public:
     explicit TimeSeriesStore(Config config, std::string mode);
@@ -66,6 +71,12 @@ public:
     void record_history_events(const std::vector<BrokerEvent>& events);
     std::vector<Row> historical_requests(std::int64_t dataset_id, HistoryWindow window) const;
     std::vector<Row> historical_bars(std::int64_t dataset_id, HistoryWindow window) const;
+    research::Snapshot create_snapshot(std::int64_t dataset_id, HistoryWindow window, const std::string& name);
+    research::Snapshot snapshot(std::int64_t snapshot_id) const;
+    Page snapshot_catalog(std::int64_t after_id=0, int limit=100) const;
+    std::int64_t save_experiment(const Experiment& experiment);
+    Experiment experiment(std::int64_t experiment_id) const;
+    Page experiment_catalog(std::int64_t after_id=0, int limit=100) const;
     Status status() const;
     Page catalog(std::int64_t after_id = 0, int limit = 100) const;
     Page history(std::int64_t series_id, std::int64_t after_id = 0,
