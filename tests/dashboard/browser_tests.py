@@ -15,7 +15,7 @@ CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'sel
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         assets = {'/': 'index.html', '/dashboard/': 'index.html', '/dashboard/index.html': 'index.html',
-                  '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css', '/dashboard/storage.mjs': 'storage.mjs', '/dashboard/storage-model.mjs': 'storage-model.mjs'}
+                  '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css', '/dashboard/storage.mjs': 'storage.mjs', '/dashboard/storage-model.mjs': 'storage-model.mjs', '/dashboard/history.mjs': 'history.mjs', '/dashboard/history-model.mjs': 'history-model.mjs', '/dashboard/history.css': 'history.css'}
         name = assets.get(urlparse(self.path).path)
         if not name:
             self.send_error(404); return
@@ -78,6 +78,7 @@ def main():
             page.route('**/api/**', handle); page.route('**/ib/status', handle)
             page.goto(origin); expect(page.locator('#session-badge')).to_have_text('LOCKED')
             page.wait_for_timeout(150)
+            assert not errors, f'Frontend modules did not initialize: {errors}'
             assert calls == [], 'Locked page must not inspect API state or connect'
             page.screenshot(path=str(shots/'dashboard-desktop.png'), full_page=True)
             page.set_viewport_size({'width':390,'height':844}); page.screenshot(path=str(shots/'dashboard-mobile.png'), full_page=True)
@@ -92,7 +93,8 @@ def main():
             assert page.evaluate('localStorage.length === 0 && sessionStorage.length === 0')
             page.locator('#connect').click(); expect(page.locator('#broker-status')).to_have_text('Ready')
             expect(page.locator('#session-badge')).to_have_text('SIMULATION')
-            page.locator('#resolve').click(); expect(page.locator('#candidates button')).to_have_count(2, timeout=7000)
+            page.locator('#resolve').click(); expect(page.locator('#candidates button[data-contract-id]')).to_have_count(2, timeout=7000)
+            expect(page.get_by_role('button', name='Historical bars', exact=True)).to_have_count(2)
             assert not any(path=='/api/subscriptions' for _,path,_ in calls), 'Resolution must not automatically subscribe'
             page.get_by_role('button', name='Subscribe 102', exact=True).click()
             expect(page.locator('#subscription-count')).to_have_text('1'); expect(page.locator('#chart-value')).to_have_text('100')
