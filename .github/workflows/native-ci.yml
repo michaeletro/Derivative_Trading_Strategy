@@ -1,0 +1,36 @@
+name: Native server and TWS integration
+on:
+  push:
+    branches: [feature/ibkr-foundation-20260922]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential cmake ninja-build libasio-dev libboost-system-dev libboost-thread-dev libboost-filesystem-dev libssl-dev libsqlite3-dev libcurl4-openssl-dev libeigen3-dev libwebsocketpp-dev protobuf-compiler libprotobuf-dev
+      - name: Inspect official SDK compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --max-time 120 https://interactivebrokers.github.io/downloads/twsapi_macunix.1045.01.zip -o "$RUNNER_TEMP/ibapi.zip"
+          sha256sum "$RUNNER_TEMP/ibapi.zip"
+          unzip -q "$RUNNER_TEMP/ibapi.zip" -d "$RUNNER_TEMP/ibapi"
+          echo 'SDK source directories:'
+          find "$RUNNER_TEMP/ibapi" -maxdepth 5 -type d | sort | head -60
+          echo 'Native callback and conversion declarations:'
+          find "$RUNNER_TEMP/ibapi" -name EWrapper_prototypes.h -o -name DefaultEWrapper.h -o -name EClientSocket.h -o -name DecimalFunctions.h | while read -r f; do
+            echo "$(basename "$f")"
+            grep -E 'nextValidId|contractDetails\(|contractDetailsEnd\(|position\(|positionEnd\(|tickPrice\(|marketDataType\(|error\(|eConnect\(|asyncEConnect|decimalToDouble' "$f" | head -20 || true
+          done
+      - name: Existing server build baseline
+        run: make -C src/backend/cpp_src -j2
