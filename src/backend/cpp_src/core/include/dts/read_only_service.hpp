@@ -33,12 +33,18 @@ public:
     void connect() {
         require_broker();
         if (state() == ConnectionState::Ready || state() == ConnectionState::Connecting) return;
+        ++generation_;
         invalidate(); errors_.clear(); broker_->connect();
     }
     void disconnect() noexcept {
+        if (state() != ConnectionState::Disconnected) ++generation_;
         if (broker_) broker_->disconnect();
         invalidate();
     }
+    // Read-only views. The application holds its service mutex for the whole snapshot.
+    std::uint64_t generation() const noexcept { return generation_; }
+    const std::map<RequestId, ContractId>& subscriptions() const noexcept { return subscriptions_; }
+    const Contract& contract(ContractId id) const { return contracts_.at(id); }
     RequestId resolve(const ContractQuery& query) {
         require_broker(); query.validate();
         if (resolutions_.size() >= 128) throw std::length_error("Resolution cache full; reconnect to clear");
@@ -54,6 +60,8 @@ public:
         require_broker();
         const auto it = contracts_.find(id);
         if (it == contracts_.end()) throw std::invalid_argument("Resolve the contract successfully before subscribing");
+        // One subscription per conId across tabs; a repeated intent does not leak a line.
+        for (const auto& entry : subscriptions_) if (entry.second == id) return entry.first;
         const auto request = broker_->subscribe(it->second);
         subscriptions_.emplace(request, id); return request;
     }
@@ -71,11 +79,10 @@ public:
     RequestId request_positions() {
         require_broker();
         if (positions_.status == SnapshotStatus::Pending) throw std::logic_error("Position snapshot already pending");
-        // Local correlation IDs are outside the native signed-int request space.
         if (next_position_id_ == std::numeric_limits<RequestId>::max())
             throw std::overflow_error("Position request IDs exhausted");
         const auto id = next_position_id_++;
-        broker_->request_positions(id); // Reject first, without destroying an existing snapshot.
+        broker_->request_positions(id);
         position_id_ = id; staged_positions_.clear(); positions_ = {};
         positions_.status = SnapshotStatus::Pending; return id;
     }
@@ -89,6 +96,7 @@ public:
     }
 private:
     std::unique_ptr<IBroker> broker_;
+    std::uint64_t generation_ = 0;
     std::map<RequestId, ResolutionView> resolutions_;
     std::map<ContractId, Contract> contracts_;
     std::map<RequestId, ContractId> subscriptions_;
@@ -135,7 +143,6 @@ private:
         }
         view.status = SnapshotStatus::Complete;
         for (const auto& c : view.contracts) contracts_[c.id] = c;
-        // Ambiguous queries retain ALL candidates. The caller must choose a conId.
     }
     void apply(const PositionEvent& e) {
         if (e.request_id != position_id_ || positions_.status != SnapshotStatus::Pending) return;

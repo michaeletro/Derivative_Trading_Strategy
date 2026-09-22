@@ -2,6 +2,7 @@
 #include <boost/asio.hpp>
 namespace asio = boost::asio;
 #include <crow_all.h>
+#include <dashboard_routes.hpp>
 #include <sqlite3.h>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
@@ -62,6 +63,29 @@ Json contract_json(const dts::Contract& c) {
     }
     return j;
 }
+Json quote_json(const dts::Quote& quote, dts::Clock::time_point now) {
+    Json j; j["contract_id"] = quote.contract_id; j["data_type"] = feed_name(quote.data_type);
+    const auto mid = quote.mid(now, std::chrono::seconds(5));
+    j["mid"] = mid ? Json(*mid) : Json(nullptr); j["indicative_only"] = true;
+    const auto side = [now](const std::optional<dts::QuoteSide>& value) {
+        if (!value) return Json(nullptr);
+        Json out; out["price"] = value->price;
+        out["receipt_age_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(now - value->received_at).count();
+        return out;
+    };
+    j["bid"] = side(quote.bid); j["ask"] = side(quote.ask); return j;
+}
+Json positions_json(const dts::PositionsView& view, bool simulation) {
+    Json j; j["status"] = snapshot_name(view.status); j["simulation"] = simulation;
+    j["snapshot_not_stream"] = true; std::vector<Json> rows;
+    for (const auto& position : view.positions) {
+        Json row; row["account"] = position.account; row["quantity"] = position.quantity;
+        row["contract"] = contract_json(position.contract); rows.push_back(std::move(row));
+    }
+    j["positions"] = view.status == dts::SnapshotStatus::Complete ? Json(std::move(rows)) : Json(nullptr);
+    if (view.completed_at) j["completed_at_unix_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(view.completed_at->time_since_epoch()).count();
+    return j;
+}
 std::string text(const crow::json::rvalue& j, const char* key, const std::string& fallback = "") {
     if (!j.has(key)) return fallback;
     if (j[key].t() != crow::json::type::String) throw std::invalid_argument("Expected string");
@@ -82,8 +106,7 @@ crow::json::rvalue object(const crow::request& req) {
     return j;
 }
 
-// Existing asset_data schema, now opened read-only. No implicit migrations,
-// CSV restore, backup exports, or trading records are written by the HTTP server.
+// Existing asset_data schema, opened read-only. No implicit migrations or backups.
 class AssetRepository {
     sqlite3* db_ = nullptr;
 public:
@@ -156,8 +179,6 @@ public:
             }
             broker_.disconnect();
         });
-        // Crow's Asio signal handling stops run(); ownership cleanup happens
-        // afterward, not in a std::signal handler doing joins or I/O.
         app_.bindaddr("127.0.0.1").port(static_cast<std::uint16_t>(port_)).concurrency(2).run();
         stop();
     }
@@ -167,6 +188,8 @@ private:
     int port_;
     AssetRepository assets_;
     dts::ReadOnlyService broker_;
+    // Non-secret instance identifier prevents charts joining observations across restarts.
+    const std::string instance_ = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     std::mutex broker_mutex_, database_mutex_;
     std::condition_variable wake_;
     std::thread worker_;
@@ -195,7 +218,8 @@ private:
     }
     crow::response response(Json body, int status = 200) const {
         crow::response result(std::move(body)); result.code = status;
-        result.set_header("Cache-Control", "no-store"); return result;
+        result.set_header("Cache-Control", "no-store");
+        result.set_header("X-Content-Type-Options", "nosniff"); return result;
     }
     crow::response message(int status, const char* text_value) const {
         Json j; j["error"] = text_value; return response(std::move(j), status);
@@ -225,11 +249,32 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        dts::dashboard::mount(app_, port_);
         CROW_ROUTE(app_, "/health")([this] {
             std::lock_guard<std::mutex> lock(broker_mutex_);
             Json j; j["status"] = worker_failed_ ? "degraded" : "ok";
             j["db_connected"] = assets_.available(); j["read_only"] = true;
             return response(std::move(j));
+        });
+        CROW_ROUTE(app_, "/api/dashboard")([this](const crow::request& req) {
+            return guarded(req, [&] {
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                // Drain first so all displayed views share a coherent service state.
+                broker_.poll();
+                Json j; j["broker"] = status();
+                j["session_id"] = instance_ + "-" + std::to_string(broker_.generation());
+                j["positions"] = positions_json(broker_.positions(), mode_ == "mock");
+                std::vector<Json> subscriptions;
+                const auto now = dts::Clock::now();
+                for (const auto& entry : broker_.subscriptions()) {
+                    Json row; row["subscription_id"] = entry.first;
+                    row["contract"] = contract_json(broker_.contract(entry.second));
+                    try { row["quote"] = quote_json(broker_.quote(entry.second), now); }
+                    catch (const std::out_of_range&) { row["quote"] = nullptr; }
+                    subscriptions.push_back(std::move(row));
+                }
+                j["subscriptions"] = std::move(subscriptions); return j;
+            });
         });
         CROW_ROUTE(app_, "/echo").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req, [&] { Json j; j["body"] = req.body; return j; });
@@ -290,17 +335,8 @@ private:
         });
         CROW_ROUTE(app_, "/api/quotes/<int>")([this](const crow::request& req, int id) {
             return guarded(req, [&] {
-                std::lock_guard<std::mutex> lock(broker_mutex_); const auto& quote = broker_.quote(id);
-                Json j; j["contract_id"] = quote.contract_id; j["data_type"] = feed_name(quote.data_type);
-                const auto now = dts::Clock::now(); const auto mid = quote.mid(now, std::chrono::seconds(5));
-                j["mid"] = mid ? Json(*mid) : Json(nullptr); j["indicative_only"] = true;
-                const auto side = [now](const std::optional<dts::QuoteSide>& value) {
-                    if (!value) return Json(nullptr);
-                    Json out; out["price"] = value->price;
-                    out["receipt_age_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(now - value->received_at).count();
-                    return out;
-                };
-                j["bid"] = side(quote.bid); j["ask"] = side(quote.ask); return j;
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                return quote_json(broker_.quote(id), dts::Clock::now());
             });
         });
         CROW_ROUTE(app_, "/api/positions/refresh").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
@@ -311,16 +347,8 @@ private:
         });
         CROW_ROUTE(app_, "/api/positions")([this](const crow::request& req) {
             return guarded(req, [&] {
-                std::lock_guard<std::mutex> lock(broker_mutex_); const auto& view = broker_.positions();
-                Json j; j["status"] = snapshot_name(view.status); j["simulation"] = mode_ == "mock";
-                j["snapshot_not_stream"] = true; std::vector<Json> rows;
-                for (const auto& position : view.positions) {
-                    Json row; row["account"] = position.account; row["quantity"] = position.quantity;
-                    row["contract"] = contract_json(position.contract); rows.push_back(std::move(row));
-                }
-                j["positions"] = view.status == dts::SnapshotStatus::Complete ? Json(std::move(rows)) : Json(nullptr);
-                if (view.completed_at) j["completed_at_unix_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(view.completed_at->time_since_epoch()).count();
-                return j;
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                return positions_json(broker_.positions(), mode_ == "mock");
             });
         });
     }
