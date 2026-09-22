@@ -7,13 +7,14 @@
   <title>Derivative Lab · Market & pricing research</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/dashboard/dashboard.css">
+  <link rel="stylesheet" href="/dashboard/greeks.css">
   <script type="module" src="/dashboard/app.mjs"></script>
 </head>
 <body>
 <a class="skip" href="#overview">Skip to workspace</a>
 <aside class="sidebar">
   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#roadmap"><span>05</span> Study roadmap</a></nav>
+  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#roadmap"><span>06</span> Study roadmap</a></nav>
   <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes.</small></div>
 </aside>
 <main id="overview">
@@ -88,7 +89,72 @@
       </div>
     </div><p id="pricing-note" class="pricing-note" role="status" aria-live="polite">Unlock local access to run an offline model experiment.</p>
   </section>
-  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">05 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Measure risk</h3><p>Greeks, scenarios, conventions, and portfolio aggregation.</p><span class="badge">PLANNED</span></article></section>
+  <section class="panel greeks-lab" id="sensitivities" aria-labelledby="greeks-title">
+    <header class="section-heading"><div><p class="eyebrow">05 / Sensitivities &amp; model shocks</p><h2 id="greeks-title">Greeks &amp; Scenario Lab</h2></div><span class="badge positive">HYPOTHETICAL · NO ACCOUNT EXPOSURE</span></header>
+    <p class="section-description">Differentiate the model. Reprice the shock. Compare the approximation. European exercise, constant coefficients, continuous yield. All calculations run in C++; no live prices or portfolio holdings are used.</p>
+    <div class="greeks-body">
+      <div class="lab-toolbar"><h3>Model inputs</h3><button id="greeks-copy" type="button" class="secondary" disabled>Copy pricing-lab inputs</button></div>
+      <form id="greeks-model-form"><fieldset id="greeks-model-fields" disabled><legend class="sr-only">Sensitivity model inputs</legend><div class="form-grid model-grid">
+        <label>Option right<select name="right"><option value="call">European call</option><option value="put">European put</option></select></label>
+        <label>Currency label<input name="currency" value="USD" maxlength="3" required></label>
+        <label>Spot S<input name="spot" type="number" min="0" max="100000000" step="any" value="100" required></label>
+        <label>Strike K<input name="strike" type="number" min="0.00000001" max="100000000" step="any" value="100" required></label>
+        <label>Maturity τ (years)<input name="maturity_years" type="number" min="0" max="30" step="any" value="1" required></label>
+        <label>Volatility σ (decimal)<input name="volatility" type="number" min="0" max="3" step="any" value="0.2" required></label>
+        <label>Rate r (decimal/year)<input name="rate" type="number" min="-0.5" max="0.5" step="any" value="0.05" required></label>
+        <label>Yield q (decimal/year)<input name="dividend_yield" type="number" min="-0.5" max="0.5" step="any" value="0" required></label>
+      </div></fieldset></form>
+      <p class="hint">Manual scenarios only. Interior Greeks require S &gt; 0, σ &gt; 0 and τ &gt; 0. Boundary prices remain available; no midpoint or one-sided Greek convention is inferred.</p>
+      <div class="greeks-layout">
+        <form id="greeks-form"><fieldset id="greeks-fields" disabled><legend>Monte Carlo sensitivity check</legend><div class="form-grid">
+          <label class="full">Estimator<select name="estimator" id="greeks-estimator"><option value="pathwise">Pathwise delta &amp; vega</option><option value="central_crn">Central difference · common random numbers</option></select></label>
+          <label>Terminal draws<input name="draws" type="number" min="1000" max="2000000" step="1" value="100000" required></label>
+          <label>Seed (uint64)<input name="seed" value="42" pattern="[0-9]{1,20}" required></label>
+          <label class="full">Pairing<select name="pairing"><option value="plain">Independent draws</option><option value="antithetic">Antithetic pairs</option></select></label>
+          <label>Relative spot bump<input name="relative_spot_bump" type="number" min="0.000001" max="0.1" step="any" value="0.001" required></label>
+          <label>Absolute σ bump<input name="volatility_bump" type="number" min="0.000001" max="0.1" step="any" value="0.001" required></label>
+        </div><p class="hint">Bumps are used only by central differences. Both bumped valuations share the same random draws. Antithetic uncertainty uses independent pair averages.</p></fieldset>
+        <button id="greeks-run" class="full-button" type="submit" disabled>Estimate Greeks</button>
+        <button id="greeks-export" class="secondary full-button" type="button" disabled>Export Greek experiment JSON</button>
+        </form>
+        <div id="greeks-results" aria-busy="false">
+          <div class="greek-summary">
+            <article><p>Model value</p><strong id="greeks-price">—</strong><small>Per payoff unit</small></article>
+            <article><p>Delta ∂V/∂S</p><strong id="greeks-delta">—</strong><small>Per spot unit</small></article>
+            <article><p>Gamma ∂²V/∂S²</p><strong id="greeks-gamma">—</strong><small>Per spot unit squared</small></article>
+            <article><p>Vega ∂V/∂σ</p><strong id="greeks-vega">—</strong><small>Per 1 volatility point</small></article>
+            <article><p>Theta −∂V/∂τ</p><strong id="greeks-theta">—</strong><small>Per calendar day (annual / 365)</small></article>
+            <article><p>Rho ∂V/∂r</p><strong id="greeks-rho">—</strong><small>Per 1 rate percentage point</small></article>
+          </div>
+          <p id="greeks-counts" class="hint">No sensitivity experiment has been run.</p>
+          <div class="table-scroll greek-comparison" tabindex="0" role="region" aria-label="Monte Carlo sensitivity estimates"><table><thead><tr><th>Sensitivity / unit</th><th>MC estimate</th><th>Std error</th><th>Pointwise 95% interval</th><th>Sampling target</th><th>Finite-bump bias</th></tr></thead><tbody id="greeks-mc-body"></tbody></table></div>
+          <p class="hint">The sampling target is the analytical derivative for pathwise estimates, or the analytical central difference for CRN. Finite-bump bias is excluded from sampling intervals. Gamma, theta and rho above are analytical only.</p>
+          <div id="greeks-warnings" role="status"></div><p id="greeks-provenance" class="pricing-provenance"></p>
+        </div>
+      </div>
+      <p id="greeks-note" class="lab-note" role="status" aria-live="polite">Unlock local access to estimate sensitivities.</p>
+      <div class="scenario-heading"><p class="eyebrow">MODEL REPRICING / LOCAL APPROXIMATION</p><h3>Shock the same instrument</h3><p>Full repricing versus Δ·ΔS + ½Γ·ΔS² + ν·Δσ + Θ·Δt. Cross terms and higher orders are omitted. This is model-value change, not account P&amp;L.</p></div>
+      <form id="scenario-form"><fieldset id="scenario-fields" disabled><legend class="sr-only">Scenario controls</legend><div class="form-grid scenario-grid-controls">
+        <label>Relative spot shock<input name="relative_spot" type="number" min="-0.9" max="1" step="any" value="0.10" required><small>0.10 means +10%</small></label>
+        <label>Absolute volatility shock<input name="volatility" type="number" min="-1" max="1" step="any" value="0.01" required><small>0.01 means +1 volatility point</small></label>
+        <label>Time roll (years)<input name="elapsed_years" type="number" min="0" max="30" step="any" value="0" required><small>Must not exceed remaining maturity</small></label>
+        <label>Spot grid ± half-width<input name="spot_span" type="number" min="0" max="0.5" step="any" value="0.20" required></label>
+        <label>Volatility grid ± half-width<input name="volatility_span" type="number" min="0" max="0.5" step="any" value="0.05" required></label>
+      </div></fieldset><div class="lab-toolbar"><button id="scenario-run" type="submit" disabled>Reprice scenarios</button><button id="scenario-export" type="button" class="secondary" disabled>Export scenario JSON</button></div></form>
+      <div id="scenario-results" aria-busy="false">
+        <div class="scenario-summary greek-summary"><article><p>Full model-value change</p><strong id="scenario-full">—</strong></article><article><p>Greek approximation</p><strong id="scenario-approx">—</strong></article><article><p>Repricing minus approximation</p><strong id="scenario-residual">—</strong></article></div>
+        <div class="scenario-charts">
+          <article><div class="lab-toolbar"><h3>Value &amp; sensitivity versus spot</h3><label class="sr-only" for="curve-metric">Curve metric</label><select id="curve-metric"><option value="price">Model value</option><option value="delta">Delta</option><option value="gamma">Gamma</option></select></div><div class="chart-wrap"><canvas id="greeks-curve-chart" role="img" aria-label="No scenario curves yet"></canvas></div><p class="hint">Current maturity, half maturity and one-tenth maturity. These curves do not apply the selected shock or time roll.</p></article>
+          <article><h3>Approximation residual versus spot shock</h3><div class="chart-wrap"><canvas id="scenario-residual-chart" role="img" aria-label="No residual curve yet"></canvas></div><p class="hint">Selected volatility shock and time roll held fixed. Residual = full repricing change minus truncated approximation.</p></article>
+        </div>
+        <div class="heatmap-panel"><div class="lab-toolbar"><h3>Spot / volatility scenario grid</h3><label class="sr-only" for="heatmap-metric">Heatmap metric</label><select id="heatmap-metric"><option value="full_change">Full model-value change</option><option value="residual">Approximation residual</option></select></div><div class="chart-wrap heatmap-wrap"><canvas id="scenario-heatmap" role="img" aria-label="No scenario grid yet"></canvas></div><p id="heatmap-description" class="hint">Run repricing to populate the grid. Out-of-domain cells remain unavailable; volatility is never silently clamped.</p></div>
+        <details><summary>Exact grid values (accessible table)</summary><div class="table-scroll" tabindex="0" role="region" aria-label="Scenario grid numerical values"><table><thead><tr><th>Spot shock %</th><th>Vol shock pp</th><th>Full change</th><th>Approximation</th><th>Residual</th><th>Status</th></tr></thead><tbody id="scenario-table"></tbody></table></div></details>
+      </div>
+      <p id="scenario-note" class="lab-note" role="status" aria-live="polite">Repricing does not require a Monte Carlo run or a broker connection.</p>
+    </div>
+  </section>
+  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">06 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
+  <p id="build-info" class="build-info">Build identity: unlock to inspect the running server.</p>
   <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
 </main>
 <dialog id="disconnect-dialog" aria-labelledby="disconnect-title"><h2 id="disconnect-title">Disconnect this broker session?</h2><p>This clears server subscriptions and snapshots for every client using this server. It does not cancel brokerage orders.</p><div class="actions"><button id="keep-connected" class="secondary">Keep connected</button><button id="confirm-disconnect">Disconnect session</button></div></dialog>

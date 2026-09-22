@@ -1,0 +1,59 @@
+/* Sensitivities retain the local dashboard palette, without remote assets. */
+.greeks-lab { margin-bottom:22px }
+.greeks-body { padding:0 25px 24px }
+.lab-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:18px 0 }
+.lab-toolbar h3 { margin:0 }
+.lab-toolbar button { font-size:12px }
+.lab-toolbar select { width:auto; max-width:240px }
+.model-grid { grid-template-columns:repeat(4,minmax(0,1fr)) }
+.greeks-layout { display:grid;grid-template-columns:minmax(260px,1fr) minmax(0,2fr);gap:26px;margin-top:26px;padding-top:24px;border-top:1px solid var(--border) }
+.greeks-layout legend { font-size:15px;margin-bottom:18px }
+.greeks-layout .form-grid { gap:12px }
+.greek-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px }
+.greek-summary article { min-width:0;padding:16px;border:1px solid var(--border);border-radius:7px;background:var(--panel-top) }
+.greek-summary p { font-size:12px; margin:0 0 9px }
+.greek-summary strong { font:600 19px/1.4 ui-monospace,monospace;overflow-wrap:anywhere }
+.greek-summary small { display:block;color:var(--subtle);font-size:10px;margin-top:8px }
+#greeks-results { min-width:0 }
+.greek-comparison { margin-top:20px }
+.greek-comparison th,.greek-comparison td { padding:12px;font-size:11px }
+.lab-note { margin-top:20px;padding:14px;background:var(--panel-top);border-left:2px solid var(--accent);font-size:13px;overflow-wrap:anywhere }
+#greeks-warnings p { color:var(--warn);font-size:12px;margin-top:12px }
+.scenario-heading { margin-top:30px;padding-top:25px;border-top:1px solid var(--border) }
+.scenario-heading p { font-size:12px }
+.scenario-grid-controls { grid-template-columns:repeat(3,minmax(0,1fr)) }
+.scenario-grid-controls small { display:block;font-size:10px;margin-top:5px }
+.scenario-summary { margin-top:24px }
+.scenario-charts { display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:24px 0 }
+.scenario-charts article { min-width:0 }
+.scenario-charts .chart-wrap { height:240px;margin:12px 0 }
+.scenario-charts .lab-toolbar { margin-top:0 }
+.scenario-charts h3 { min-height:42px;display:flex;align-items:center;margin:0 }
+.heatmap-panel { padding:18px;border:1px solid var(--border);border-radius:8px }
+.heatmap-panel .lab-toolbar { margin-top:0 }
+.heatmap-wrap { height:300px;margin:16px 0 }
+.greeks-body details { margin-top:20px;font-size:12px }
+.greeks-body summary { cursor:pointer }
+.build-info { font:11px/1.8 ui-monospace,monospace;overflow-wrap:anywhere;color:var(--muted);margin-top:24px;padding:12px;border:1px solid var(--border);border-radius:6px }
+@media(max-width:1150px) {
+ .greeks-layout { grid-template-columns:1fr }
+ .greeks-layout .form-grid { grid-template-columns:repeat(3,minmax(0,1fr)) }
+ .greeks-layout .form-grid .full { grid-column:auto }
+}
+@media(max-width:700px) {
+ nav { overflow-x:auto;justify-content:flex-start;gap:12px;padding-bottom:2px }
+ nav a { flex-shrink:0 }
+ .greeks-body { padding:0 18px 20px }
+ .greeks-lab .section-heading { align-items:flex-start;flex-direction:column }
+ .model-grid,.greeks-layout .form-grid,.scenario-grid-controls { grid-template-columns:repeat(2,minmax(0,1fr)) }
+ .greeks-layout .form-grid .full { grid-column:1/-1 }
+ .greek-summary { grid-template-columns:repeat(2,minmax(0,1fr));gap:10px }
+ .greek-summary strong { font-size:16px }
+ .greek-summary article { padding:12px }
+ .scenario-summary { grid-template-columns:1fr }
+ .scenario-charts { grid-template-columns:1fr }
+ .lab-toolbar { flex-wrap:wrap;gap:12px }
+ .lab-toolbar select { max-width:100%;width:100% }
+ .heatmap-panel { padding:12px }
+ .heatmap-wrap { height:260px }
+}

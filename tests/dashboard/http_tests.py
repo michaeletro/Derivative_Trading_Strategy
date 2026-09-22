@@ -39,7 +39,7 @@ def main():
                     if process.poll() is not None: raise AssertionError('Server stopped at startup')
                     time.sleep(.05)
                 else: raise AssertionError('Server startup timed out')
-                for path,mime in [('/','text/html'),('/dashboard','text/html'),('/dashboard/','text/html'),('/dashboard/index.html','text/html'),('/dashboard/dashboard.css','text/css'),('/dashboard/app.mjs','text/javascript'),('/dashboard/model.mjs','text/javascript')]:
+                for path,mime in [('/','text/html'),('/dashboard','text/html'),('/dashboard/','text/html'),('/dashboard/index.html','text/html'),('/dashboard/dashboard.css','text/css'),('/dashboard/app.mjs','text/javascript'),('/dashboard/model.mjs','text/javascript'),('/dashboard/greeks.mjs','text/javascript'),('/dashboard/greeks-model.mjs','text/javascript'),('/dashboard/greeks.css','text/css')]:
                     code,headers,body=call(path)
                     assert code==200 and mime in headers['Content-Type'],(path,code,headers)
                     assert headers['Cache-Control']=='no-store' and headers['X-Content-Type-Options']=='nosniff'

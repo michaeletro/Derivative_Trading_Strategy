@@ -15,7 +15,7 @@ CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'sel
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         assets = {'/': 'index.html', '/dashboard/': 'index.html', '/dashboard/index.html': 'index.html',
-                  '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs'}
+                  '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css'}
         name = assets.get(urlparse(self.path).path)
         if not name:
             self.send_error(404); return
