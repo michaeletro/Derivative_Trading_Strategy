@@ -1,0 +1,2 @@
+# Dependencies for the offline Python regression suite only.
+requests>=2.32.4,<3
