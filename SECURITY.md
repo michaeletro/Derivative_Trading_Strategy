@@ -59,3 +59,21 @@ checkout. Successful batches are committed during collection; backups use SQLite
 online backup API on orderly shutdown. A forced process/WSL exit cannot guarantee
 a shutdown backup, and same-disk backups cannot protect against disk loss. See
 `docs/persistent-timeseries.md` for exact scope, permissions and restore behavior.
+
+
+## Immutable research records
+
+The Replay & Research Lab uses the existing authenticated, loopback-only service.
+Snapshots are created only from saved historical datasets. HTTP input cannot
+supply SQL, source paths, saved numerical outputs, or arbitrary broker requests.
+Snapshot/run limits bound work and storage per operation; there is no automatic
+retention. Names are untrusted user labels and are rendered as text. Research
+calculations share the bounded calculation lock rather than touching live state.
+
+Schema-3 snapshots/runs use immutability triggers and integrity checks. A SHA-256
+content digest detects changes; it is not a signature and does not protect against
+an attacker controlling the local account/database. Snapshot exports include saved
+market observations and should not be published unintentionally. They exclude
+configured tokens and account/position state. Token removal clears the research UI
+and suppresses pending responses but does not undo a server-side committed save.
+No browser/transport retry is allowed to silently create a duplicate run.

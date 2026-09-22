@@ -1,5 +1,36 @@
 # Derivative Trading Strategy
 
+## Replay & Research Lab (0.8.0)
+
+Freeze a completed historical view into an immutable snapshot, replay released
+observations in session order, inspect trailing log-return/sample-volatility
+diagnostics, and save complete runs with snapshot/configuration/build identity.
+Saved reruns are new records, not overwrites. No broker call or order can be
+triggered by this research workspace. Daily replay is ordinal; minute bars use a
+modeled bar-end availability convention. This is retrospective research, not
+point-in-time strategy backtesting or listed-option P&L.
+
+**Existing archives upgrade to schema 3 after a verified pre-migration backup.**
+Older schema-only binaries refuse the upgraded archive. Read the [replay runbook
+and migration/rollback instructions](docs/replay-research.md) before first launch.
+The catalog added here stores return/volatility diagnostics; pricing/Greeks
+experiments still use their existing JSON exports.
+
+```bash
+python3 tools/start_dashboard.py --profile paper-tws
+```
+
+Use the already configured profile, then open `/#replay`. For saved-data-only
+research, `--profile paper-tws --mode research` disables the broker while keeping
+the same archive/token. Stop the old archive owner before either launch.
+
+## Historical Data Manager (0.7.0)
+
+Private named profiles persist the local dashboard token and connection settings.
+The historical manager retrieves bounded daily/minute USD equity/ETF bars, caches
+completed response intervals and preserves revisions. See [historical acquisition
+and conventions](docs/historical-data.md). No claim of full-market coverage is made.
+
 ## Persistent time-series archive (0.6.0)
 
 The server now opens a durable SQLite recorder automatically, outside the checkout.
@@ -7,8 +38,9 @@ Broker quote events and bars returned by `/api/assets` are committed during use;
 normal shutdown drains delivered events and creates a verified consistent backup.
 The new Recorded history workspace retrieves stored data after restart without
 relabeling it as live. See [recording, shutdown and restore](docs/persistent-timeseries.md).
-One recorder owns each data directory. No automatic retention/deletion or historical
-IBKR backfill is included. Local archival writes do not enable broker orders.
+One recorder owns each data directory. No automatic retention/deletion is included.
+Historical acquisition is provided separately by the 0.7.0 manager described above.
+Local archival writes do not enable broker orders.
 
 ## New: Greeks & Scenario Lab
 
