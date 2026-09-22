@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Derivative Lab · Market & positions</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/dashboard/dashboard.css">
+  <script type="module" src="/dashboard/app.mjs"></script>
+</head>
+<body>
+<a class="skip" href="#overview">Skip to workspace</a>
+<aside class="sidebar">
+  <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
+  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#roadmap"><span>04</span> Study roadmap</a></nav>
+  <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes.</small></div>
+</aside>
+<main id="overview">
+  <header class="page-heading"><div><p class="eyebrow">Interactive Brokers / Research console</p><h1>Market & positions<span>.</span></h1><p>A direct view of your broker connection. No inferred balances, no synthetic live prices.</p></div><span id="session-badge" class="badge">LOCKED</span></header>
+  <section class="panel access" aria-labelledby="access-title">
+    <div><h2 id="access-title">Local access</h2><p>Use your server’s <code>DTS_API_TOKEN</code>, not your IBKR password. The token stays in this tab’s memory.</p></div>
+    <form id="access-form" autocomplete="off"><label class="sr-only" for="token">Local dashboard token</label><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Local dashboard token" maxlength="1024"><button id="unlock" type="submit">Unlock dashboard</button><button id="forget" type="button" class="secondary" disabled>Forget token</button></form>
+  </section>
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <section class="metrics" aria-label="System summary">
+    <article class="panel metric"><p class="eyebrow">HTTP service</p><h2 id="http-status">Locked</h2><p id="http-detail">Unlock to inspect the service</p></article>
+    <article class="panel metric"><p class="eyebrow">Broker session</p><h2 id="broker-status">Not inspected</h2><p id="broker-detail">No connection opened by this page</p></article>
+    <article class="panel metric"><p class="eyebrow">Subscriptions</p><h2 id="subscription-count">—</h2><p>Explicit contract selection only</p></article>
+    <article class="panel metric"><p class="eyebrow">Position snapshot</p><h2 id="snapshot-status">Unavailable</h2><p id="snapshot-detail">Not an empty portfolio</p></article>
+  </section>
+  <section class="panel connection" aria-label="Broker connection controls"><p id="connection-note">Unlock, then connect explicitly to your configured broker.</p><div class="actions"><button id="refresh" class="secondary" disabled>Refresh view</button><button id="connect" disabled>Connect broker</button><button id="disconnect" class="secondary" disabled>Disconnect</button></div></section>
+  <div class="workspace-grid">
+    <section class="panel monitor" aria-labelledby="monitor-title">
+      <header class="section-heading"><div><p class="eyebrow">01 / Market observations</p><h2 id="monitor-title">Quote monitor</h2></div><span id="poll-badge" class="badge">NOT POLLING</span></header>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Subscribed instrument quotes"><table><thead><tr><th>Instrument / conId</th><th>Bid</th><th>Ask</th><th>Midpoint</th><th>Feed / quality</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="quotes-body"><tr class="empty"><td colspan="6">No subscriptions loaded.<small>Resolve an instrument, inspect the candidates, then subscribe.</small></td></tr></tbody></table></div>
+      <div class="chart-heading"><div><h3>Browser-session midpoint</h3><p id="chart-label">Select a subscribed instrument. This is not historical tick data.</p></div><strong id="chart-value">—</strong></div>
+      <div class="chart-wrap"><canvas id="chart" role="img" aria-label="No midpoint observations yet"></canvas><p id="chart-empty">Waiting for observations</p></div>
+      <div class="chart-footer"><span id="chart-time">No recorded observations</span><span>Last 120 polls · gaps preserved · indicative only</span></div>
+    </section>
+    <section class="panel discovery" id="instruments" aria-labelledby="discovery-title">
+      <p class="eyebrow">02 / Contract discovery</p><h2 id="discovery-title">Find an instrument</h2>
+      <form id="contract-form"><fieldset id="contract-fields" disabled><div class="form-grid">
+        <label>Symbol<input name="symbol" value="AAPL" maxlength="64" required autocomplete="off"></label>
+        <label>Security<select name="security_type" id="security-type"><option value="STK">Equity / ETF</option><option value="OPT">Listed option</option></select></label>
+        <label>Route<input name="exchange" value="SMART" maxlength="64" required></label><label>Currency<input name="currency" value="USD" maxlength="16" required></label>
+        <label class="full">Primary exchange <span class="subtle">optional</span><input name="primary_exchange" placeholder="e.g. NASDAQ" maxlength="64"></label>
+        <div id="option-fields" class="full form-grid" hidden><label>Right<select name="right"><option value="C">Call</option><option value="P">Put</option></select></label><label>Strike<input name="strike" type="number" min="0.000001" step="any" inputmode="decimal"></label><label class="full">Expiry<input name="expiry" type="date"></label></div>
+      </div><button id="resolve" class="full-button" type="submit">Resolve contract</button></fieldset></form>
+      <p class="hint">A symbol is a query, not a unique contract.</p><p id="resolution-note" role="status"></p><div id="candidates" aria-label="Resolved contract candidates"></div>
+    </section>
+  </div>
+  <section class="panel positions" id="positions" aria-labelledby="positions-title">
+    <header class="section-heading"><div><p class="eyebrow">03 / Broker holdings</p><h2 id="positions-title">Position snapshot</h2></div><button id="snapshot" class="secondary" disabled>Request snapshot</button></header>
+    <p class="section-description" id="position-description">Unavailable until a request completes. One native snapshot per connection; not continuous reconciliation.</p>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Position snapshot"><table><thead><tr><th>Account</th><th>Instrument</th><th>Type</th><th>Quantity</th><th>Multiplier</th><th>Currency</th></tr></thead><tbody id="positions-body"><tr class="empty"><td colspan="6">Positions unavailable — no completed snapshot.</td></tr></tbody></table></div>
+  </section>
+  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">04 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">NEXT · NOT IMPLEMENTED</span></article><article><span class="step">03</span><h3>Measure risk</h3><p>Greeks, scenarios, conventions, and portfolio aggregation.</p><span class="badge">PLANNED</span></article></section>
+  <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
+</main>
+<dialog id="disconnect-dialog" aria-labelledby="disconnect-title"><h2 id="disconnect-title">Disconnect this broker session?</h2><p>This clears server subscriptions and snapshots for every client using this server. It does not cancel brokerage orders.</p><div class="actions"><button id="keep-connected" class="secondary">Keep connected</button><button id="confirm-disconnect">Disconnect session</button></div></dialog>
+<noscript>This dashboard needs JavaScript. Broker access remains available through the documented HTTP API.</noscript>
+</body>
+</html>
