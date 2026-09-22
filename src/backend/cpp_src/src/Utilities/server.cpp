@@ -5,6 +5,7 @@ namespace asio = boost::asio;
 #include <sqlite3.h>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
+#include <dts/dashboard_http.hpp>
 #ifdef DTS_WITH_IBKR
 #include <dts/tws_broker.hpp>
 #endif
@@ -225,6 +226,13 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        dts::web::install_dashboard(app_, port_);
+        CROW_ROUTE(app_, "/api/dashboard")([this](const crow::request& req) {
+            return guarded(req, [&] {
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                return dts::web::dashboard_json(broker_, status(), mode_ == "mock");
+            });
+        });
         CROW_ROUTE(app_, "/health")([this] {
             std::lock_guard<std::mutex> lock(broker_mutex_);
             Json j; j["status"] = worker_failed_ ? "degraded" : "ok";

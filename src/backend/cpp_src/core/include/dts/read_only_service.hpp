@@ -52,11 +52,17 @@ public:
     }
     RequestId subscribe(ContractId id) {
         require_broker();
+        if (state() != ConnectionState::Ready) throw std::logic_error("Broker is not ready");
         const auto it = contracts_.find(id);
         if (it == contracts_.end()) throw std::invalid_argument("Resolve the contract successfully before subscribing");
+        // A dashboard refresh/repeated selection must not consume another line.
+        for (const auto& entry : subscriptions_) if (entry.second == id) return entry.first;
+        if (subscriptions_.size() >= 16) throw std::length_error("Subscription limit reached");
         const auto request = broker_->subscribe(it->second);
         subscriptions_.emplace(request, id); return request;
     }
+    const std::map<RequestId, ContractId>& subscriptions() const noexcept { return subscriptions_; }
+    const Contract& contract(ContractId id) const { return contracts_.at(id); }
     bool unsubscribe(RequestId id) {
         require_broker();
         const auto it = subscriptions_.find(id);

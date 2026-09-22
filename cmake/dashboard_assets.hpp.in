@@ -1,0 +1,8 @@
+#pragma once
+#include <string_view>
+namespace dts::web {
+inline constexpr std::string_view html = R"DTS_HTML(@DTS_DASHBOARD_HTML@)DTS_HTML";
+inline constexpr std::string_view css = R"DTS_CSS(@DTS_DASHBOARD_CSS@)DTS_CSS";
+inline constexpr std::string_view app_js = R"DTS_APP(@DTS_DASHBOARD_APP@)DTS_APP";
+inline constexpr std::string_view model_js = R"DTS_MODEL(@DTS_DASHBOARD_MODEL@)DTS_MODEL";
+}
