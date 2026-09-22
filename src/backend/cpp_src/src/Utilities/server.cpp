@@ -18,7 +18,7 @@ namespace asio = boost::asio;
 #include "../../headers/DataBase/DataBaseClass.h"
 #include "../../headers/APIConnection/IBWebSocket.h"
 
-// Minimal Crow server with health, echo, DB-backed asset query, and optional IB relay.
+// Legacy read-only HTTP surface. Raw broker command forwarding is disabled.
 namespace {
 
 crow::SimpleApp app;
@@ -53,14 +53,14 @@ void tryInitDb() {
     const std::string stockCsv = envOrDefault("STOCK_CSV", "stock_backup.csv");
     const std::string optionCsv = envOrDefault("OPTION_CSV", "option_backup.csv");
     const bool createIfMissing = parseBool(envOrDefault("DB_CREATE_IF_MISSING", "true"), true);
-    const bool restoreFromCsv = parseBool(envOrDefault("DB_RESTORE_FROM_CSV", "true"), true);
+    const bool restoreFromCsv = parseBool(envOrDefault("DB_RESTORE_FROM_CSV", "false"), false);
     const bool failFast = parseBool(envOrDefault("DB_FAIL_FAST", "true"), true);
 
     const bool exists = std::filesystem::exists(dbPath);
     if (!exists && !createIfMissing) {
-        std::cerr << "❌ Database file not found at " << dbPath << "; creation disabled." << std::endl;
+        std::cerr << "Database file not found at " << dbPath << "; creation disabled." << std::endl;
         if (failFast) {
-            std::cerr << "⛔ DB_FAIL_FAST=true; exiting." << std::endl;
+            std::cerr << "DB_FAIL_FAST=true; exiting." << std::endl;
             std::exit(1);
         }
         return;
@@ -68,11 +68,11 @@ void tryInitDb() {
 
     try {
         g_db = std::make_unique<DataBaseClass>(dbPath, assetCsv, stockCsv, optionCsv, createIfMissing, restoreFromCsv);
-        std::cout << "✅ Database ready at " << dbPath << " (" << (exists ? "existing" : "new") << ")" << std::endl;
+        std::cout << "Database ready at " << dbPath << " (" << (exists ? "existing" : "new") << ")" << std::endl;
     } catch (const std::exception& ex) {
-        std::cerr << "❌ Failed to init database: " << ex.what() << std::endl;
+        std::cerr << "Failed to init database: " << ex.what() << std::endl;
         if (failFast) {
-            std::cerr << "⛔ DB_FAIL_FAST=true; exiting." << std::endl;
+            std::cerr << "DB_FAIL_FAST=true; exiting." << std::endl;
             std::exit(1);
         }
     }
@@ -100,10 +100,10 @@ crow::json::wvalue toJson(const std::vector<std::unique_ptr<AssetData>>& rows) {
 }
 
 void tryInitIb() {
-    const std::string enable = envOrDefault("ENABLE_IB_WS", "true");
-    g_ibEnabled = parseBool(enable, true);
+    const std::string enable = envOrDefault("ENABLE_IB_WS", "false");
+    g_ibEnabled = parseBool(enable, false);
     if (!g_ibEnabled) {
-        std::cout << "ℹ️ IB WebSocket disabled (set ENABLE_IB_WS=true to enable)." << std::endl;
+        std::cout << "IB WebSocket disabled. See SECURITY.md before enabling the legacy transport." << std::endl;
         return;
     }
 
@@ -111,9 +111,9 @@ void tryInitIb() {
     try {
         g_ib = std::make_unique<IBWebSocket>();
         g_ib->connect(g_ibUrl);
-        std::cout << "✅ IB WebSocket connection attempt to " << g_ibUrl << std::endl;
+        std::cout << "Experimental IB WebSocket connection attempted; brokerage readiness is not verified." << std::endl;
     } catch (const std::exception& ex) {
-        std::cerr << "❌ Failed to initialize IB WebSocket: " << ex.what() << std::endl;
+        std::cerr << "Failed to initialize IB WebSocket: " << ex.what() << std::endl;
         g_ibEnabled = false;
     }
 }
@@ -151,13 +151,7 @@ void startServer() {
         }
 
         auto rows = g_db->queryData(
-            "asset_data",
-            ticker ? ticker : "",
-            start ? start : "",
-            end ? end : "",
-            limit,
-            true);
-
+            "asset_data", ticker ? ticker : "", start ? start : "", end ? end : "", limit, true);
         return crow::response{toJson(rows)};
     });
 
@@ -165,31 +159,19 @@ void startServer() {
         crow::json::wvalue res;
         res["enabled"] = g_ibEnabled;
         res["connected"] = g_ib ? g_ib->isConnected() : false;
-        res["url"] = g_ibUrl;
+        res["brokerage_ready"] = false;
+        res["order_submission_enabled"] = false;
         return crow::response{res};
     });
 
-    CROW_ROUTE(app, "/ib/send").methods(crow::HTTPMethod::POST)([](const crow::request& req) {
-        if (!g_ibEnabled || !g_ib) {
-            return crow::response{503, "IB WebSocket disabled"};
-        }
-        if (!g_ib->isConnected()) {
-            return crow::response{503, "IB WebSocket not connected"};
-        }
-        const std::string payload = req.body;
-        if (payload.empty()) {
-            return crow::response{400, "Empty body"};
-        }
-        g_ib->sendMessage(payload);
-        crow::json::wvalue res;
-        res["sent_bytes"] = static_cast<int>(payload.size());
-        return crow::response{res};
+    CROW_ROUTE(app, "/ib/send").methods(crow::HTTPMethod::POST)([] {
+        return crow::response{403, "Raw IB relay disabled. Typed, authenticated broker services are required."};
     });
 
     std::signal(SIGINT, handleShutdown);
     std::signal(SIGTERM, handleShutdown);
 
     constexpr uint16_t port = 8080;
-    std::cout << "Starting HTTP server on :" << port << std::endl;
-    app.port(port).multithreaded().run();
+    std::cout << "Starting local HTTP server on 127.0.0.1:" << port << std::endl;
+    app.bindaddr("127.0.0.1").port(port).multithreaded().run();
 }

@@ -53,3 +53,19 @@ config.json
 *.backup
 *.orig
 *.rej
+
+# Local configuration, SDKs, and CMake output
+.venv/
+.env.*
+!.env.example
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+Testing/
+compile_commands.json
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+vendor/ibkr/

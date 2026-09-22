@@ -1,203 +1,128 @@
+"""Polygon aggregate-bar client with runtime credentials and bounded requests."""
 import logging
+import math
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Optional
-from urllib.error import HTTPError
+from urllib.parse import quote, urlencode
 
 import requests
 
-# Custom error handling classes
-from Error_Handling.api_errors import CustomAPIError, APIDelayedError, APIEmptyResponseError, APIInvalidRequestError
+from Error_Handling.api_errors import (
+    CustomAPIError, APIDelayedError, APIEmptyResponseError, APIConnectionError,
+    APITimeoutError, APIDataParsingError, APIUnexpectedStatusCodeError,
+)
 
-# API key for authentication
-from Utilities.Utilities_Resources import apiKey
+logger = logging.getLogger(__name__)
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class API_Connection:
+    """Fetch one aggregate-bar response. Pagination/retries are not implemented.
+
+    Existing positional arguments are preserved. Date defaults and credentials
+    are resolved when a client is constructed, not when the module is imported.
+    No request is made during construction. Public URL/repr/logs omit the key.
     """
-    A class to manage API connections and requests for financial asset data.
-
-    Attributes:
-    -----------
-    asset : str
-        The financial asset ticker symbol.
-    time_multiplier : str
-        The time multiplier for data aggregation.
-    time_span : str
-        The time span for data aggregation.
-    start_date : str
-        The start date for the data request.
-    end_date : str
-        The end date for the data request.
-    adjusted : bool
-        Whether the data is adjusted.
-    sort : str
-        The sort order of the data ("asc" or "desc").
-    limit : Optional[int]
-        The limit on the number of data points.
-    debug : bool
-        Whether to enable debug mode.
-
-    Methods:
-    --------
-    generate_request() -> Dict:
-        Sends the API request and returns the response.
-
-    build_url() -> str:
-        Constructs the API request URL.
-
-    validate_parameters():
-        Validates input parameters to ensure they meet API requirements.
-    """
-
     API_BASE_URL = "https://api.polygon.io/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{start}/{end}"
 
-    def __init__(
-        self,
-        asset_name: str,
-        time_multiplier: str = "1",
-        time_span: str = "day",
-        start_date: str = (datetime.today()-timedelta(days=10)).strftime("%Y-%m-%d"),
-        end_date: str = datetime.today().strftime("%Y-%m-%d"),
-        adjusted: bool = True,
-        sort: str = "asc",
-        limit: Optional[int] = 5000,
-        api_key: str = apiKey,
-        debug: bool = False,
-    ):
-        """
-        Initializes the APIConnection class with the specified parameters.
-
-        Parameters:
-        -----------
-        asset : str
-            The financial asset ticker symbol.
-        time_multiplier : str
-            The time multiplier for data aggregation.
-        time_span : str
-            The time span for data aggregation (e.g., "minute", "day").
-        start_date : str
-            The start date for the data request.
-        end_date : str
-            The end date for the data request.
-        adjusted : bool
-            Whether the data is adjusted.
-        sort : str
-            The sort order of the data ("asc" or "desc").
-        limit : Optional[int]
-            The limit on the number of data points.
-        api_key : str
-            API key for authentication.
-        debug : bool
-            Whether to enable debug mode.
-        """
+    def __init__(self, asset_name: str, time_multiplier: str = "1",
+                 time_span: str = "day", start_date: Optional[str] = None,
+                 end_date: Optional[str] = None, adjusted: bool = True,
+                 sort: str = "asc", limit: Optional[int] = 5000,
+                 api_key: Optional[str] = None, debug: bool = False, *,
+                 timeout: float = 15.0):
+        today = datetime.today()
         self.response = None
         self.asset_name = asset_name
-        self.time_multiplier = time_multiplier
+        self.time_multiplier = str(time_multiplier)
         self.time_span = time_span
-        self.start_date = start_date
-        self.end_date = end_date
+        self.start_date = start_date if start_date is not None else (today - timedelta(days=10)).strftime("%Y-%m-%d")
+        self.end_date = end_date if end_date is not None else today.strftime("%Y-%m-%d")
         self.adjusted = adjusted
         self.sort = sort
         self.limit = limit
-        self.api_key = api_key
+        self.api_key = os.environ.get("POLYGON_API_KEY", "") if api_key is None else api_key
         self.debug = debug
+        self.timeout = timeout
         self.headers = {"Accept": "application/json"}
         self.payload = None
-
+        self._validate_parameters()
         self.url = self._build_url()
 
-        if self.debug:
-            logging.info("Generating a API Connection Class...")
-            print(self.url)
-
-    def _validate_response(self):
-        """Validates the API response output."""
-        status = self.response.get('status')
-        results_count = self.response.get('resultsCount', 0)
-
-        if status == 'ERROR':
-            if self.debug:
-                logging.info(self.response)
-            logging.warning("API Error encountered. Retrying...")
-            raise CustomAPIError("API Error encountered.", self.response)
-
-        if status == 'DELAYED' and results_count == 0:
-            if self.debug:
-                logging.info(self.response)
-            logging.warning("Response delayed. Retrying...")
-            raise APIDelayedError(self.response)
-
-        if status == 'OK' and results_count == 0:
-            if self.debug:
-                logging.info(self.response)
-            logging.error("Unexpected empty response. Retrying...")
-            raise APIEmptyResponseError(self.response)
-
-        if self.debug:
-            logging.info("Response validated successfully.")
-
-
     def _validate_parameters(self):
-        """Validates input parameters to ensure they meet API requirements."""
-        valid_time_spans = {"minute", "hour", "day", "week", "month"}
-        valid_sort_orders = {"asc", "desc"}
-
-        if self.time_span not in valid_time_spans:
-            raise ValueError(f"Invalid time_span: {self.time_span}. Must be one of {valid_time_spans}.")
-        if self.sort not in valid_sort_orders:
-            raise ValueError(f"Invalid sort order: {self.sort}. Must be one of {valid_sort_orders}.")
-        if not self.api_key:
-            raise ValueError("API key is required.")
-
-        if self.debug:
-            logging.info("Parameters validated successfully.")
+        if not isinstance(self.asset_name, str) or not self.asset_name.strip():
+            raise ValueError("asset_name must be nonempty")
+        if self.time_span not in {"minute", "hour", "day", "week", "month"}:
+            raise ValueError("Invalid time_span")
+        if not self.time_multiplier.isdecimal() or int(self.time_multiplier) <= 0:
+            raise ValueError("time_multiplier must be a positive integer")
+        if self.sort not in {"asc", "desc"} or not isinstance(self.adjusted, bool):
+            raise ValueError("Invalid sort or adjusted value")
+        if self.limit is not None and (type(self.limit) is not int or not 1 <= self.limit <= 50000):
+            raise ValueError("limit must be an integer in [1, 50000] or None")
+        if not isinstance(self.api_key, str) or not self.api_key.strip():
+            raise ValueError("Set POLYGON_API_KEY or supply api_key explicitly")
+        if not isinstance(self.timeout, (int, float)) or isinstance(self.timeout, bool) or not math.isfinite(self.timeout) or self.timeout <= 0:
+            raise ValueError("timeout must be finite and positive")
+        start = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end = datetime.strptime(self.end_date, "%Y-%m-%d")
+        if start > end:
+            raise ValueError("start_date must not be after end_date")
 
     def _build_url(self) -> str:
-        """Constructs the API request URL."""
         url = self.API_BASE_URL.format(
-            ticker=self.asset_name,
-            multiplier=self.time_multiplier,
-            timespan=self.time_span,
-            start=self.start_date,
-            end=self.end_date,
-        )
-        url += f"?adjusted={str(self.adjusted).lower()}&sort={self.sort}"
-        if self.limit:
-            url += f"&limit={self.limit}"
-        if self.debug:
-            logging.debug(f"Constructed URL: {url}")
-        url += f"&apiKey={self.api_key}"
-        return url
+            ticker=quote(self.asset_name, safe=""), multiplier=self.time_multiplier,
+            timespan=self.time_span, start=self.start_date, end=self.end_date)
+        params = {"adjusted": str(self.adjusted).lower(), "sort": self.sort}
+        if self.limit is not None:
+            params["limit"] = self.limit
+        return url + "?" + urlencode(params)
+
+    def _validate_response(self):
+        if not isinstance(self.response, dict):
+            raise APIDataParsingError()
+        status = self.response.get("status")
+        results = self.response.get("results", [])
+        count = self.response.get("resultsCount", len(results) if isinstance(results, list) else 0)
+        if status == "ERROR":
+            raise CustomAPIError("Market-data API returned an error")
+        if status == "DELAYED" and count == 0:
+            raise APIDelayedError()
+        if status == "OK" and count == 0:
+            raise APIEmptyResponseError()
 
     def generate_request(self) -> Dict:
-        """
-        Sends the API request and returns the response.
-
-        Returns:
-        --------
-        Dict:
-            The API response as a dictionary.
-
-        Raises:
-        -------
-        requests.RequestException:
-            If the request fails due to a network or server error.
-        """
+        self._validate_parameters()
+        self.response = None  # Never expose the previous successful response after a failure.
+        self.url = self._build_url()
+        if self.debug:
+            logger.info("Requesting aggregate market data for %s", self.asset_name)
+        headers = dict(self.headers, Authorization="Bearer " + self.api_key)
         try:
-            self._validate_parameters()
-
-            response = requests.get(self.url, headers=self.headers)
-            self.response = response.json()
-
+            response = requests.get(self.url, headers=headers,
+                                    timeout=self.timeout, allow_redirects=False)
+            # Do not forward credentials to redirects or treat redirects as success.
+            if 300 <= response.status_code < 400:
+                raise APIUnexpectedStatusCodeError(response.status_code)
+            response.raise_for_status()
+        except requests.Timeout:
+            raise APITimeoutError() from None
+        except requests.HTTPError as error:
+            code = error.response.status_code if error.response is not None else 0
+            raise APIUnexpectedStatusCodeError(code) from None
+        except requests.RequestException:
+            raise APIConnectionError() from None
+        try:
+            parsed = response.json()
+        except ValueError:
+            raise APIDataParsingError() from None
+        self.response = parsed
+        try:
             self._validate_response()
-            return self.response
-
-        except HTTPError as e:
-            logging.error(f"API request failed: {e}")
-            #raise APIInvalidRequestError(e)
+        except CustomAPIError:
+            self.response = None
+            raise
+        return self.response
 
     def __repr__(self):
-        """Returns a string representation of the APIConnection instance."""
-        return f"<APIConnection(asset={self.asset_name}, url={self.url})>"
+        return f"<APIConnection(asset={self.asset_name!r})>"
