@@ -1,0 +1,50 @@
+name: Web dashboard
+on:
+  pull_request:
+  push:
+    branches: [feature/web-dashboard-20260922]
+permissions:
+  contents: read
+concurrency:
+  group: dashboard-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install server and browser test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build libasio-dev libboost-system-dev libsqlite3-dev
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: JavaScript model tests
+        run: node --test tests/dashboard_model_tests.mjs
+      - name: Build server with embedded dashboard (no broker SDK needed)
+        run: |
+          cmake -S . -B build-dashboard -G Ninja -DDTS_BUILD_SERVER=ON -DDTS_WITH_IBKR=OFF -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-dashboard --parallel 2
+          ctest --test-dir build-dashboard --output-on-failure
+      - name: Real browser against embedded assets and explicit API fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          DTS_BROKER=none HTTP_PORT=8181 ./build-dashboard/server > "$RUNNER_TEMP/dashboard-server.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do curl -sf http://127.0.0.1:8181/health >/dev/null && break; sleep 0.2; done
+          python tests/dashboard_browser_tests.py --base-url http://127.0.0.1:8181 --output test-artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-test-previews
+          path: test-artifacts/
+          retention-days: 7
