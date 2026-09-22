@@ -31,6 +31,8 @@ inline void mount(crow::SimpleApp& app, int port) {
         if (name == "dashboard.css") return serve(req, assets::dashboard_css, "text/css; charset=utf-8");
         if (name == "app.mjs") return serve(req, assets::app_mjs, "text/javascript; charset=utf-8");
         if (name == "model.mjs") return serve(req, assets::model_mjs, "text/javascript; charset=utf-8");
+        if (name == "pricing.mjs") return serve(req, assets::pricing_mjs, "text/javascript; charset=utf-8");
+        if (name == "pricing-model.mjs") return serve(req, assets::pricing_model_mjs, "text/javascript; charset=utf-8");
         return crow::response(404, "Unknown dashboard asset");
     });
 }

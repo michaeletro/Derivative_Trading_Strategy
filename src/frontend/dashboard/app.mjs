@@ -1,7 +1,9 @@
+import {mountPricing} from './pricing.mjs';
 import {POLL_MS, numberText, titleCase, quoteView, sample, validateSnapshot, contractQuery, createApi} from './model.mjs';
 
 const $=id=>document.getElementById(id);
 const api=createApi();
+const pricingLab=mountPricing(api,error=>lock(error.message));
 let unlocked=false, busy=false, current=null, currentAt=0, fresh=false, revision=0, timer;
 let session='', selected=null, pendingResolution=null, candidates=[], requestedPositions=false;
 let histories=new Map(), quoteRows=new Map(), positionSignature='';
@@ -209,6 +211,7 @@ function renderChart() {
   ctx.stroke();ctx.fillStyle=css.getPropertyValue('--accent');for(const p of valid) {ctx.beginPath();ctx.arc(x(p),y(p),2,0,Math.PI*2);ctx.fill();}
 }
 function render() {
+  pricingLab.setAccess(unlocked);
   const broker=fresh?current?.broker:null, state=broker?.state;
   text('session-badge',!unlocked?'LOCKED':!fresh?'DATA UNAVAILABLE':broker?.simulation?'SIMULATION':'READ ONLY');
   $('session-badge').className='badge'+(broker?.simulation?' warning':ready()?' positive':'');

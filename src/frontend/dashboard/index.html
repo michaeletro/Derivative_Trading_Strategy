@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Derivative Lab · Market & positions</title>
+  <title>Derivative Lab · Market & pricing research</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/dashboard/dashboard.css">
   <script type="module" src="/dashboard/app.mjs"></script>
@@ -13,7 +13,7 @@
 <a class="skip" href="#overview">Skip to workspace</a>
 <aside class="sidebar">
   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#roadmap"><span>04</span> Study roadmap</a></nav>
+  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#roadmap"><span>05</span> Study roadmap</a></nav>
   <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes.</small></div>
 </aside>
 <main id="overview">
@@ -55,7 +55,40 @@
     <p class="section-description" id="position-description">Unavailable until a request completes. One native snapshot per connection; not continuous reconciliation.</p>
     <div class="table-scroll" tabindex="0" role="region" aria-label="Position snapshot"><table><thead><tr><th>Account</th><th>Instrument</th><th>Type</th><th>Quantity</th><th>Multiplier</th><th>Currency</th></tr></thead><tbody id="positions-body"><tr class="empty"><td colspan="6">Positions unavailable — no completed snapshot.</td></tr></tbody></table></div>
   </section>
-  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">04 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">NEXT · NOT IMPLEMENTED</span></article><article><span class="step">03</span><h3>Measure risk</h3><p>Greeks, scenarios, conventions, and portfolio aggregation.</p><span class="badge">PLANNED</span></article></section>
+  <section class="panel pricing-lab" id="pricing" aria-labelledby="pricing-title">
+    <header class="section-heading"><div><p class="eyebrow">04 / Numerical experiments</p><h2 id="pricing-title">Pricing &amp; Simulation Lab</h2></div><span class="badge positive">OFFLINE MODEL · EUROPEAN</span></header>
+    <p class="section-description">Compare Black–Scholes–Merton with exact-GBM Monte Carlo. Manual scenarios under the risk-neutral measure, not market forecasts or listed-option fair values.</p>
+    <div class="pricing-grid">
+      <form id="pricing-form"><fieldset id="pricing-fields" disabled><legend class="sr-only">European option model inputs</legend><div class="form-grid">
+        <label>Option right<select name="right"><option value="call">European call</option><option value="put">European put</option></select></label>
+        <label>Currency label<input name="currency" value="USD" pattern="[A-Z]{3}" maxlength="3" required></label>
+        <label>Spot S₀<input name="spot" value="100" type="number" min="0" max="100000000" step="any" required></label>
+        <label>Strike K<input name="strike" value="100" type="number" min="0.00000001" max="100000000" step="any" required></label>
+        <label>Maturity T (years)<input name="maturity_years" value="1" type="number" min="0" max="30" step="any" required></label>
+        <label>Volatility σ (decimal)<input name="volatility" value="0.2" type="number" min="0" max="3" step="any" required></label>
+        <label>Continuous rate r<input name="rate" value="0.05" type="number" min="-0.5" max="0.5" step="any" required></label>
+        <label>Continuous yield q<input name="dividend_yield" value="0" type="number" min="-0.5" max="0.5" step="any" required></label>
+        <label>Payoff evaluations / paths<input name="paths" value="100000" type="number" min="1000" max="2000000" step="1" required></label>
+        <label>Random seed (64-bit)<input name="seed" value="42" pattern="[0-9]{1,20}" maxlength="20" inputmode="numeric" required></label>
+        <label class="full">Estimator<select name="method"><option value="plain">Plain Monte Carlo</option><option value="antithetic">Antithetic pairs — same payoff budget</option></select></label>
+      </div><p class="hint">Use 0.20 for 20% volatility and 0.05 for a 5% rate. Constant coefficients; continuous yield only. No discrete dividends or early exercise.</p></fieldset>
+      <button id="pricing-run" class="full-button" type="submit" disabled>Run experiment</button>
+      <div class="pricing-files"><button type="button" id="pricing-export" class="secondary" disabled>Export experiment JSON</button><button type="button" id="pricing-import" class="secondary" disabled>Import inputs</button><input id="pricing-file" type="file" accept=".json,application/json" aria-label="Import experiment JSON" hidden></div>
+      <p class="hint">Save the exported file yourself. No server-side experiment database or browser storage is used.</p></form>
+      <div id="pricing-results" aria-busy="false">
+        <div class="pricing-summary"><article><p>Analytical BSM</p><strong id="pricing-analytical">—</strong></article><article><p>Monte Carlo estimate</p><strong id="pricing-mc">—</strong></article><article><p>Sampling standard error</p><strong id="pricing-se">—</strong></article><article><p>Pointwise 95% interval</p><strong id="pricing-ci">—</strong></article></div>
+        <p id="pricing-metrics" class="hint">No experiment has been run.</p>
+        <p class="hint">MC minus analytical: <strong id="pricing-difference">—</strong>. Prices are per one payoff unit, without a listed-contract multiplier.</p>
+        <div class="pricing-chart-key"><span>● Monte Carlo estimate / pointwise intervals</span><span>– – Analytical benchmark</span></div>
+        <div class="chart-wrap pricing-chart-wrap"><canvas id="pricing-chart" role="img" aria-label="No sampling convergence curve."></canvas><p id="pricing-chart-empty">Run an experiment to inspect convergence.</p></div>
+        <p class="hint">Nested sample sizes share observations. Intervals cover sampling error under this model only—not model risk, profitability, or a simultaneous convergence band.</p>
+        <div id="pricing-warnings" role="status" aria-live="polite"></div>
+        <p id="pricing-provenance" class="pricing-provenance">Results are computed by C++, not by the browser.</p>
+        <details><summary>Convergence values</summary><div class="table-scroll" tabindex="0" role="region" aria-label="Monte Carlo convergence values"><table><thead><tr><th>Paths</th><th>Independent samples</th><th>Estimate</th><th>Std error</th><th>95% low</th><th>95% high</th></tr></thead><tbody id="pricing-points"></tbody></table></div></details>
+      </div>
+    </div><p id="pricing-note" class="pricing-note" role="status" aria-live="polite">Unlock local access to run an offline model experiment.</p>
+  </section>
+  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">05 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Measure risk</h3><p>Greeks, scenarios, conventions, and portfolio aggregation.</p><span class="badge">PLANNED</span></article></section>
   <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
 </main>
 <dialog id="disconnect-dialog" aria-labelledby="disconnect-title"><h2 id="disconnect-title">Disconnect this broker session?</h2><p>This clears server subscriptions and snapshots for every client using this server. It does not cancel brokerage orders.</p><div class="actions"><button id="keep-connected" class="secondary">Keep connected</button><button id="confirm-disconnect">Disconnect session</button></div></dialog>
