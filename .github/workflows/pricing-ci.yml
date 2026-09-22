@@ -1,0 +1,33 @@
+name: Pricing lab
+on:
+  push:
+    branches: [feature/pricing-simulation-lab]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: pricing-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source snapshot (no vendor SDK, secrets, or runtime data)
+        run: |
+          git archive --format=tar.gz -o research-source.tar.gz HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-source
+          path: research-source.tar.gz
+          retention-days: 3
+      - name: Install HTTP dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build libasio-dev libboost-system-dev libsqlite3-dev
+      - name: Build research server without a broker SDK
+        run: |
+          cmake -S . -B build-pricing -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDTS_BUILD_SERVER=ON -DDTS_WITH_IBKR=OFF
+          cmake --build build-pricing --parallel 2
+          ctest --test-dir build-pricing --output-on-failure
