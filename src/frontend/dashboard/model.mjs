@@ -64,6 +64,25 @@ export function contractQuery(form) {
   return q;
 }
 export class ApiError extends Error { constructor(message, status=0) { super(message); this.status=status; } }
+// Only allow literal numeric cursor/filter parameters on the two read-only
+// archive routes. Do not relax the token client's policy to arbitrary queries.
+function validApiPath(path, method) {
+  if (typeof path!=='string' || path.includes('..') || path.includes('\\')) return false;
+  const parts=path.split('?'), route=parts[0];
+  if (parts.length>2 || !/^\/(?:api\/[A-Za-z0-9_/-]+|ib\/status)$/.test(route)) return false;
+  if (parts.length===1) return true;
+  const keys=route==='/api/storage/series' ? ['after_id','limit'] :
+    route==='/api/storage/history' ? ['series_id','after_id','through_id','limit','from_ms','to_ms'] : null;
+  if (method!=='GET' || !keys || !parts[1]) return false;
+  const seen=new Set();
+  for (const pair of parts[1].split('&')) {
+    if (!/^[a-z_]+=(?:0|[1-9][0-9]{0,18})$/.test(pair)) return false;
+    const key=pair.split('=')[0];
+    if (!keys.includes(key) || seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
+}
 // The token exists only in this closure. Never use persistent browser storage.
 export function createApi(fetcher = fetch) {
   let token = '', generation = 0;
@@ -74,7 +93,7 @@ export function createApi(fetcher = fetch) {
     clear() { cancel(); token=''; },
     cancel,
     async request(path, method='GET', data) {
-      if (!/^\/(?:api\/|ib\/status$)/.test(path) || path.includes('..') || path.includes('\\') || path.includes('?')) throw new ApiError('Invalid local API path.');
+      if (!validApiPath(path,method)) throw new ApiError('Invalid local API path.');
       const started = generation, controller = new AbortController(); active.add(controller);
       const timer=setTimeout(() => controller.abort(), 12000);
       try {
