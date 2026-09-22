@@ -110,7 +110,7 @@ public:
     }
     void positionEnd() override { post([](TwsState& s) { s.position_end(); }); }
     void error(int id, time_t, int code, const std::string& message, const std::string&) override { deliver_error(id, code, message); }
-    void historicalData(TickerId id,const ::Bar& bar) override {
+    void historicalData(int id,const ::Bar& bar) override {
         try {
             HistoricalBar b;b.time=bar.time;b.open=bar.open;b.high=bar.high;b.low=bar.low;b.close=bar.close;
             const auto volume=DecimalFunctions::decimalToDouble(bar.volume);
