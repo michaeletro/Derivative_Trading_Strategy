@@ -4,6 +4,7 @@ namespace asio = boost::asio;
 #include <crow_all.h>
 #include <dashboard_routes.hpp>
 #include <sqlite3.h>
+#include "pricing_json.hpp"
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
 #ifdef DTS_WITH_IBKR
@@ -190,7 +191,7 @@ private:
     dts::ReadOnlyService broker_;
     // Non-secret instance identifier prevents charts joining observations across restarts.
     const std::string instance_ = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
-    std::mutex broker_mutex_, database_mutex_;
+    std::mutex broker_mutex_, database_mutex_, pricing_mutex_;
     std::condition_variable wake_;
     std::thread worker_;
     bool stopping_ = false, worker_failed_ = false;
@@ -249,6 +250,14 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        CROW_ROUTE(app_, "/api/pricing/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                const auto request = dts::pricing::http::parse(object(req));
+                std::unique_lock<std::mutex> lock(pricing_mutex_, std::try_to_lock);
+                if (!lock.owns_lock()) throw std::length_error("Pricing is busy; wait for the current experiment");
+                return dts::pricing::http::record(request, dts::pricing::simulate(request.inputs, request.config));
+            });
+        });
         dts::dashboard::mount(app_, port_);
         CROW_ROUTE(app_, "/health")([this] {
             std::lock_guard<std::mutex> lock(broker_mutex_);
