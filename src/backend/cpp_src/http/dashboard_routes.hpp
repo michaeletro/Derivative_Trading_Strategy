@@ -23,7 +23,8 @@ inline void mount(crow::SimpleApp& app, int port) {
         return response;
     };
     CROW_ROUTE(app, "/")([serve](const crow::request& req) { return serve(req, assets::index_html, "text/html; charset=utf-8"); });
-    CROW_ROUTE(app, "/dashboard")([serve](const crow::request& req) { return serve(req, assets::index_html, "text/html; charset=utf-8"); });
+    // This Crow version registers /dashboard as a redirect for /dashboard/.
+    // Registering both explicitly makes startup fail with a duplicate handler.
     CROW_ROUTE(app, "/dashboard/")([serve](const crow::request& req) { return serve(req, assets::index_html, "text/html; charset=utf-8"); });
     CROW_ROUTE(app, "/dashboard/<string>")([serve](const crow::request& req, const std::string& name) {
         if (name == "index.html") return serve(req, assets::index_html, "text/html; charset=utf-8");
