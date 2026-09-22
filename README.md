@@ -1,5 +1,15 @@
 # Derivative Trading Strategy
 
+## Persistent time-series archive (0.6.0)
+
+The server now opens a durable SQLite recorder automatically, outside the checkout.
+Broker quote events and bars returned by `/api/assets` are committed during use;
+normal shutdown drains delivered events and creates a verified consistent backup.
+The new Recorded history workspace retrieves stored data after restart without
+relabeling it as live. See [recording, shutdown and restore](docs/persistent-timeseries.md).
+One recorder owns each data directory. No automatic retention/deletion or historical
+IBKR backfill is included. Local archival writes do not enable broker orders.
+
 ## New: Greeks & Scenario Lab
 
 The `feature/greeks-scenario-lab` increment adds analytical BSM Greeks,
@@ -42,7 +52,7 @@ for assumptions, input units, reproducibility limits, tests and run commands.
 - Existing Polygon Python ingestion, static web prototype and SwiftUI scaffold.
 
 No order-submission interface exists. Listed-contract pricing/calibration and portfolio risk
-limits, account balances, durable live-data recording and continuous position
+limits, account balances and continuous position
 reconciliation remain future increments. A validated OrderIntent is not risk
 approval. The old experimental Client Portal source is retained but no longer
 started by the server; the raw `/ib/send` relay is unavailable.
@@ -73,7 +83,8 @@ DTS_BROKER=none ./build-server/server
 
 The compatibility Makefile at `src/backend/cpp_src/Makefile` delegates to CMake
 and copies the executable to its `bin/server`. The active server reads an existing
-`asset_data` SQLite schema; it never creates a DB or restores/exports CSVs.
+`asset_data` SQLite schema; it never creates that source DB or restores/exports CSVs.
+A separate persistent recorder is automatically opened as described above.
 `DB_PATH` defaults to `quant_data.db`; a missing database is reported explicitly.
 The old database/research classes remain outside this read-only HTTP target.
 
@@ -96,7 +107,11 @@ paper session for acceptance tests. Ports alone do not identify account mode.
 | `POST /api/greeks/run` | Manual-model analytical Greeks and MC delta/vega checks |
 | `POST /api/scenarios/run` | Manual-model full repricing, approximation and scenario grid |
 | `POST /echo` | JSON wrapper containing the submitted body |
-| `GET /api/assets` | Read-only SQLite asset query |
+| `GET /api/assets` | Read-only source query; returned bars are archived separately |
+| `GET /api/storage/status` | Archive status, counts and file locations |
+| `GET /api/storage/series` | Saved-series catalog |
+| `GET /api/storage/history` | Cursor-paginated saved observations |
+| `POST /api/storage/backup` | Consistent backup while broker is disconnected |
 | `GET /ib/status` | Adapter mode, API-handshake state and error codes |
 | `POST /api/broker/connect` or `/disconnect` | Explicit connection lifecycle |
 | `POST /api/contracts/resolve` | Asynchronous contract query |

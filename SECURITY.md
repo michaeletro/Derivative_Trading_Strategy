@@ -24,8 +24,9 @@ any subsequent history cleanup with collaborators; no history rewrite is made he
 - Missing/incomplete/unsupported position data is unavailable or failed, not a
   fabricated empty portfolio. Returned complete positions are snapshots, not live
   risk controls. Request IDs persist across reconnects.
-- The asset repository opens existing SQLite data read-only. HTTP startup does not
-  create databases, migrate schemas, or restore/export CSVs.
+- The asset repository opens existing source SQLite data read-only; it does not
+  create/migrate that source database or restore/export CSVs. HTTP startup now
+  opens or initializes a separate, private recording schema with an identity check.
 
 Loopback is not a hardened multi-user boundary. The HTTP token travels over local
 HTTP, and the native SDK socket is not made into a public TLS service by this
@@ -48,3 +49,13 @@ and buying-power limits, and tested cancellation/kill-switch semantics. Timeouts
 must never trigger blind resubmission. Do not store broker passwords or two-factor
 secrets in source. Successful offline/CI tests do not validate a live brokerage
 session, market-data entitlement, option model, or trading strategy.
+
+## Local time-series recording
+
+The broker remains read-only, but market observations now write to a separate
+private SQLite database. Do not share backups publicly or commit runtime data.
+The main archive is exclusively owned by one recorder and defaults outside the
+checkout. Successful batches are committed during collection; backups use SQLite's
+online backup API on orderly shutdown. A forced process/WSL exit cannot guarantee
+a shutdown backup, and same-disk backups cannot protect against disk loss. See
+`docs/persistent-timeseries.md` for exact scope, permissions and restore behavior.
