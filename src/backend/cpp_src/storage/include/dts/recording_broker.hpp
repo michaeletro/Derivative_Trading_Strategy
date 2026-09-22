@@ -27,7 +27,7 @@ public:
         if (active_) {
             // A final drain has a finite cutoff. Bytes still in the network/SDK
             // after this point are not claimed to have been recorded.
-            try { store_.record_events(source_, inner_->poll()); }
+            try { auto tail=inner_->poll();store_.record_history_events(tail);store_.record_events(source_, tail);store_.interrupt_history(); }
             catch (...) { /* Store retains a sticky failure; shutdown reports it. */ }
             inner_->disconnect();
             try { store_.request(source_, "disconnected"); } catch (...) {}
@@ -49,7 +49,7 @@ public:
         store_.require_healthy();
         // Preserve events already delivered at cancellation time, even though
         // they need not be shown as current after the subscription disappears.
-        auto drained=inner_->poll();store_.record_events(source_,drained);
+        auto drained=inner_->poll();store_.record_history_events(drained);store_.record_events(source_,drained);
         if(pending_.size()+drained.size()>4096) {
             store_.request(source_,"recorder_delivery_overflow");disconnect();
             throw std::overflow_error("Recorded event delivery queue overflow");
@@ -59,13 +59,17 @@ public:
         store_.request(source_, cancelled ? "unsubscribed" : "unsubscribe_unknown", id);
         return cancelled;
     }
+    RequestId request_history(const HistorySpec& spec,HistoryWindow window) override {
+        store_.require_healthy();return inner_->request_history(spec,window);
+    }
+    void cancel_history(RequestId id) override {inner_->cancel_history(id);}
     void request_positions(RequestId id) override {
         store_.require_healthy(); inner_->request_positions(id);
         // Deliberately do not persist account identifiers or position contents.
     }
     std::vector<BrokerEvent> poll() override {
         store_.require_healthy();
-        auto events = inner_->poll(); store_.record_events(source_, events);
+        auto events = inner_->poll(); store_.record_history_events(events); store_.record_events(source_, events);
         std::vector<BrokerEvent> out;out.swap(pending_);
         out.insert(out.end(),std::make_move_iterator(events.begin()),std::make_move_iterator(events.end()));return out;
     }

@@ -52,6 +52,20 @@ public:
     void register_contract(const std::string& source, const Contract& contract);
     void record_events(const std::string& source, const std::vector<BrokerEvent>& events);
     RecordedRead record_asset_read(const AssetRead& read, const std::vector<Bar>& bars);
+    // Typed historical datasets are separate from legacy bars and streaming quotes.
+    std::int64_t historical_dataset(const HistorySpec& spec);
+    HistorySpec historical_spec(std::int64_t dataset_id) const;
+    std::vector<Row> historical_catalog() const;
+    std::vector<HistoryWindow> historical_gaps(std::int64_t dataset_id, HistoryWindow window, bool include_pending=false) const;
+    std::vector<std::int64_t> queue_history(std::int64_t dataset_id, const std::vector<HistoryWindow>& windows);
+    void bind_history(std::int64_t request_id, RequestId native_id);
+    void finish_history(std::int64_t request_id, const std::string& state, int code=0);
+    std::string history_state(std::int64_t request_id) const;
+    std::int64_t recent_history_dispatch_ms() const;
+    void interrupt_history();
+    void record_history_events(const std::vector<BrokerEvent>& events);
+    std::vector<Row> historical_requests(std::int64_t dataset_id, HistoryWindow window) const;
+    std::vector<Row> historical_bars(std::int64_t dataset_id, HistoryWindow window) const;
     Status status() const;
     Page catalog(std::int64_t after_id = 0, int limit = 100) const;
     Page history(std::int64_t series_id, std::int64_t after_id = 0,

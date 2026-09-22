@@ -1,5 +1,6 @@
 #include <dts/time_series_store.hpp>
 #include <sqlite3.h>
+#include <dts/history_schema.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -170,7 +171,7 @@ struct TimeSeriesStore::Impl {
             sqlite3_extended_result_codes(db,1);sqlite3_busy_timeout(db,1000);
             const auto appid=scalar(db,"PRAGMA application_id"),version=scalar(db,"PRAGMA user_version");
             const bool empty=scalar(db,"SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")==0;
-            if(!((appid==0&&version==0&&empty)||(appid==application_id&&version==1)))
+            if(!((appid==0&&version==0&&empty)||(appid==application_id&&(version==1||version==2))))
                 throw std::runtime_error("Unknown recording schema: existing file was not adopted or reset");
             sql(db,"PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON;");
             // Single connection in exclusive mode: no cross-process WAL writers
@@ -208,7 +209,14 @@ PRAGMA user_version=1;
 )SQL");t.commit();
             }
             if(scalar_text(db,"PRAGMA quick_check")!="ok")throw std::runtime_error("Recording database integrity check failed; restore separately, never overwrite automatically");
+            if (version!=2) {
+                // Refuse an upgrade unless an existing v1 archive can be backed up.
+                // New empty databases need no pre-migration backup.
+                if(!empty) { info.run_id="migration"; backup_locked(); }
+                Transaction migration(db); sql(db,history_schema); migration.commit();
+            }
             Transaction t(db);
+            sql(db,"UPDATE history_requests SET state='interrupted',finished_ms=strftime('%s','now')*1000 WHERE state IN ('queued','pending')");
             sql(db,"UPDATE runs SET state='interrupted' WHERE state='running'");
             Statement run(db,"INSERT INTO runs(mode,started_ms,state) VALUES(?1,?2,'running')");
             run.bind(1,mode);run.bind(2,now_ms());run.step();info.run_id=std::to_string(sqlite3_last_insert_rowid(db));
@@ -405,6 +413,7 @@ void TimeSeriesStore::close(bool acquisition_clean) {
     std::lock_guard<std::mutex> l(impl_->mutex);if(!impl_->db)return;
     std::string error;
     try {
+        sql(impl_->db,"UPDATE history_requests SET state='interrupted',finished_ms=strftime('%s','now')*1000 WHERE state IN ('queued','pending')");
         Statement run(impl_->db,"UPDATE runs SET state=?1,stopped_ms=?2 WHERE run_id=?3");
         run.bind(1,std::string(acquisition_clean&&!impl_->info.failed?"clean":"recording_incomplete"));run.bind(2,now_ms());run.bind(3,impl_->run_id());run.step();
         impl_->backup_locked();
@@ -417,3 +426,5 @@ void TimeSeriesStore::close(bool acquisition_clean) {
     if(!error.empty())throw std::runtime_error(error);
 }
 } // namespace dts::storage
+
+#include "history_store.inc"
