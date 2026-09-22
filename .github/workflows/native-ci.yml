@@ -1,8 +1,5 @@
 name: Native server and TWS integration
-on:
-  push:
-    branches: [feature/ibkr-foundation-20260922]
-  pull_request:
+on: [pull_request]
 permissions:
   contents: read
 concurrency:
@@ -17,28 +14,17 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y build-essential cmake ninja-build libasio-dev libboost-system-dev libboost-thread-dev libboost-filesystem-dev libssl-dev libsqlite3-dev libcurl4-openssl-dev libeigen3-dev libwebsocketpp-dev rapidjson-dev protobuf-compiler libprotobuf-dev
-      - name: Inspect official SDK compatibility
+          sudo apt-get install -y cmake ninja-build libasio-dev libboost-system-dev libsqlite3-dev protobuf-compiler libprotobuf-dev libintelrdfpmath-dev
+      - name: Download pinned official SDK (not redistributed)
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 --max-time 120 https://interactivebrokers.github.io/downloads/twsapi_macunix.1045.01.zip -o "$RUNNER_TEMP/ibapi.zip"
           echo '56ea048911052e86d6621ab712957c790fce6d547bc2a55900136ae4f6835941  '"$RUNNER_TEMP/ibapi.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/ibapi.zip" -d "$RUNNER_TEMP/ibapi"
-          python3 - <<'PY'
-          import os, pathlib, re, json
-          root = pathlib.Path(os.environ['RUNNER_TEMP'])/'ibapi'/'IBJts'
-          client = root/'source/cppclient/client'
-          print('CLIENT FILES:', sorted(p.name for p in client.iterdir() if p.is_file()))
-          print('DECIMAL LIBRARIES:', [str(p.relative_to(root)) for p in root.rglob('*') if p.suffix in ('.so', '.a')])
-          for name in ['NextValidId','TickPrice','MarketDataType','Contract','ContractData','ContractDataEnd','Position','PositionEnd','ErrorMessage']:
-              p = root/'source/proto'/f'{name}.proto'
-              if p.exists():
-                  print('SCHEMA', name, re.findall(r'(?:optional\s+|repeated\s+)?(\w+)\s+(\w+)\s*=\s*\d+', p.read_text()))
-          for name in ['Decimal.h','EWrapper_prototypes.h']:
-              text = (client/name).read_text()
-              print('DECLARATIONS', name, [l.strip() for l in text.splitlines() if any(k in l for k in ['decimalToDouble','decimalStringToDisplay','tickPriceProtoBuf(', 'marketDataTypeProtoBuf(', 'positionProtoBuf(', 'positionEndProtoBuf(', 'contractDataProtoBuf(', 'contractDataEndProtoBuf(', 'nextValidIdProtoBuf(', 'errorProtoBuf('])])
-          print('DEFAULT WRAPPER FILE SIZES:', [(p.name,p.stat().st_size) for p in client.glob('DefaultEWrapper*')])
-          PY
-      - name: Existing server build baseline
-        run: make -C src/backend/cpp_src -j2
+      - name: Configure full native build
+        run: cmake -S . -B build-native -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDTS_BUILD_SERVER=ON -DDTS_WITH_IBKR=ON -DIBKR_API_ROOT="$RUNNER_TEMP/ibapi/IBJts"
+      - name: Build SDK, adapter and server
+        run: cmake --build build-native --parallel 2
+      - name: Test (no real broker or credentials)
+        run: ctest --test-dir build-native --output-on-failure
