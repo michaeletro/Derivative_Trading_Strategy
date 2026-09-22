@@ -1,3 +1,4 @@
+import {mountHistory} from './history.mjs';
 import {mountStorage} from './storage.mjs';
 import {mountGreeks} from './greeks.mjs';
 import {buildLabel} from './greeks-model.mjs';
@@ -8,6 +9,7 @@ const $=id=>document.getElementById(id);
 const api=createApi();
 const pricingLab=mountPricing(api,error=>lock(error.message));
 const greeksLab=mountGreeks(api,error=>lock(error.message));
+const historyLab=mountHistory(api,error=>lock(error.message));
 const storageLab=mountStorage(api,error=>lock(error.message));
 let unlocked=false, busy=false, current=null, currentAt=0, fresh=false, revision=0, timer;
 let session='', selected=null, pendingResolution=null, candidates=[], requestedPositions=false;
@@ -131,12 +133,17 @@ function renderCandidates() {
     button.addEventListener('click',()=>command(async()=>{
       await api.request('/api/subscriptions','POST',{contract_id:c.contract_id});
     }));
-    item.append(button); root.append(item);
+    item.append(button);
+    if(c.security_type==='STK'&&c.currency==='USD'){
+      const historyButton=node('button','Historical bars','secondary');
+      historyButton.addEventListener('click',()=>historyLab.selectContract(c));item.append(historyButton);
+    }
+    root.append(item);
   }
   updateCandidateButtons();
 }
 function updateCandidateButtons() {
-  for(const button of $('candidates').querySelectorAll('button')) {
+  for(const button of $('candidates').querySelectorAll('button[data-contract-id]')) {
     const subscribed=current?.subscriptions.some(row=>row.contract.contract_id===Number(button.dataset.contractId));
     button.disabled=!ready() || busy || subscribed;
     button.textContent=subscribed ? 'Subscribed' : `Subscribe ${button.dataset.contractId}`;
@@ -219,6 +226,7 @@ function render() {
   pricingLab.setAccess(unlocked);
   greeksLab.setAccess(unlocked);
   storageLab.setAccess(unlocked);
+  historyLab.setAccess(unlocked);historyLab.update(fresh?current?.broker.state:null);
   storageLab.update(fresh?current?.storage:null,fresh?current?.broker?.state:null);
   text('build-info',fresh?buildLabel(current?.build,current?.broker?.mode):'Build identity: unlock or refresh to inspect the running server.');
   const broker=fresh?current?.broker:null, state=broker?.state;

@@ -7,6 +7,7 @@
   <title>Derivative Lab · Market & pricing research</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/dashboard/dashboard.css">
+  <link rel="stylesheet" href="/dashboard/history.css">
   <link rel="stylesheet" href="/dashboard/greeks.css">
   <script type="module" src="/dashboard/app.mjs"></script>
 </head>
@@ -14,7 +15,7 @@
 <a class="skip" href="#overview">Skip to workspace</a>
 <aside class="sidebar">
   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#roadmap"><span>07</span> Study roadmap</a></nav>
+  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#roadmap"><span>08</span> Study roadmap</a></nav>
   <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes. Market observations are saved locally.</small></div>
 </aside>
 <main id="overview">
@@ -166,7 +167,27 @@
     <p id="storage-notice" role="status" aria-live="polite"></p>
     <div class="table-wrap"><table aria-label="Recorded time series"><thead id="storage-head"></thead><tbody id="storage-body"></tbody></table></div>
   </section>
-  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">07 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
+  <section class="panel historical-panel" id="history" aria-labelledby="history-title">
+    <div class="section-heading"><div><p class="eyebrow">07 / Historical data manager</p><h2 id="history-title">Past data. Explicit provenance.</h2></div><span class="badge">RECORDED · NOT LIVE</span></div>
+    <p>USD equities/ETFs only. Fetch missing provider-response intervals, preserve revisions, and inspect saved bars without a broker connection.</p>
+    <div class="history-toolbar"><button id="history-load" type="button" disabled>Load saved datasets</button><label>Dataset<select id="history-dataset" disabled><option value="">Choose a saved dataset or resolve a contract</option></select></label></div>
+    <p id="history-contract">Resolve a USD equity/ETF under Instruments, then choose Historical bars on the intended contract.</p>
+    <form id="history-form" class="history-form">
+      <label>Bar interval<select id="history-size"><option>1 day</option><option>1 min</option></select></label>
+      <label>Price source<select id="history-price"><option>TRADES</option><option>MIDPOINT</option><option>BID</option><option>ASK</option></select></label>
+      <label>Start (included)<input id="history-start" type="date" required></label><label>End (excluded)<input id="history-end" type="date" required></label>
+      <label class="history-checkbox"><input id="history-rth" type="checkbox" checked> Regular trading hours only</label>
+      <label>Request policy<select id="history-policy"><option value="saved">Saved data only — no broker request</option><option value="fetch_missing">Fetch uncovered intervals</option><option value="refresh">Refresh this interval from IBKR</option></select></label>
+      <div class="history-actions"><button id="history-request" type="submit" disabled>Load / request history</button><button id="history-cancel" type="button" class="secondary" disabled>Cancel pending downloads</button><button id="history-export" type="button" class="secondary" disabled>Export this view</button></div>
+    </form>
+    <p id="history-time-note"></p><p id="history-notice" role="status" aria-live="polite"></p>
+    <h3 id="history-summary">No saved dataset view loaded.</h3><p id="history-conventions"></p>
+    <canvas id="history-chart" class="historical-chart" role="img" aria-label="Historical candles; no recorded view yet"></canvas>
+    <p id="history-chart-note">Saved candles, not synthetic or current prices.</p><p id="history-gaps"></p>
+    <details><summary>Numerical bars — latest 200 in this view</summary><div class="table-wrap"><table><thead><tr><th>Session date / UTC</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume (source)</th><th>Versions</th><th>Request ID</th></tr></thead><tbody id="history-rows"></tbody></table></div></details>
+    <details open><summary>Request ledger — latest 200 overlapping requests</summary><div class="table-wrap"><table><thead><tr><th>ID</th><th>Start</th><th>End (excluded)</th><th>State</th><th>Received rows</th><th>Code</th></tr></thead><tbody id="history-requests"></tbody></table></div></details>
+  </section>
+  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">08 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
   <p id="build-info" class="build-info">Build identity: unlock to inspect the running server.</p>
   <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
 </main>

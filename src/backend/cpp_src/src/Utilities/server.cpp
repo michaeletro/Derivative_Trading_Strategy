@@ -7,6 +7,7 @@ namespace asio = boost::asio;
 #include "pricing_json.hpp"
 #include "greeks_json.hpp"
 #include "storage_json.hpp"
+#include "history_json.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
@@ -196,7 +197,7 @@ public:
     Application() : mode_(env("DTS_BROKER", "none")), token_(env("DTS_API_TOKEN")),
         port_(integer(env("HTTP_PORT", "8080"), 1024, 65535)),
         store_(dts::storage::Config::from_environment(), mode_),
-        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()) {
+        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()), history_(store_) {
         if (env("ENABLE_IB_WS", "false") != "false" && env("ENABLE_IB_WS") != "0")
             throw std::invalid_argument("Client Portal relay is retired; configure DTS_BROKER instead");
         if (env("DB_FAIL_FAST", "false") == "true" && !assets_.available())
@@ -212,7 +213,7 @@ public:
         worker_ = std::thread([this] {
             std::unique_lock<std::mutex> lock(broker_mutex_);
             while (!stopping_) {
-                try { broker_.poll(); }
+                try { broker_.poll(); history_.tick(broker_); }
                 catch (...) { broker_.disconnect(); worker_failed_ = true; }
                 wake_.wait_for(lock, std::chrono::milliseconds(10), [this] { return stopping_; });
             }
@@ -240,6 +241,7 @@ private:
     dts::storage::TimeSeriesStore store_;
     AssetRepository assets_;
     dts::ReadOnlyService broker_;
+    dts::storage::HistoricalManager history_;
     // Non-secret instance identifier prevents charts joining observations across restarts.
     const std::string instance_ = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     std::mutex broker_mutex_, database_mutex_, pricing_mutex_;
@@ -301,6 +303,39 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        CROW_ROUTE(app_, "/api/history/datasets")([this](const crow::request& req) {
+            return guarded(req,[&]{Json j;j["datasets"]=dts::history_http::rows(store_.historical_catalog());j["limit"]=200;j["recorded_not_live"]=true;return j;});
+        });
+        CROW_ROUTE(app_, "/api/history/view").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"dataset_id","start_s","end_s"});
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                return dts::history_http::view(store_,dts::history_http::id(j,"dataset_id"),dts::history_http::window(j));});
+        });
+        CROW_ROUTE(app_, "/api/history/request").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);
+                dts::history_http::fields(j,{"dataset_id","contract_id","start_s","end_s","bar_size","price_type","use_rth","policy"});
+                if(j.has("dataset_id")==j.has("contract_id"))throw std::invalid_argument("Choose one saved dataset or explicitly resolved contract");
+                std::lock_guard<std::mutex> lock(broker_mutex_);dts::HistorySpec spec;
+                if(j.has("dataset_id")) {
+                    if(j.has("bar_size")||j.has("price_type")||j.has("use_rth"))throw std::invalid_argument("Saved dataset conventions are immutable");
+                    spec=store_.historical_spec(dts::history_http::id(j,"dataset_id"));
+                }else{
+                    spec.contract=broker_.contract(dts::history_http::integer(j,"contract_id"));
+                    spec.bar_size=text(j,"bar_size","1 day");spec.price_type=text(j,"price_type","TRADES");
+                    if(!j.has("use_rth")||(j["use_rth"].t()!=crow::json::type::True&&j["use_rth"].t()!=crow::json::type::False))throw std::invalid_argument("use_rth must be an explicit Boolean");
+                    spec.use_rth=j["use_rth"].b();
+                }
+                const auto w=dts::history_http::window(j);const auto policy=text(j,"policy","saved");
+                const auto plan=history_.request(spec,w,policy,broker_.state());
+                Json out=dts::history_http::view(store_,plan.dataset_id,w);std::vector<Json> queued;
+                for(auto id:plan.queued_ids)queued.emplace_back(std::to_string(id));
+                out["new_request_ids"]=std::move(queued);
+                out["dispatch_spacing_seconds"]=15;return out;
+            });
+        });
+        CROW_ROUTE(app_, "/api/history/cancel").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{dts::history_http::fields(object(req),{});std::lock_guard<std::mutex> lock(broker_mutex_);history_.cancel(broker_);Json j;j["cancelled_pending_history"]=true;return j;});
+        });
         CROW_ROUTE(app_, "/api/storage/status")([this](const crow::request& req) {
             return guarded(req, [&] { return dts::storage::http::status(store_.status()); });
         });

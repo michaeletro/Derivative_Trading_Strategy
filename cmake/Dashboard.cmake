@@ -1,7 +1,7 @@
 # Self-contained dashboard: no CDN, Node build, runtime path, or generated secrets.
 set(DTS_DASHBOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/frontend/dashboard")
 set(DTS_DASHBOARD_HEADER "#pragma once\nnamespace dts::dashboard::assets {\n")
-foreach(asset index.html dashboard.css app.mjs model.mjs pricing.mjs pricing-model.mjs greeks.mjs greeks-model.mjs greeks.css storage.mjs storage-model.mjs)
+foreach(asset index.html dashboard.css app.mjs model.mjs pricing.mjs pricing-model.mjs greeks.mjs greeks-model.mjs greeks.css storage.mjs storage-model.mjs history.mjs history-model.mjs history.css)
     set(path "${DTS_DASHBOARD_DIR}/${asset}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
     file(READ "${path}" content)
