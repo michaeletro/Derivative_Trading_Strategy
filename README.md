@@ -1,5 +1,21 @@
 # Derivative Trading Strategy
 
+## New: Greeks & Scenario Lab
+
+The `feature/greeks-scenario-lab` increment adds analytical BSM Greeks,
+pathwise/central-CRN Monte Carlo delta and vega, full-repricing scenarios, a
+hypothetical spot/volatility grid, explicit JSON exports and running-build identity.
+No orders, broker-derived valuation inputs or portfolio risk estimates are added.
+See [the runbook and numerical conventions](docs/greeks-scenarios.md).
+
+```bash
+python3 tools/start_dashboard.py --mode research --port 8081
+```
+
+This reconfigures, builds and tests the current checkout before launching it.
+It refuses an occupied port rather than killing an existing server. No IBKR SDK
+is needed for research mode. Open the printed URL and unlock local access.
+
 A C++17/Python research application for a modular derivatives pricing and risk
 platform. **This is a read-only development system, not a production trading bot.**
 
@@ -25,7 +41,7 @@ for assumptions, input units, reproducibility limits, tests and run commands.
   tests and HTTP lifecycle/security smoke tests on GitHub Actions.
 - Existing Polygon Python ingestion, static web prototype and SwiftUI scaffold.
 
-No order-submission interface exists. Listed-contract pricing/calibration, Greeks, portfolio risk
+No order-submission interface exists. Listed-contract pricing/calibration and portfolio risk
 limits, account balances, durable live-data recording and continuous position
 reconciliation remain future increments. A validated OrderIntent is not risk
 approval. The old experimental Client Portal source is retained but no longer
@@ -76,6 +92,9 @@ paper session for acceptance tests. Ports alone do not identify account mode.
 | Route | Behavior |
 | --- | --- |
 | `GET /health` | Non-secret server and asset DB status |
+| `GET /api/build` | Guarded configure-time revision and research-engine identity |
+| `POST /api/greeks/run` | Manual-model analytical Greeks and MC delta/vega checks |
+| `POST /api/scenarios/run` | Manual-model full repricing, approximation and scenario grid |
 | `POST /echo` | JSON wrapper containing the submitted body |
 | `GET /api/assets` | Read-only SQLite asset query |
 | `GET /ib/status` | Adapter mode, API-handshake state and error codes |
