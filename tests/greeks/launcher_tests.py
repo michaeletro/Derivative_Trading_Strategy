@@ -34,4 +34,15 @@ class LauncherTests(unittest.TestCase):
             with patch.dict(os.environ,{'DTS_API_TOKEN':token}):
                 _,cmd,env=launcher.prepare(args)
                 self.assertNotIn(token,' '.join(cmd));self.assertEqual(env['DTS_API_TOKEN'],token)
+    def test_recording_paths_are_outside_checkout(self):
+        with patch.dict(os.environ,{'DTS_DATA_DIR':'','DTS_BACKUP_DIR':'','XDG_DATA_HOME':''}):
+            _,_,env=launcher.prepare(launcher.options([]))
+        self.assertEqual(Path(env['DTS_DATA_DIR']),Path.home()/'.local/share/derivative-lab')
+        self.assertNotIn(str(launcher.ROOT),env['DTS_DATA_DIR'])
+    def test_separate_recording_directory_override(self):
+        _,_,env=launcher.prepare(launcher.options(['--data-dir','/tmp/dts-data-fixture','--backup-dir','/tmp/dts-backup-fixture']))
+        self.assertEqual(env['DTS_DATA_DIR'],'/tmp/dts-data-fixture')
+        self.assertEqual(env['DTS_BACKUP_DIR'],'/tmp/dts-backup-fixture')
+    def test_relative_recording_directory_rejected(self):
+        with self.assertRaises(ValueError):launcher.prepare(launcher.options(['--data-dir','relative']))
 if __name__=='__main__':unittest.main()

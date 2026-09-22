@@ -18,7 +18,8 @@ def main():
             sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
         origin=f'http://127.0.0.1:{port}'
         env={**os.environ,'HTTP_PORT':str(port),'DTS_BROKER':'mock','DTS_API_TOKEN':TOKEN,
-             'ENABLE_IB_WS':'false','DB_FAIL_FAST':'false','DB_PATH':directory+'/absent.db'}
+             'ENABLE_IB_WS':'false','DB_FAIL_FAST':'false','DB_PATH':directory+'/absent.db',
+             'DTS_DATA_DIR':directory+'/recordings','DTS_BACKUP_DIR':directory+'/backups'}
         with open(Path(directory)/'server.log','w+') as log:
             process=subprocess.Popen([str(executable)],cwd=directory,env=env,stdout=log,stderr=log)
             def call(path, method='GET', auth=False, headers=None):

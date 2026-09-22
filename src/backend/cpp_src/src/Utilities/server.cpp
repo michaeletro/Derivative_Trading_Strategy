@@ -6,12 +6,15 @@ namespace asio = boost::asio;
 #include <sqlite3.h>
 #include "pricing_json.hpp"
 #include "greeks_json.hpp"
+#include "storage_json.hpp"
+#include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
 #ifdef DTS_WITH_IBKR
 #include <dts/tws_broker.hpp>
 #endif
 #include <atomic>
+#include <csignal>
 #include <condition_variable>
 #include <cstdlib>
 #include <iostream>
@@ -108,11 +111,15 @@ crow::json::rvalue object(const crow::request& req) {
     return j;
 }
 
-// Existing asset_data schema, opened read-only. No implicit migrations or backups.
+// Existing asset_data source stays read-only. Returned bars are archived in a
+// separate database before the successful response is sent to the browser.
 class AssetRepository {
     sqlite3* db_ = nullptr;
+    std::string dataset_;
+    dts::storage::TimeSeriesStore& store_;
 public:
-    explicit AssetRepository(const std::string& path) {
+    explicit AssetRepository(const std::string& path, dts::storage::TimeSeriesStore& store)
+        : dataset_(std::filesystem::weakly_canonical(path).string()), store_(store) {
         if (sqlite3_open_v2(path.c_str(), &db_, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nullptr) != SQLITE_OK) {
             if (db_) sqlite3_close(db_);
             db_ = nullptr;
@@ -125,6 +132,7 @@ public:
     bool available() const noexcept { return db_ != nullptr; }
     Json query(const crow::request& req) {
         if (!db_) throw std::logic_error("Asset database unavailable");
+        store_.require_healthy();
         const auto parameter = [&req](const char* name) {
             const auto* p = req.url_params.get(name); return p ? std::string(p) : std::string();
         };
@@ -142,6 +150,7 @@ public:
         sqlite3_bind_text(raw, 3, end.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(raw, 4, limit);
         std::vector<Json> rows;
+        std::vector<dts::storage::Bar> archived;
         int status = SQLITE_OK;
         while ((status = sqlite3_step(raw)) == SQLITE_ROW) {
             Json row; row["id"] = static_cast<std::int64_t>(sqlite3_column_int64(raw, 0));
@@ -149,13 +158,36 @@ public:
                 const auto* value = sqlite3_column_text(raw, column);
                 row[column == 1 ? "ticker" : "date"] = value ? reinterpret_cast<const char*>(value) : "";
             }
+            dts::storage::Bar bar;
+            bar.source_row_id = std::to_string(sqlite3_column_int64(raw, 0));
+            const auto read_text = [raw](int col) {
+                const auto* value = sqlite3_column_text(raw, col);
+                return value ? std::string(reinterpret_cast<const char*>(value), sqlite3_column_bytes(raw,col)) : std::string();
+            };
+            bar.symbol=read_text(1); bar.time_text=read_text(7);
             const char* prices[] = {"open_price", "close_price", "high_price", "low_price"};
-            for (int i = 0; i < 4; ++i) row[prices[i]] = sqlite3_column_double(raw, i + 2);
-            row["volume"] = static_cast<std::int64_t>(sqlite3_column_int64(raw, 6));
+            std::optional<double>* values[] = {&bar.open,&bar.close,&bar.high,&bar.low};
+            for (int i = 0; i < 4; ++i) {
+                if (sqlite3_column_type(raw,i+2)!=SQLITE_NULL) {
+                    if (sqlite3_column_type(raw,i+2)!=SQLITE_FLOAT && sqlite3_column_type(raw,i+2)!=SQLITE_INTEGER)
+                        throw std::runtime_error("Asset price has an invalid source type");
+                    *values[i]=sqlite3_column_double(raw,i+2);
+                }
+                row[prices[i]] = *values[i] ? Json(**values[i]) : Json(nullptr);
+            }
+            if(sqlite3_column_type(raw,6)!=SQLITE_NULL) {
+                if(sqlite3_column_type(raw,6)!=SQLITE_INTEGER)throw std::runtime_error("Asset volume is not an integer");
+                bar.volume=static_cast<std::int64_t>(sqlite3_column_int64(raw,6));
+            }
+            row["volume"]=bar.volume ? Json(*bar.volume) : Json(nullptr);
+            archived.push_back(std::move(bar));
             rows.push_back(std::move(row));
         }
         if (status != SQLITE_DONE) throw std::runtime_error("Asset query did not complete");
-        Json result; result["count"] = rows.size(); result["results"] = std::move(rows); return result;
+        const auto saved=store_.record_asset_read({dataset_,ticker,start,end,limit},archived);
+        Json result; result["count"] = rows.size(); result["results"] = std::move(rows);
+        result["recording"]["durable"] = true; result["recording"]["read_id"] = std::to_string(saved.id);
+        result["recording"]["new_observations"] = saved.inserted; return result;
     }
 };
 
@@ -163,12 +195,17 @@ class Application {
 public:
     Application() : mode_(env("DTS_BROKER", "none")), token_(env("DTS_API_TOKEN")),
         port_(integer(env("HTTP_PORT", "8080"), 1024, 65535)),
-        assets_(env("DB_PATH", "quant_data.db")), broker_(make_broker()) {
+        store_(dts::storage::Config::from_environment(), mode_),
+        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()) {
         if (env("ENABLE_IB_WS", "false") != "false" && env("ENABLE_IB_WS") != "0")
             throw std::invalid_argument("Client Portal relay is retired; configure DTS_BROKER instead");
         if (env("DB_FAIL_FAST", "false") == "true" && !assets_.available())
             throw std::runtime_error("Configured asset database unavailable");
         routes();
+        const auto storage=store_.status();
+        std::cout << "Time-series database opened: " << storage.database << '\n'
+                  << "Automatic shutdown backups: " << storage.backup_directory << std::endl;
+        if(storage.interrupted_runs)std::cerr << "Previous unclean run(s) detected: committed history recovered; gaps may exist.\n";
     }
     ~Application() { stop(); }
     void run() {
@@ -179,15 +216,28 @@ public:
                 catch (...) { broker_.disconnect(); worker_failed_ = true; }
                 wake_.wait_for(lock, std::chrono::milliseconds(10), [this] { return stopping_; });
             }
+            // Stop has a finite acquisition cutoff. Persist all delivered events
+            // before disconnecting and closing the store. Never wait until exit
+            // to save observations that were received earlier in the session.
+            try { broker_.poll(); } catch (...) { worker_failed_ = true; }
             broker_.disconnect();
         });
-        app_.bindaddr("127.0.0.1").port(static_cast<std::uint16_t>(port_)).concurrency(2).run();
+        try {
+        app_.signal_add(SIGHUP).bindaddr("127.0.0.1").port(static_cast<std::uint16_t>(port_)).concurrency(2).run();
+        } catch (...) {
+            stop(); try { store_.close(false); } catch (...) {}
+            throw;
+        }
         stop();
+        std::cout << "Shutdown: acquisition stopped. Finalizing recording and creating SQLite backup..." << std::endl;
+        store_.close(!worker_failed_);
+        std::cout << "Shutdown complete: " << store_.status().last_backup << std::endl;
     }
 private:
     crow::SimpleApp app_;
     std::string mode_, token_;
     int port_;
+    dts::storage::TimeSeriesStore store_;
     AssetRepository assets_;
     dts::ReadOnlyService broker_;
     // Non-secret instance identifier prevents charts joining observations across restarts.
@@ -198,7 +248,7 @@ private:
     bool stopping_ = false, worker_failed_ = false;
     std::unique_ptr<dts::IBroker> make_broker() {
         if (mode_ == "none") return {};
-        if (mode_ == "mock") return std::make_unique<dts::MockBroker>();
+        if (mode_ == "mock") return std::make_unique<dts::storage::RecordingBroker>(std::make_unique<dts::MockBroker>(), store_, "mock");
         if (mode_ != "tws") throw std::invalid_argument("DTS_BROKER must be none, mock, or tws");
         if (token_.size() < 24) throw std::invalid_argument("TWS mode requires DTS_API_TOKEN of at least 24 characters");
 #ifdef DTS_WITH_IBKR
@@ -208,7 +258,7 @@ private:
         config.client_id = integer(env("IB_CLIENT_ID", "17"), 1, 2147483647);
         config.market_data_type = integer(env("IB_MARKET_DATA_TYPE", "3"), 1, 4);
         config.timeout = std::chrono::milliseconds(integer(env("IB_TIMEOUT_MS", "10000"), 100, 60000));
-        return std::make_unique<dts::TwsBroker>(config);
+        return std::make_unique<dts::storage::RecordingBroker>(std::make_unique<dts::TwsBroker>(config), store_, "ibkr_tws");
 #else
         throw std::invalid_argument("Rebuild with DTS_WITH_IBKR=ON to select TWS");
 #endif
@@ -251,6 +301,31 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        CROW_ROUTE(app_, "/api/storage/status")([this](const crow::request& req) {
+            return guarded(req, [&] { return dts::storage::http::status(store_.status()); });
+        });
+        CROW_ROUTE(app_, "/api/storage/series")([this](const crow::request& req) {
+            return guarded(req, [&] { return dts::storage::http::page(store_.catalog(
+                dts::storage::http::parameter(req,"after_id"), dts::storage::http::limit(req))); });
+        });
+        CROW_ROUTE(app_, "/api/storage/history")([this](const crow::request& req) {
+            return guarded(req, [&] { return dts::storage::http::page(store_.history(
+                dts::storage::http::parameter(req,"series_id"),dts::storage::http::parameter(req,"after_id"),
+                dts::storage::http::parameter(req,"through_id"),dts::storage::http::limit(req),
+                dts::storage::http::parameter(req,"from_ms"),dts::storage::http::parameter(req,"to_ms",253402300799999LL))); });
+        });
+        CROW_ROUTE(app_, "/api/storage/backup").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                if(!req.body.empty() && req.body!="{}")throw std::invalid_argument("Backup accepts no path or options in the request");
+                // Do not block recording behind a full-database backup while
+                // native event queues are filling. Shutdown uses the same order.
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                if(broker_.state()==dts::ConnectionState::Ready || broker_.state()==dts::ConnectionState::Connecting)
+                    throw std::logic_error("Disconnect the broker before making a manual backup");
+                Json j;j["backup"]=store_.backup();j["consistent_snapshot"]=true;return j;
+            });
+        });
+
         CROW_ROUTE(app_, "/api/build")([this](const crow::request& req) {
             return guarded(req, [&] { return dts::pricing::sensitivity_http::build_json(); });
         });
@@ -281,8 +356,8 @@ private:
         dts::dashboard::mount(app_, port_);
         CROW_ROUTE(app_, "/health")([this] {
             std::lock_guard<std::mutex> lock(broker_mutex_);
-            Json j; j["status"] = worker_failed_ ? "degraded" : "ok";
-            j["db_connected"] = assets_.available(); j["read_only"] = true;
+            Json j; j["status"] = worker_failed_ || store_.status().failed ? "degraded" : "ok";
+            j["db_connected"] = assets_.available(); j["read_only"] = true; j["recording_healthy"] = !store_.status().failed;
             return response(std::move(j));
         });
         CROW_ROUTE(app_, "/api/dashboard")([this](const crow::request& req) {
@@ -292,6 +367,7 @@ private:
                 broker_.poll();
                 Json j; j["broker"] = status();
                 j["build"] = dts::pricing::sensitivity_http::build_json();
+                j["storage"] = dts::storage::http::status(store_.status());
                 j["session_id"] = instance_ + "-" + std::to_string(broker_.generation());
                 j["positions"] = positions_json(broker_.positions(), mode_ == "mock");
                 std::vector<Json> subscriptions;

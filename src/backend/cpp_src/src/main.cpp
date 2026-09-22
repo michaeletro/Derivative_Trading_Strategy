@@ -3,5 +3,5 @@
 #include <iostream>
 int main() {
     try { startServer(); return 0; }
-    catch (const std::exception& error) { std::cerr << "Startup failed: " << error.what() << '\n'; return 1; }
+    catch (const std::exception& error) { std::cerr << "Application failed: " << error.what() << '\n'; return 1; }
 }

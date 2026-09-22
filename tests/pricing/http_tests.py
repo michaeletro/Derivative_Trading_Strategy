@@ -27,7 +27,9 @@ class Server:
         self.origin = f'http://127.0.0.1:{self.port}'
         env = dict(os.environ, DTS_BROKER='none', DTS_API_TOKEN=TOKEN,
                    ENABLE_IB_WS='false', HTTP_PORT=str(self.port), DB_FAIL_FAST='false',
-                   DB_PATH=str(Path(self.tmp.name)/'not-created.db'))
+                   DB_PATH=str(Path(self.tmp.name)/'not-created.db'),
+                   DTS_DATA_DIR=str(Path(self.tmp.name)/'recordings'),
+                   DTS_BACKUP_DIR=str(Path(self.tmp.name)/'backups'))
         self.log = open(Path(self.tmp.name)/'server.log', 'w+')
         self.process = subprocess.Popen([self.executable], env=env, cwd=self.tmp.name,
                                         stdout=self.log, stderr=subprocess.STDOUT)
@@ -106,5 +108,5 @@ def main():
         assert state['broker']['mode']=='none' and not state['broker']['enabled']
         assert state['positions']['positions'] is None
         assert not (Path(server.tmp.name)/'not-created.db').exists()
-    print(f'PASS {count} pricing HTTP checks: real engine, seed replay, bounds, auth, no broker or database writes')
+    print(f'PASS {count} pricing HTTP checks: real engine, seed replay, bounds, auth, no broker or asset-database writes')
 if __name__ == '__main__': main()

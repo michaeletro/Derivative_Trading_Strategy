@@ -40,7 +40,8 @@ with tempfile.TemporaryDirectory() as directory:
     for mode, stop_signal in [("none", signal.SIGTERM), ("mock", signal.SIGINT)]:
         with socket.socket() as reserved:
             reserved.bind(("127.0.0.1", 0)); port = reserved.getsockname()[1]
-        env = dict(os.environ, DTS_BROKER=mode, DTS_API_TOKEN=TOKEN, HTTP_PORT=str(port), DB_PATH=str(db), ENABLE_IB_WS="false")
+        env = dict(os.environ, DTS_BROKER=mode, DTS_API_TOKEN=TOKEN, HTTP_PORT=str(port), DB_PATH=str(db), ENABLE_IB_WS="false",
+                   DTS_DATA_DIR=directory+"/recordings", DTS_BACKUP_DIR=directory+"/backups")
         with open(Path(directory) / (mode + ".log"), "w+") as log:
             process = subprocess.Popen([EXE], env=env, cwd=directory, stdout=log, stderr=log)
             try:
