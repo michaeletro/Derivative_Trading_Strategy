@@ -10,21 +10,30 @@ import shutil
 import socket
 import subprocess
 import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from local_config import load as load_profile, ENV_KEYS
 
 ROOT=Path(__file__).resolve().parents[1]
 def options(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--mode',choices=['research','tws'],default='research')
-    p.add_argument('--port',type=int,default=8081)
+    p.add_argument('--profile', help='Explicit saved local profile; never selected automatically')
+    p.add_argument('--mode',choices=['research','tws'])
+    p.add_argument('--port',type=int)
     p.add_argument('--build-dir',type=Path,default=ROOT/'build-workspace')
     p.add_argument('--jobs',type=int,default=2)
-    p.add_argument('--sdk-root',type=Path,default=Path.home()/'.local/share/ibkr-api-10.45.01/IBJts')
+    p.add_argument('--sdk-root',type=Path)
     p.add_argument('--data-dir',type=Path,help='Persistent local recording directory, independent of checkout')
     p.add_argument('--backup-dir',type=Path,help='Directory for consistent SQLite backups')
     p.add_argument('--dry-run',action='store_true',help='Validate configuration and print non-secret actions only')
     return p.parse_args(argv)
 
 def prepare(args):
+    saved,token=load_profile(args.profile) if args.profile else ({},None)
+    args.mode=args.mode or saved.get('mode','research')
+    args.port=args.port if args.port is not None else saved.get('port',8081)
+    args.sdk_root=args.sdk_root or Path(saved.get('sdk_root',str(Path.home()/'.local/share/ibkr-api-10.45.01/IBJts')))
+    if args.data_dir is None and saved.get('data_dir'):args.data_dir=Path(saved['data_dir'])
+    if args.backup_dir is None and saved.get('backup_dir'):args.backup_dir=Path(saved['backup_dir'])
     if not 1024<=args.port<=65535:raise ValueError('HTTP port must be between 1024 and 65535')
     if not 1<=args.jobs<=32:raise ValueError('Build jobs must be between 1 and 32')
     build=args.build_dir.expanduser().resolve()
@@ -35,6 +44,11 @@ def prepare(args):
             if line.startswith('CMAKE_HOME_DIRECTORY:INTERNAL=') and Path(line.split('=',1)[1]).resolve()!=ROOT:
                 raise ValueError('This build directory belongs to another checkout; choose --build-dir with a different path')
     env=dict(os.environ,HTTP_PORT=str(args.port),DTS_BROKER='tws' if args.mode=='tws' else 'none',ENABLE_IB_WS='false')
+    if args.profile:
+        # Explicit profile is authoritative over stale shell exports. CLI overrides profile paths/mode/HTTP port.
+        for field,key in ENV_KEYS.items():
+            env[key]=str(saved.get(field, {'ib_host':'127.0.0.1','ib_port':7497,'ib_client_id':17,'ib_market_data_type':3,'ib_timeout_ms':10000}[field]))
+        env['DTS_API_TOKEN']=token
     cmd=['cmake','-S',str(ROOT),'-B',str(build),'-DCMAKE_BUILD_TYPE=Release','-DBUILD_TESTING=ON','-DDTS_BUILD_SERVER=ON',f'-DDTS_WITH_IBKR={"ON" if args.mode=="tws" else "OFF"}']
     if args.mode=='tws':
         sdk=args.sdk_root.expanduser().resolve()
@@ -62,6 +76,7 @@ def main(argv=None):
         print(f'Source checkout: {ROOT}\nSource revision: {revision}\nBuild directory: {build}\nMode: {args.mode} (no order capability)',flush=True)
         print(f"Persistent database: {env['DTS_DATA_DIR']}/timeseries.sqlite3\nBackup directory: {env['DTS_BACKUP_DIR']}",flush=True)
         print('Local token: configured (not displayed)' if env.get('DTS_API_TOKEN') else 'Local token: none; unlock with an empty field in research mode',flush=True)
+        print(f"Broker endpoint: {env.get('IB_HOST','127.0.0.1')}:{env.get('IB_PORT','4002')} (not contacted by preflight)",flush=True)
         if args.dry_run:
             print('Would reconfigure, build, test, then execute the server. No build or server commands were run.');return 0
         recorder=Path(env['DTS_DATA_DIR'])/'recorder.lock'
@@ -77,7 +92,7 @@ def main(argv=None):
         for cmd in [configure,['cmake','--build',str(build),'--parallel',str(args.jobs)],['ctest','--test-dir',str(build),'--output-on-failure']]:
             subprocess.run(cmd,cwd=ROOT,check=True)
         binary=build/'server'
-        print(f'Open http://127.0.0.1:{args.port}/#sensitivities\nKeep this terminal running; Ctrl+C drains recording and creates a backup; wait for shutdown to finish.',flush=True)
+        print(f'Open http://127.0.0.1:{args.port}/#history\nKeep this terminal running; Ctrl+C drains recording and creates a backup; wait for shutdown to finish.',flush=True)
         os.execve(binary,[str(binary)],env)
     except (ValueError,OSError,subprocess.CalledProcessError) as e:
         print(f'Launch stopped: {e}',file=sys.stderr);return 2
