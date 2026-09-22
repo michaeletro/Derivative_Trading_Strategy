@@ -30,7 +30,7 @@ int main() {
         protobuf::TickPrice bid; bid.set_reqid(static_cast<int>(id)); bid.set_ticktype(66); bid.set_price(99);
         callbacks.tickPriceProtoBuf(bid); bid.set_ticktype(67); bid.set_price(101); callbacks.tickPriceProtoBuf(bid);
         callbacks.drain(state); events=state.poll(); const auto quote=std::get<Quote>(events.back());
-        CHECK(quote.data_type==MarketDataType::Delayed && quote.mid(Clock::now(),std::chrono::seconds(5))==100);
+        CHECK(quote.data_type==dts::MarketDataType::Delayed && quote.mid(Clock::now(),std::chrono::seconds(5))==100);
         state.request_positions(999,now);
         protobuf::Position position; position.set_account("SYNTHETIC_ACCOUNT"); proto_stock(position.mutable_contract()); position.set_position("-2.5");
         callbacks.positionProtoBuf(position); callbacks.positionEndProtoBuf(protobuf::PositionEnd{}); callbacks.drain(state);

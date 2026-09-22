@@ -1,39 +1,50 @@
 # Security and operational boundaries
 
-This repository is a research prototype, not an approved live-trading system.
+This is a read-only research/development system, not an approved trading service.
 
-## Exposed provider credential
+## Exposed Polygon credential
 
-An earlier commit contained a hard-coded Polygon credential in
-`src/backend/Arch/python_src/Utilities/Utilities_Resources.py`.
-The development branch replaces that literal with an environment lookup.
-**The owner must revoke/rotate the exposed key at the provider.** Changing code,
-adding .gitignore, opening a PR, or deleting a file does not revoke a key.
-The credential also remains in earlier commits and on branches not yet updated.
-No history rewrite is performed by this change. Coordinate any later history
-cleanup with collaborators after revocation. Do not paste replacement secrets
-into issues, pull requests, terminal transcripts, or committed configuration.
+An earlier commit exposed a Polygon key. The branch removes the source literal,
+not the provider credential or earlier history. **The owner must revoke/rotate it
+at the provider.** Do not post replacement keys in issues, PRs or chat. Coordinate
+any subsequent history cleanup with collaborators; no history rewrite is made here.
 
-## Current defaults
+## Current controls
 
-The legacy HTTP service binds to IPv4 loopback. `POST /ib/send` returns HTTP 403
-and never forwards a payload. Client Portal WebSocket startup is off by default.
-The new C++ `IBroker` interface is read-only; `MockBroker` cannot connect to IBKR
-or submit orders. The optional TWS probe only completes a handshake and requests
-server time; it does not request positions, market data, or submit orders.
-A port number is not proof that an account is a paper account.
+- The HTTP server binds only to IPv4 loopback; native TWS mode requires a local
+  Bearer token of at least 24 characters. Host and Origin checks limit browser
+  cross-origin access. Health exposes no account details. Tokens are not logged.
+- Default mode is `none`. Starting the server never opens a broker connection;
+  an explicit authenticated POST is required. `/ib/send` always returns 410.
+- Native IBroker exposes no order, exercise, transfer, or account-write capability.
+  The optional SDK itself contains other capabilities but is private to the adapter.
+- Socket callbacks only enqueue work; bounded mailboxes fail closed on overflow.
+  Critical disconnects clear quotes and position state. No automatic order replay
+  or connection recovery masks loss of state.
+- Missing/incomplete/unsupported position data is unavailable or failed, not a
+  fabricated empty portfolio. Returned complete positions are snapshots, not live
+  risk controls. Request IDs persist across reconnects.
+- The asset repository opens existing SQLite data read-only. HTTP startup does not
+  create databases, migrate schemas, or restore/export CSVs.
 
-## Remaining work before enabling broker services
+Loopback is not a hardened multi-user boundary. The HTTP token travels over local
+HTTP, and the native SDK socket is not made into a public TLS service by this
+adapter. Do not expose either port to the internet or disable firewalls. WSL
+networking can require an explicit reachable Windows-host IPv4 address; review
+trusted-host and Read-Only API settings in TWS/IB Gateway. A port does not prove
+paper-account identity. OS TCP connection setup may outlast callback deadlines;
+use a supervised process/outer timeout for diagnostics.
 
-The retained experimental Client Portal transport still needs verified TLS
-certificate/hostname handling, an authenticated brokerage session state machine,
-bounded shutdown/reconnect, and sanitized logging. Do not enable it against a
-live account or expose its surrounding service to a network. The legacy server
-still needs application-owned state, concurrency review, authentication, request
-size limits, and end-to-end tests. Loopback binding alone is not authentication.
+The retired Client Portal source remains for reference and has unresolved
+TLS/session/lifecycle limitations. The new executable does not instantiate it;
+requests to enable ENABLE_IB_WS are rejected. Do not enable it independently
+against live accounts based on this branch's test results.
 
-Before execution is implemented, require explicit paper-account identity checks,
-reconciliation of positions/open orders/executions, persistent client order IDs,
-duplicate suppression, quote-age/type checks, buying-power and exposure limits,
-and tested cancel/kill-switch behavior. Timeouts must never trigger blind order
-resubmission. Never put broker logins or two-factor secrets in this repository.
+## Before any future execution implementation
+
+Require explicit account identity, position/open-order/execution reconciliation,
+durable client IDs, deduplication, quote freshness and feed-type checks, exposure
+and buying-power limits, and tested cancellation/kill-switch semantics. Timeouts
+must never trigger blind resubmission. Do not store broker passwords or two-factor
+secrets in source. Successful offline/CI tests do not validate a live brokerage
+session, market-data entitlement, option model, or trading strategy.

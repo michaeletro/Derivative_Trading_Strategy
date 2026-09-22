@@ -1,72 +1,54 @@
-# Incremental architecture and study plan
+# Architecture and textbook study map
 
-## Current change boundary
+## Implemented boundary
 
-Keep the existing Crow/SQLite application, financial classes, Python research,
-web frontend, and SwiftUI scaffold. Add the new C++17 core in
-`src/backend/cpp_src/core/include/dts`; avoid a repository-wide move while the
-legacy application lacks a full regression suite.
+```text
+HTTP clients -> owned Application -> serialized ReadOnlyService
+                                      |              |
+                                      |              +-> confirmed contracts, quotes, completed snapshots
+                                      +-> IBroker -> MockBroker (synthetic)
+                                                -> TwsBroker (official native SDK, optional)
+                                                     |
+                                                     +-> bounded callback mailbox -> TwsState -> typed events
 
-The independent core has three files:
+HTTP asset queries -> owned AssetRepository -> existing SQLite (read-only)
+```
 
-- `domain.hpp`: contracts, option terms, quotes, positions, and limit intents.
-- `broker.hpp`: read-only interface and typed events, with snapshot completion.
-- `mock_broker.hpp`: explicitly simulated fixture adapter with bounded events.
+All public IBroker calls, including poll/state, are externally serialized.
+Application uses a mutex shared by its HTTP handlers and polling worker. No
+callback accesses Crow, SQLite, strategy code or application caches. Native SDK
+types remain behind TwsBroker's PIMPL. The SDK and system protobuf/Intel BID
+libraries are separate build dependencies, not copied into public source control.
 
-`MockBroker` is single-threaded. A future TWS adapter must own its SDK reader
-thread, marshal events into a synchronized bounded queue, and expose `poll()`
-to the application thread. Pricing cannot run inside SDK callbacks. Readiness
-must distinguish transport, API handshake, account synchronization, and market
-data permissions; none of these alone authorizes orders. Reconnect must invalidate
-stale state before resubscription. Request IDs are not order IDs.
+Contract resolution has pending/complete/failed state. Multiple candidates are
+preserved until a client explicitly chooses conId. Quote sides retain distinct
+receipt timestamps and actual feed type. A feed-mode transition invalidates both
+sides. Critical connection failures and bounded-queue overflow invalidate state.
+Position rows are staged until successful completion; an invalid/unsupported row
+invalidates the entire snapshot. Native snapshots are limited to one per connection
+because reqPositions does not tag callback generations. Reconnect/resubscribe is
+explicit. There is no execution capability or automatic recovery loop.
 
-`Quote` timestamps bid and ask separately using a monotonic receipt clock. Store
-exchange timestamps separately when available. Preserve the feed type (realtime,
-delayed, frozen, delayed-frozen, simulation) rather than presenting all ticks as
-live. Quote.mid is only an indicative mark. It is not fillable and does not prove
-that a pricing discrepancy is tradable. Position value is quantity * multiplier
-* mark, denominated in the contract currency; it does not sum prices over time.
+The old research asset classes, Python tools and UI prototypes are retained. The
+old Client Portal transport and auto-restore database class are not instantiated
+by the active HTTP server. Read docs/native-ibkr.md for the exact active API and
+behavioral changes, including read-only DB opening and JSON-wrapped echo responses.
 
-Unknown exercise style stays Unknown until resolved. Never price American equity
-options as European instruments and call the difference a trading opportunity.
-Contract multipliers must be resolved, not assumed to be 100. The present domain
-only validates equity/options; it is not a universal multi-asset schema.
+## Study sequence and next increments
 
-## Next reviewable increments
-
-1. Build and smoke-test the legacy server on WSL; replace globals with an owned
-   application context and establish DB thread ownership/transactions. Preserve
-   schema and data before splitting repositories or introducing migrations.
-2. Pin/install the official C++ TWS SDK outside source control. Implement a native
-   adapter for the read-only interface: handshake, contract resolution, one
-   quote subscription, position snapshot completion, disconnect and reconnect.
-   The Python probe is only a networking/SDK diagnostic, not this adapter.
-3. Add Black-Scholes analytic pricing and exact-terminal GBM Monte Carlo offline.
-   Return price, sample size, standard error, configuration, and seed. Validate
-   confidence-interval coverage across independent seeds, not one lucky run.
-4. Add timestamped market snapshots and connect read-only pricing/risk display.
-   Store curve, dividend, volatility, contract, and model provenance explicitly.
-5. Add a separate execution capability only after an event journal, account
-   allowlist, reconciliation, risk reservations, duplicate suppression, stale
-   quote gates, order-state tests, and kill-switch tests are implemented.
-
-Do not infer a paper account from its port. Do not retry uncertain order
-submissions without reconciliation. A TCP acknowledgement is not an exchange
-fill. Do not make raw transport payloads a public trading endpoint.
-
-## Studying Duffy / Kienitz alongside development
-
-| Book material | Implementation exercise | Evidence of understanding |
+| Reading in Duffy/Kienitz | Application task | Validation requirement |
 | --- | --- | --- |
-| Chapters 0 and 7 | GBM terminal sampling and MC estimator | Analytic price, standard error, seed experiments |
-| Chapters 1-2 | Ito formula and SDE assumptions | Derive log-GBM; separate real-world and risk-neutral drift |
-| Chapters 4-5 | Euler, Milstein, exact GBM | Coupled Brownian increments; strong/weak convergence tests |
-| Chapters 8-12 | Model/simulator/pricer separation | No broker SDK headers inside pricing/domain code |
-| Chapters 14-15 | Instrument terms and path-dependent payoffs | Exercise/monitoring conventions and control variates |
-| Chapter 18 | Greeks | Common-random-number bumps versus analytic Greeks |
-| Chapters 16 and 26 | Heston schemes | Positivity treatment and bias/variance comparisons |
-| Chapters 21, 24-25 | Profiling/parallelism | Reproducible random streams and measured speedup |
+| Chapters 8-12: architectures, decomposition, patterns, generic design | Broker/domain boundary and owned application services | Synthetic callback/failure/lifecycle tests |
+| Chapter 0; Chapters 4-5: initial MC framework and schemes | Separate offline GBM, exact sampler, Euler/Milstein and payoff modules | Closed-form European prices; coupled paths for discretization checks |
+| Chapter 7; Chapter 22: MC foundations and random generation | Reproducible simulation configuration and uncertainty reporting | Sampling-error convergence and deterministic seeds |
+| Chapter 14: instruments/payoffs | Enrich option conventions before selecting a pricer | Exercise style, multiplier, dates and dividend assumptions verified |
+| Chapter 18: Greeks | Separate Greek estimators and finite-difference reference | Compare analytic Greeks; common-random-number tests |
+| Chapters 16 and 26: stochastic volatility/numerics | Heston only after GBM tests and a calibration dataset exist | Positivity, discretization bias and benchmark prices |
+| Chapters 24-25: concurrency/OpenMP | Profile and parallelize the numerical engine separately | Reproducibility, thread safety and measured speedup |
 
-Keep risk-neutral pricing under Q distinct from P-measure return forecasting
-and P&L scenarios. More simulation paths reduce sampling noise, not model error,
-contract mismatch, time-discretization bias, or stale-market-data error.
+The current API does not produce theoretical prices, model edge or approved order
+intents. Market quotes do not automatically provide a rate curve, dividend model,
+volatility surface or pricing measure. Those inputs need explicit provenance and
+validation in later model modules. Risk-neutral valuation is not a forecast of
+real-world PnL. The next useful quant milestone is an offline exact-GBM Monte Carlo
+price plus standard error, compared with Black-Scholes, without a broker dependency.
