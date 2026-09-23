@@ -50,10 +50,24 @@ def main(executable):
         expect(page.locator('#http-status')).to_have_text('Locked');assert not context.cookies()
         page.reload();expect(page.locator('#notice')).to_contain_text('open_dashboard.py');expect(page.locator('#http-status')).to_have_text('Locked')
         other.reload();expect(other.locator('#http-status')).to_have_text('Locked')
-        # Ticket cannot be replayed. A fresh profile handoff works without typing.
-        page.goto(url);expect(page.locator('#http-status')).to_have_text('Locked')
+        # Fragment-only handoffs can target an existing tab. Ensure the actual
+        # exchange happens, a consumed code is refused, and the URL is cleaned.
+        with page.expect_response(lambda response: response.url.endswith('/api/auth/exchange')) as replay:
+            page.goto(url)
+        assert replay.value.status==401
+        expect(page.locator('#http-status')).to_have_text('Locked')
         expect(page.locator('#notice')).to_contain_text('Access rejected')
-        fresh,_=url_from_saved_profile();page.goto(fresh);expect(page.locator('#http-status')).to_have_text('Available')
+        assert 'local-signin=' not in page.url
+        fresh,_=url_from_saved_profile()
+        with page.expect_response(lambda response: response.url.endswith('/api/auth/exchange')) as reopened:
+            page.goto(fresh)
+        assert reopened.value.status==200
+        expect(page.locator('#http-status')).to_have_text('Available')
+        assert 'local-signin=' not in page.url
+        exchanges=sum('/api/auth/exchange' in target for target,_,_ in calls)
+        page.goto(server.origin+'/#hedging');expect(page.locator('#http-status')).to_have_text('Available')
+        page.wait_for_timeout(100)
+        assert sum('/api/auth/exchange' in target for target,_,_ in calls)==exchanges
         page.locator('#forget').click();expect(page.locator('#notice')).to_contain_text('Signed out.')
         # Manual bearer fallback still works, remains memory-only, does not quietly
         # turn a bad explicit token into a valid cookie-authenticated request.

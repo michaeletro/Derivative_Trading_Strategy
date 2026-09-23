@@ -299,4 +299,9 @@ async function autoSignIn() {
     if(version===revision) lock(error.message || reopenMessage);
   } finally { if(version===revision) { busy=false; render(); schedule(); } }
 }
+// A browser may reuse an existing tab for a fragment-only handoff. Normal
+// workspace anchors must not initiate authentication or change the session.
+window.addEventListener('hashchange',()=>{
+  if(window.location.hash.startsWith('#local-signin=')) autoSignIn();
+});
 autoSignIn();
