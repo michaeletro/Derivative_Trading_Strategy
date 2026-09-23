@@ -1,3 +1,24 @@
+## Delta-Hedging & Replication Lab (0.10.0)
+
+The new synthetic lab compares unhedged, initial-delta and periodic policies on
+shared exact-GBM paths, with a reconciled stock/cash ledger, separate path and
+hedge volatilities, financing and explicit transaction costs. Save, rerun and
+compare `hedging_replication` experiments in the existing typed catalog.
+No live execution, historical option P&L, margin or funding realism is inferred.
+Read [the model, ledger and migration runbook](docs/hedging-replication.md).
+
+**Current archive schema is 5.** A required verified backup precedes migration;
+existing numerical records retain their IDs, parent links and integrity digests.
+Stop the previous server and wait for its shutdown before launching:
+
+```bash
+python3 tools/start_dashboard.py --profile paper-tws --mode research
+```
+
+Open the profile's port at `#hedging`. Reuse the existing token and archive.
+The sections below describe prior increments; the current runbook above controls
+schema compatibility and deployment instructions.
+
 ## SDE Discretization Lab (0.9.0)
 
 The `feature/sde-discretization-lab` increment adds coupled exact-GBM,
@@ -26,8 +47,8 @@ triggered by this research workspace. Daily replay is ordinal; minute bars use a
 modeled bar-end availability convention. This is retrospective research, not
 point-in-time strategy backtesting or listed-option P&L.
 
-**The current application uses schema 4; review the [current migration
-instructions](docs/sde-discretization.md) before first launch.** The replay
+**The current application uses schema 5; review the [current migration
+instructions](docs/hedging-replication.md) before first launch.** The replay
 workspace retains its snapshot-backed return/volatility records. The shared
 Saved experiments catalog also exposes these records without rewriting them.
 

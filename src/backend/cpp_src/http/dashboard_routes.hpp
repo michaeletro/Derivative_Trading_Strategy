@@ -41,6 +41,9 @@ inline void mount(crow::SimpleApp& app, int port) {
         if (name == "history.mjs") return serve(req, assets::history_mjs, "text/javascript; charset=utf-8");
         if (name == "history-model.mjs") return serve(req, assets::history_model_mjs, "text/javascript; charset=utf-8");
         if (name == "history.css") return serve(req, assets::history_css, "text/css; charset=utf-8");
+        if (name == "hedging.mjs") return serve(req, assets::hedging_mjs, "text/javascript; charset=utf-8");
+        if (name == "hedging-model.mjs") return serve(req, assets::hedging_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "hedging.css") return serve(req, assets::hedging_css, "text/css; charset=utf-8");
         if (name == "sde.mjs") return serve(req, assets::sde_mjs, "text/javascript; charset=utf-8");
         if (name == "sde-model.mjs") return serve(req, assets::sde_model_mjs, "text/javascript; charset=utf-8");
         if (name == "sde.css") return serve(req, assets::sde_css, "text/css; charset=utf-8");

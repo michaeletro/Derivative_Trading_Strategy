@@ -1,6 +1,6 @@
 namespace dts::storage {
 namespace {
-bool numerical_kind(const std::string& k){return k=="option_pricing"||k=="greek_validation"||k=="sde_convergence";}
+bool numerical_kind(const std::string& k){return k=="option_pricing"||k=="greek_validation"||k=="sde_convergence"||k=="hedging_replication";}
 std::string numerical_digest(const NumericalExperiment& e) {
     std::string out="typed-experiment-1\n";
     // Length-delimited fields avoid ambiguous concatenation. IDs are local,

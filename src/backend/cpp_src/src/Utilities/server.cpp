@@ -305,6 +305,12 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        CROW_ROUTE(app_, "/api/hedging/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto request=dts::hedging_http::parse(object(req));
+                std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Another research calculation is running");
+                return dts::hedging_http::run(request);});
+        });
         CROW_ROUTE(app_, "/api/sde/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto request=dts::sde_http::parse(object(req));
                 std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);

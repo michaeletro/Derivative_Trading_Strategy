@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DerivativeTradingCore VERSION 0.9.0 LANGUAGES CXX)
+project(DerivativeTradingCore VERSION 0.10.0 LANGUAGES CXX)
 option(DTS_BUILD_SERVER "Build the owned Crow/SQLite read-only service" OFF)
 option(DTS_WITH_IBKR "Build the optional official-SDK native TWS adapter" OFF)
 add_library(trading_core INTERFACE)
@@ -93,6 +93,9 @@ if(DTS_BUILD_SERVER)
         add_test(NAME sde_http_tests COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/sde/http_tests.py" "$<TARGET_FILE:server>" "$<TARGET_FILE:research_store_tests>")
         set_tests_properties(sde_http_tests PROPERTIES TIMEOUT 45)
+        add_test(NAME hedging_http_tests COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/hedging/http_tests.py" "$<TARGET_FILE:server>")
+        set_tests_properties(hedging_http_tests PROPERTIES TIMEOUT 60)
         add_test(NAME profile_tests COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/history/config_tests.py")
         add_test(NAME launcher_tests COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/greeks/launcher_tests.py")

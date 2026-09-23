@@ -90,7 +90,7 @@ def main(exe,seed,hash_exe):
         # Complete backups include both the snapshots and the experiment catalog.
         backup=sorted((root/'backups').glob('*.sqlite'))[-1]
         with closing(sqlite3.connect(backup)) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==4)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==5)
             ck(db.execute('SELECT count(*) FROM research_experiments').fetchone()[0]==2)
             ck(db.execute('PRAGMA quick_check').fetchall()==[('ok',)])
         dest=root/'restored'
@@ -115,7 +115,7 @@ def main(exe,seed,hash_exe):
             ck(db.execute('PRAGMA user_version').fetchone()[0]==2)
             ck(db.execute('SELECT count(*) FROM history_versions').fetchone()[0]==160)
         with closing(sqlite3.connect(path)) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==4)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==5)
     # Verify multi-block/binary-UTF8 fingerprints against an independent implementation.
     rng=random.Random(5)
     for length in [0,1,55,56,57,63,64,65,128,1024,4096]:

@@ -1,8 +1,9 @@
+import {hedgeRequest,validateHedge} from './hedging-model.mjs';
 import {validateModel,modelFromForm,validateGreekRecord} from './greeks-model.mjs';
 import {validateRecord as validatePrice} from './pricing-model.mjs';
 import {validateExperiment as validateReplay} from './replay-model.mjs';
 export const ENGINE='coupled-gbm-convergence-1';
-export const KINDS=['greek_validation','option_pricing','return_volatility','sde_convergence'];
+export const KINDS=['greek_validation','hedging_replication','option_pricing','return_volatility','sde_convergence'];
 const finite=Number.isFinite;
 const exactKeys=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 export function stable(value) {
@@ -58,14 +59,15 @@ export function validateSde(v,request) {
   return v;
 }
 export function typedReference(s) {
-  if(typeof s!=='string'||!/^(greek_validation|option_pricing|return_volatility|sde_convergence):[1-9][0-9]{0,17}$/.test(s))throw new Error('Invalid typed experiment reference.');return s;
+  if(typeof s!=='string'||!/^(greek_validation|hedging_replication|option_pricing|return_volatility|sde_convergence):[1-9][0-9]{0,17}$/.test(s))throw new Error('Invalid typed experiment reference.');return s;
 }
 export function validateTyped(v) {
   if(!v||!KINDS.includes(v.kind)||typedReference(v.reference).split(':')[0]!==v.kind||v.immutable!==true||typeof v.name!=='string'||
      !/^[a-f0-9]{64}$/.test(v.result_sha256??''))throw new Error('Invalid saved experiment.');
   if(v.parent_reference!==null&&typedReference(v.parent_reference).split(':')[0]!==v.kind)throw new Error('Invalid parent reference.');
   if(v.kind!=='return_volatility'&&stable(v.configuration)!==stable(v.result?.request))throw new Error('Saved configuration/result binding mismatch.');
-  if(v.kind==='sde_convergence')validateSde(v.result,sdeRequest(v.result.request.model,v.result.request.simulation));
+  if(v.kind==='hedging_replication')validateHedge(v.result,hedgeRequest(v.result.request.model,v.result.request.dynamics,v.result.request.costs,v.result.request.simulation));
+  else if(v.kind==='sde_convergence')validateSde(v.result,sdeRequest(v.result.request.model,v.result.request.simulation));
   else if(v.kind==='option_pricing')validatePrice(v.result,v.result.request);
   else if(v.kind==='greek_validation')validateGreekRecord(v.result,v.result.request);
   else validateReplay(v);

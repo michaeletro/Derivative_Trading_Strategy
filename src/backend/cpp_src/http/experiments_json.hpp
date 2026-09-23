@@ -1,9 +1,10 @@
 #pragma once
 #include "sde_json.hpp"
+#include "hedging_json.hpp"
 
 namespace dts::experiments_http {
 using Json=crow::json::wvalue;using Read=crow::json::rvalue;
-inline bool kind_valid(const std::string& k){return k=="return_volatility"||k=="option_pricing"||k=="greek_validation"||k=="sde_convergence";}
+inline bool kind_valid(const std::string& k){return k=="return_volatility"||k=="option_pricing"||k=="greek_validation"||k=="sde_convergence"||k=="hedging_replication";}
 inline std::pair<std::string,std::int64_t> reference(const Read& j) {
     if(!j.has("reference")||j["reference"].t()!=crow::json::type::String)throw std::invalid_argument("Supply a typed experiment reference");
     const std::string ref=j["reference"].s();const auto pos=ref.find(':');
@@ -13,6 +14,7 @@ inline std::pair<std::string,std::int64_t> reference(const Read& j) {
     return {ref.substr(0,pos),std::stoll(number)};
 }
 inline std::string engine(const std::string& kind) {
+    if(kind=="hedging_replication")return hedging::engine_version;
     if(kind=="sde_convergence")return sde::engine_version;
     if(kind=="option_pricing")return pricing::engine_version;
     if(kind=="greek_validation")return pricing::sensitivity_version;
@@ -20,6 +22,7 @@ inline std::string engine(const std::string& kind) {
     throw std::invalid_argument("Unsupported experiment kind");
 }
 inline Json canonical(const std::string& kind,const Read& req) {
+    if(kind=="hedging_replication")return hedging_http::canonical(hedging_http::parse(req));
     if(kind=="sde_convergence")return sde_http::canonical(sde_http::parse(req));
     if(kind=="option_pricing")return pricing::http::canonical_request(pricing::http::parse(req));
     if(kind=="greek_validation")return pricing::sensitivity_http::canonical(pricing::sensitivity_http::parse_greeks(req));
@@ -31,7 +34,7 @@ inline Json numerical_json(const storage::NumericalExperiment& e) {
     // Binding must be checked, not just a result digest. The stored kind is not
     // allowed to reinterpret a different result family or configuration.
     try {
-        const std::string expected=e.kind=="sde_convergence"?"sde_convergence":e.kind=="option_pricing"?"derivative_lab.pricing_experiment":"derivative_lab.greeks_experiment";
+        const std::string expected=e.kind=="hedging_replication"?"hedging_replication":e.kind=="sde_convergence"?"sde_convergence":e.kind=="option_pricing"?"derivative_lab.pricing_experiment":"derivative_lab.greeks_experiment";
         if(!saved.has("kind")||std::string(saved["kind"].s())!=expected||canonical(e.kind,configuration).dump()!=canonical(e.kind,saved["request"]).dump())
             throw std::runtime_error("Archived binding mismatch");
     }catch(const std::exception&){throw std::runtime_error("Numerical experiment binding validation failed");}
@@ -57,7 +60,8 @@ inline Json compute(storage::TimeSeriesStore& store,const std::string& kind,cons
     }
     storage::NumericalExperiment e;e.kind=kind;e.name=label;e.parent_id=parent;e.engine_version=engine(kind);
     e.config_json=canonical(kind,req).dump();Json result;
-    if(kind=="sde_convergence")result=sde_http::run(sde_http::parse(req));
+    if(kind=="hedging_replication")result=hedging_http::run(hedging_http::parse(req));
+    else if(kind=="sde_convergence")result=sde_http::run(sde_http::parse(req));
     else if(kind=="option_pricing"){const auto r=pricing::http::parse(req);result=pricing::http::record(r,pricing::simulate(r.inputs,r.config));}
     else result=pricing::sensitivity_http::run(pricing::sensitivity_http::parse_greeks(req));
     e.result_json=result.dump();return numerical_json(store.numerical_experiment(store.save_numerical_experiment(e)));

@@ -1,3 +1,4 @@
+import {requestFromHedgeForm} from './hedging-model.mjs';
 import {requestFromSdeForm,validateSde,validateTyped,typedReference,comparison} from './sde-model.mjs';
 import {requestFromForm as pricingRequest,valueText} from './pricing-model.mjs';
 import {modelFromForm,greekRequest} from './greeks-model.mjs';
@@ -72,6 +73,7 @@ export function mountSde(api,onAccessError) {
   $('lab-load').addEventListener('click',()=>work(rev=>load(rev),'lab-note'));
   $('lab-more').addEventListener('click',()=>work(rev=>load(rev,true),'lab-note'));
   function selectedRequest(kind) {
+    if(kind==='hedging_replication')return requestFromHedgeForm(new FormData($('hedge-form')));
     if(kind==='sde_convergence')return getRequest();
     if(kind==='option_pricing')return pricingRequest(new FormData($('pricing-form')));
     const m=modelFromForm(new FormData($('greeks-model-form'))),s=Object.fromEntries(new FormData($('greeks-form')));

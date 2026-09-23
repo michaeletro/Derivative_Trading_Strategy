@@ -91,7 +91,7 @@ def main(exe,seed_exe):
         with Server(exe,root) as s:ck(s.call('/api/experiments/view',{'reference':ref})[1]==a);ck(s.stop()==0)
         backup=sorted((root/'backups').glob('*.sqlite'))[-1]
         with closing(sqlite3.connect(backup)) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==4);ck(db.execute('SELECT count(*) FROM numerical_experiments').fetchone()[0]==6)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==5);ck(db.execute('SELECT count(*) FROM numerical_experiments').fetchone()[0]==6)
             ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
         dest=root/'restore';subprocess.run([sys.executable,str(ROOT/'tools/restore_timeseries.py'),'--backup',str(backup),'--data-dir',str(dest)],check=True,capture_output=True)
         with closing(sqlite3.connect(dest/'timeseries.sqlite3')) as db,db:

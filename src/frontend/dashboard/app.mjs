@@ -1,3 +1,4 @@
+import {mountHedging} from './hedging.mjs';
 import {mountSde} from './sde.mjs';
 import {mountReplay} from './replay.mjs';
 import {mountHistory} from './history.mjs';
@@ -9,6 +10,7 @@ import {POLL_MS, numberText, titleCase, quoteView, sample, validateSnapshot, con
 
 const $=id=>document.getElementById(id);
 const api=createApi();
+const hedgingLab=mountHedging(api,error=>lock(error.message));
 const sdeLab=mountSde(api,error=>lock(error.message));
 const pricingLab=mountPricing(api,error=>lock(error.message));
 const greeksLab=mountGreeks(api,error=>lock(error.message));
@@ -227,6 +229,7 @@ function renderChart() {
   ctx.stroke();ctx.fillStyle=css.getPropertyValue('--accent');for(const p of valid) {ctx.beginPath();ctx.arc(x(p),y(p),2,0,Math.PI*2);ctx.fill();}
 }
 function render() {
+  hedgingLab.setAccess(unlocked);
   sdeLab.setAccess(unlocked);
   pricingLab.setAccess(unlocked);
   greeksLab.setAccess(unlocked);

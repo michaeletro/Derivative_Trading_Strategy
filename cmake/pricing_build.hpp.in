@@ -1,5 +1,6 @@
 #pragma once
 namespace dts::pricing::build {
+inline constexpr const char* hedging_source_sha256 = "@hedging_fingerprint@";
 inline constexpr const char* sde_source_sha256 = "@sde_fingerprint@";
 inline constexpr const char* research_source_sha256 = "@research_fingerprint@";
 inline constexpr char application_version[] = "@PROJECT_VERSION@";

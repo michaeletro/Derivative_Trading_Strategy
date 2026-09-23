@@ -53,7 +53,7 @@ def main(exe,seed):
             ck(s.stop()==0)
         backups=list((root/'backups').glob('*.sqlite'));ck(bool(backups))
         with closing(sqlite3.connect(backups[-1])) as db, db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==4)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==5)
             ck(db.execute('SELECT count(*) FROM history_versions').fetchone()[0]==2)
     # A v1 archive is upgraded only after a complete, verified old-schema backup.
     with tempfile.TemporaryDirectory() as tmp:
@@ -77,7 +77,7 @@ def main(exe,seed):
             ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
             ck(db.execute('PRAGMA quick_check').fetchall()==[('ok',)])
         with closing(sqlite3.connect(path)) as db, db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==4)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==5)
             ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
             db.execute('PRAGMA user_version=999')
         before=path.read_bytes()
