@@ -91,7 +91,7 @@ def main(exe,seed_exe):
         with Server(exe,root) as s:ck(s.call('/api/experiments/view',{'reference':ref})[1]==a);ck(s.stop()==0)
         backup=sorted((root/'backups').glob('*.sqlite'))[-1]
         with closing(sqlite3.connect(backup)) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==5);ck(db.execute('SELECT count(*) FROM numerical_experiments').fetchone()[0]==6)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==6);ck(db.execute('SELECT count(*) FROM numerical_experiments').fetchone()[0]==6)
             ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
         dest=root/'restore';subprocess.run([sys.executable,str(ROOT/'tools/restore_timeseries.py'),'--backup',str(backup),'--data-dir',str(dest)],check=True,capture_output=True)
         with closing(sqlite3.connect(dest/'timeseries.sqlite3')) as db,db:
@@ -112,7 +112,7 @@ def main(exe,seed_exe):
             old=s.call('/api/research/experiments/create',{'snapshot_id':snap['snapshot_id'],'name':'Legacy run','config':{'windows':[5,20],'annualization_factor':252}})[1]
             ck(s.stop()==0)
         with closing(sqlite3.connect(root/'data/timeseries.sqlite3')) as db,db:
-            db.execute('DROP VIEW typed_experiment_catalog');db.execute('DROP TABLE numerical_experiments');db.execute('PRAGMA user_version=3')
+            db.execute('DROP TABLE depth_events');db.execute('DROP TABLE depth_sessions');db.execute('DROP VIEW typed_experiment_catalog');db.execute('DROP TABLE numerical_experiments');db.execute('PRAGMA user_version=3')
         with Server(exe,root) as s:
             ck(s.call('/api/research/experiments/view',{'experiment_id':old['experiment_id']})[1]==old)
             cat=s.call('/api/experiments/list',{})[1];ck(len(cat['rows'])==1 and cat['rows'][0]['kind']=='return_volatility')

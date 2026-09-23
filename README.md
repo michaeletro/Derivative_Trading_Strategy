@@ -1,3 +1,17 @@
+## AMS 518 / AMS 520 displayed-depth foundation (0.11.0)
+
+Read [the joint proposal](research/liquidity_aware_hedging/proposal.md) and
+[the recorder/notebook runbook](docs/course-depth.md). Native direct-depth events
+are archived and independently replayed by the Phase I notebook. Acquisition is
+explicit through `tools/depth_capture.py`; the existing dashboard handles broker
+connection and automatic local sign-in. No LSV calibration, fitted liquidity model,
+CVaR optimization or execution is added by this foundation.
+
+**Current archive schema is 6.** A verified pre-migration backup precedes the
+additive upgrade; old schema-only binaries refuse the upgraded archive. The current
+runbook above controls deployment. Sections below describe prior increments.
+Course overlap/AI approvals and real depth entitlements remain unconfirmed.
+
 ## Delta-Hedging & Replication Lab (0.10.0)
 
 The new synthetic lab compares unhedged, initial-delta and periodic policies on
@@ -7,7 +21,7 @@ compare `hedging_replication` experiments in the existing typed catalog.
 No live execution, historical option P&L, margin or funding realism is inferred.
 Read [the model, ledger and migration runbook](docs/hedging-replication.md).
 
-**Current archive schema is 5.** A required verified backup precedes migration;
+**This earlier increment introduced schema 5.** A required verified backup precedes migration;
 existing numerical records retain their IDs, parent links and integrity digests.
 Stop the previous server and wait for its shutdown before launching:
 
@@ -47,8 +61,8 @@ triggered by this research workspace. Daily replay is ordinal; minute bars use a
 modeled bar-end availability convention. This is retrospective research, not
 point-in-time strategy backtesting or listed-option P&L.
 
-**The current application uses schema 5; review the [current migration
-instructions](docs/hedging-replication.md) before first launch.** The replay
+**The current application uses schema 6; review the [current migration
+instructions](docs/course-depth.md) before first launch.** The replay
 workspace retains its snapshot-backed return/volatility records. The shared
 Saved experiments catalog also exposes these records without rewriting them.
 

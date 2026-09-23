@@ -83,3 +83,9 @@ dashboard.token
 dashboard.token.*
 .dts-auth/
 .config/derivative-lab/
+
+# Local course data/outputs are private; explicit source notebooks remain tracked.
+research/liquidity_aware_hedging/data/
+research/liquidity_aware_hedging/outputs/
+*.executed.ipynb
+*.depth-export.json

@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - name: Source snapshot (no vendor SDK, secrets, or runtime data)
         run: |
-          git archive --format=tar.gz -o "$RUNNER_TEMP/research-source.tar.gz" HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing src/backend/cpp_src/storage src/backend/cpp_src/research src/backend/cpp_src/ibkr tools/start_dashboard.py tools/restore_timeseries.py tools/local_config.py tools/configure_dashboard.py tools/open_dashboard.py
+          git archive --format=tar.gz -o "$RUNNER_TEMP/research-source.tar.gz" HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing src/backend/cpp_src/storage src/backend/cpp_src/research src/backend/cpp_src/ibkr tools/start_dashboard.py tools/restore_timeseries.py tools/local_config.py tools/configure_dashboard.py tools/open_dashboard.py tools/depth_capture.py research/liquidity_aware_hedging
       - uses: actions/upload-artifact@v4
         with:
           name: research-source
@@ -39,6 +39,15 @@ jobs:
           cmake -S . -B build-pricing -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDTS_BUILD_SERVER=ON -DDTS_WITH_IBKR=OFF
           cmake --build build-pricing --parallel 2
           ctest --test-dir build-pricing --output-on-failure
+      - name: Execute synthetic Phase I notebook (no credentials or market data)
+        run: |
+          python -m pip install -r research/liquidity_aware_hedging/requirements.txt
+          python tests/depth/notebook_test.py --output "$RUNNER_TEMP/phase1-synthetic.ipynb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase1-synthetic-notebook
+          path: ${{ runner.temp }}/phase1-synthetic.ipynb
+          retention-days: 7
       - name: Frontend rules
         run: node --test tests/dashboard/model.test.mjs tests/pricing/model.test.mjs tests/greeks/model.test.mjs tests/storage/model.test.mjs tests/history/model.test.mjs tests/replay/model.test.mjs tests/sde/model.test.mjs tests/hedging/model.test.mjs tests/auth/model.test.mjs
       - name: Install browser tools

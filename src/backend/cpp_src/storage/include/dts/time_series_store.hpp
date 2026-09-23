@@ -85,6 +85,13 @@ public:
     std::int64_t save_numerical_experiment(const NumericalExperiment&);
     NumericalExperiment numerical_experiment(std::int64_t id) const;
     TypedPage typed_experiment_catalog(const std::string& kind = "", const std::string& after = "", int limit = 100) const;
+    // Depth is an ordered delivered-event archive, not an exchange-complete order log.
+    std::int64_t begin_depth(const std::string& source, RequestId id, const DepthSpec& spec);
+    void record_depth_events(const std::string& source, const std::vector<BrokerEvent>& events);
+    void end_depth_sessions(const std::string& source, const std::string& kind);
+    Page depth_sessions(std::int64_t after_id=0, int limit=100) const;
+    Page depth_events(std::int64_t session_id, std::int64_t after_id=0, std::int64_t through_id=0, int limit=1000) const;
+    Row depth_session(std::int64_t session_id) const;
     Status status() const;
     Page catalog(std::int64_t after_id = 0, int limit = 100) const;
     Page history(std::int64_t series_id, std::int64_t after_id = 0,

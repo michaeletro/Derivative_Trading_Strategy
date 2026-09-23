@@ -4,6 +4,7 @@
 #include <dts/research_schema.hpp>
 #include <dts/numerical_schema.hpp>
 #include <dts/hedging_schema.hpp>
+#include <dts/depth_schema.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -174,7 +175,7 @@ struct TimeSeriesStore::Impl {
             sqlite3_extended_result_codes(db,1);sqlite3_busy_timeout(db,1000);
             const auto appid=scalar(db,"PRAGMA application_id"),version=scalar(db,"PRAGMA user_version");
             const bool empty=scalar(db,"SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")==0;
-            if(!((appid==0&&version==0&&empty)||(appid==application_id&&(version==1||version==2||version==3||version==4||version==5))))
+            if(!((appid==0&&version==0&&empty)||(appid==application_id&&(version==1||version==2||version==3||version==4||version==5||version==6))))
                 throw std::runtime_error("Unknown recording schema: existing file was not adopted or reset");
             sql(db,"PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON;");
             // Single connection in exclusive mode: no cross-process WAL writers
@@ -212,7 +213,7 @@ PRAGMA user_version=1;
 )SQL");t.commit();
             }
             if(scalar_text(db,"PRAGMA quick_check")!="ok")throw std::runtime_error("Recording database integrity check failed; restore separately, never overwrite automatically");
-            if (version<5) {
+            if (version<6) {
                 // Refuse an upgrade unless an existing v1 archive can be backed up.
                 // New empty databases need no pre-migration backup.
                 if(!empty) { info.run_id="migration"; backup_locked(); }
@@ -220,11 +221,18 @@ PRAGMA user_version=1;
                 if(version<2) sql(db,history_schema);
                 if(version<3) sql(db,research_schema);
                 if(version<4) sql(db,numerical_schema);
-                sql(db,hedging_schema);
+                if(version<5) sql(db,hedging_schema);
+                sql(db,depth_schema);
                 {Statement check_fk(db,"PRAGMA foreign_key_check");if(check_fk.step())throw std::runtime_error("Migration foreign-key check failed");}
                 migration.commit();
             }
             Transaction t(db);
+            // Record a terminal boundary after a crash; this is not an IBKR event
+            // and does not claim to know the number of in-flight observations lost.
+            sql(db,R"SQL(INSERT INTO depth_events(session_id,local_sequence,kind,origin,received_unix_us,received_monotonic_ns,operation,side,position,price,price_repr,size,market_maker,smart_depth,code)
+ SELECT session_id,last_sequence+1,'interrupted','recorder_recovery',strftime('%s','now')*1000000,0,-1,-1,-1,NULL,'not_applicable','','',0,-1031
+ FROM depth_sessions WHERE state='recording';
+ UPDATE depth_sessions SET state='interrupted',last_sequence=last_sequence+1,event_count=event_count+1,ended_ms=strftime('%s','now')*1000 WHERE state='recording';)SQL");
             sql(db,"UPDATE history_requests SET state='interrupted',finished_ms=strftime('%s','now')*1000 WHERE state IN ('queued','pending')");
             sql(db,"UPDATE runs SET state='interrupted' WHERE state='running'");
             Statement run(db,"INSERT INTO runs(mode,started_ms,state) VALUES(?1,?2,'running')");
@@ -419,6 +427,10 @@ Page TimeSeriesStore::history(std::int64_t series_id,std::int64_t after,std::int
 }
 std::string TimeSeriesStore::backup(){std::lock_guard<std::mutex> l(impl_->mutex);return impl_->backup_locked();}
 void TimeSeriesStore::close(bool acquisition_clean) {
+    if(impl_->db && !impl_->info.failed) {
+        try { for(const auto* source:{"ibkr_tws","mock"}) end_depth_sessions(source, acquisition_clean?"stop":"interrupted"); }
+        catch(...) { acquisition_clean=false; }
+    }
     std::lock_guard<std::mutex> l(impl_->mutex);if(!impl_->db)return;
     std::string error;
     try {
@@ -441,3 +453,5 @@ void TimeSeriesStore::close(bool acquisition_clean) {
 #include "research_store.inc"
 
 #include "numerical_store.inc"
+
+#include "depth_store.inc"

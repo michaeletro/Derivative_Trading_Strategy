@@ -39,6 +39,7 @@ struct DepthEvent {
     std::string size, market_maker;
     bool smart_depth = false;
     int code = 0;
+    std::string origin = "adapter"; // recorder-generated terminal markers are labeled separately.
 };
 inline double depth_size(const std::string& value) {
     if (value.empty() || value.size() > 64 ||
@@ -63,13 +64,16 @@ public:
         const bool contiguous = e.sequence == sequence_ + 1;
         if (e.sequence <= sequence_) { invalidate("nonincreasing_local_sequence"); return; }
         sequence_ = e.sequence; received_ = e.received;
+        if (e.kind == "start" && (e.sequence != 1 || started_)) { invalidate("unexpected_start"); return; }
+        if (e.kind == "reset" && (!started_ || terminal_)) { invalidate("unexpected_reset"); return; }
         if (e.kind == "start" || e.kind == "reset") {
+            started_ = true;
             clear(); valid_ = contiguous; active_ = true; ++epoch_;
             reason_ = contiguous ? "building" : "local_sequence_gap";
             return;
         }
-        if (e.kind == "stop" || e.kind == "gap" || e.kind == "error") {
-            clear(); active_ = false; valid_ = false; reason_ = e.kind;
+        if (e.kind == "stop" || e.kind == "gap" || e.kind == "error" || e.kind == "interrupted") {
+            clear(); active_ = false; valid_ = false; terminal_ = true; reason_ = e.kind;
             return;
         }
         if (!contiguous) { invalidate("local_sequence_gap"); return; }
@@ -121,7 +125,7 @@ private:
     std::array<std::vector<DepthLevel>, 2> sides_;
     std::uint64_t sequence_ = 0, epoch_ = 0;
     DepthStamp received_;
-    bool valid_ = false, active_ = false;
+    bool valid_ = false, active_ = false, started_ = false, terminal_ = false;
     std::string reason_ = "not_started";
     void clear() { for (auto& side : sides_) side.clear(); }
     void invalidate(const char* reason) { clear(); valid_ = false; reason_ = reason; }

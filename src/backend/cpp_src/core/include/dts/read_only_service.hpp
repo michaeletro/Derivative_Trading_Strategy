@@ -12,6 +12,11 @@ struct ResolutionView {
     SnapshotStatus status = SnapshotStatus::Pending;
     std::vector<Contract> contracts;
 };
+struct DepthView {
+    RequestId request_id;
+    DepthSpec spec;
+    DepthBook book;
+};
 struct PositionsView {
     SnapshotStatus status = SnapshotStatus::Unavailable;
     std::vector<Position> positions;
@@ -80,6 +85,21 @@ public:
         require_broker(); spec.validate(window); return broker_->request_history(spec, window);
     }
     void cancel_history(RequestId id) { require_broker(); broker_->cancel_history(id); }
+    RequestId subscribe_depth(ContractId id, const std::string& venue, int rows) {
+        require_broker();
+        if (state() != ConnectionState::Ready) throw std::logic_error("Broker is not ready");
+        if (depth_) throw std::logic_error("Stop the previous depth request first");
+        DepthSpec spec{contract(id), venue, rows}; spec.validate();
+        const auto request = broker_->subscribe_depth(spec);
+        depth_.emplace(DepthView{request, spec, DepthBook(rows)}); return request;
+    }
+    bool unsubscribe_depth(RequestId id) {
+        require_broker();
+        if (!depth_ || depth_->request_id != id) return false;
+        const bool cancelled = broker_->unsubscribe_depth(id);
+        depth_.reset(); return cancelled;
+    }
+    const std::optional<DepthView>& depth() const noexcept { return depth_; }
     RequestId request_positions() {
         require_broker();
         if (positions_.status == SnapshotStatus::Pending) throw std::logic_error("Position snapshot already pending");
@@ -106,6 +126,7 @@ private:
     std::map<RequestId, ContractId> subscriptions_;
     std::map<ContractId, Quote> quotes_;
     PositionsView positions_;
+    std::optional<DepthView> depth_;
     std::map<std::pair<std::string, ContractId>, Position> staged_positions_;
     RequestId position_id_ = 0, next_position_id_ = RequestId{1} << 32;
     std::deque<BrokerError> errors_;
@@ -114,8 +135,9 @@ private:
     }
     void invalidate() noexcept {
         contracts_.clear(); subscriptions_.clear(); quotes_.clear(); resolutions_.clear();
-        positions_ = {}; staged_positions_.clear(); position_id_ = 0;
+        positions_ = {}; staged_positions_.clear(); position_id_ = 0; depth_.reset();
     }
+    void apply(const DepthEvent& e) { if (depth_ && depth_->request_id == e.request_id) depth_->book.apply(e); }
     void apply(const HistoricalBarEvent&) {} // Committed by the recording decorator.
     void apply(const HistoricalEnd&) {}
     void apply(const ConnectionEvent& e) {

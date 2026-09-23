@@ -27,10 +27,10 @@ public:
         if (active_) {
             // A final drain has a finite cutoff. Bytes still in the network/SDK
             // after this point are not claimed to have been recorded.
-            try { auto tail=inner_->poll();store_.record_history_events(tail);store_.record_events(source_, tail);store_.interrupt_history(); }
+            try { auto tail=inner_->poll();store_.record_depth_events(source_,tail);store_.record_history_events(tail);store_.record_events(source_, tail);store_.interrupt_history(); }
             catch (...) { /* Store retains a sticky failure; shutdown reports it. */ }
             inner_->disconnect();
-            try { store_.request(source_, "disconnected"); } catch (...) {}
+            try { store_.end_depth_sessions(source_, "stop"); store_.request(source_, "disconnected"); } catch (...) {}
             active_ = false;pending_.clear();
         } else inner_->disconnect();
     }
@@ -49,7 +49,7 @@ public:
         store_.require_healthy();
         // Preserve events already delivered at cancellation time, even though
         // they need not be shown as current after the subscription disappears.
-        auto drained=inner_->poll();store_.record_history_events(drained);store_.record_events(source_,drained);
+        auto drained=inner_->poll();store_.record_depth_events(source_,drained);store_.record_history_events(drained);store_.record_events(source_,drained);
         if(pending_.size()+drained.size()>4096) {
             store_.request(source_,"recorder_delivery_overflow");disconnect();
             throw std::overflow_error("Recorded event delivery queue overflow");
@@ -57,6 +57,33 @@ public:
         pending_.insert(pending_.end(),std::make_move_iterator(drained.begin()),std::make_move_iterator(drained.end()));
         const bool cancelled = inner_->unsubscribe(id);
         store_.request(source_, cancelled ? "unsubscribed" : "unsubscribe_unknown", id);
+        return cancelled;
+    }
+    RequestId subscribe_depth(const DepthSpec& spec) override {
+        store_.require_healthy(); spec.validate();
+        const auto id = inner_->subscribe_depth(spec);
+        try { store_.begin_depth(source_,id,spec); }
+        catch (...) { inner_->disconnect(); active_=false; throw; }
+        return id;
+    }
+    bool unsubscribe_depth(RequestId id) override {
+        store_.require_healthy();
+        // Drain before cancellation disables dispatch of already queued callbacks.
+        // This is a finite cutoff, not a guarantee for later network/SDK arrivals.
+        auto before=inner_->poll();store_.record_depth_events(source_,before);
+        store_.record_history_events(before);store_.record_events(source_,before);
+        if(pending_.size()+before.size()>4096) {
+            disconnect(); throw std::overflow_error("Recorded event delivery queue overflow");
+        }
+        pending_.insert(pending_.end(),std::make_move_iterator(before.begin()),std::make_move_iterator(before.end()));
+        const auto cancelled=inner_->unsubscribe_depth(id);
+        auto drained=inner_->poll();store_.record_depth_events(source_,drained);
+        store_.record_history_events(drained);store_.record_events(source_,drained);
+        if(pending_.size()+drained.size()>4096) {
+            disconnect(); throw std::overflow_error("Recorded event delivery queue overflow");
+        }
+        pending_.insert(pending_.end(),std::make_move_iterator(drained.begin()),std::make_move_iterator(drained.end()));
+        if(cancelled)store_.end_depth_sessions(source_,"stop");
         return cancelled;
     }
     RequestId request_history(const HistorySpec& spec,HistoryWindow window) override {
@@ -69,7 +96,7 @@ public:
     }
     std::vector<BrokerEvent> poll() override {
         store_.require_healthy();
-        auto events = inner_->poll(); store_.record_history_events(events); store_.record_events(source_, events);
+        auto events = inner_->poll(); store_.record_depth_events(source_,events);store_.record_history_events(events); store_.record_events(source_, events);
         std::vector<BrokerEvent> out;out.swap(pending_);
         out.insert(out.end(),std::make_move_iterator(events.begin()),std::make_move_iterator(events.end()));return out;
     }

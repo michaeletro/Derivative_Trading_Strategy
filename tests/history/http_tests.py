@@ -53,7 +53,7 @@ def main(exe,seed):
             ck(s.stop()==0)
         backups=list((root/'backups').glob('*.sqlite'));ck(bool(backups))
         with closing(sqlite3.connect(backups[-1])) as db, db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==5)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==6)
             ck(db.execute('SELECT count(*) FROM history_versions').fetchone()[0]==2)
     # A v1 archive is upgraded only after a complete, verified old-schema backup.
     with tempfile.TemporaryDirectory() as tmp:
@@ -66,6 +66,7 @@ def main(exe,seed):
             db.execute('DROP TABLE numerical_experiments')
             for table in ['research_experiments','research_snapshot_gaps','research_snapshot_bars','research_snapshots','history_membership','history_versions','history_requests','history_datasets']:
                 db.execute('DROP TABLE '+table)
+            db.execute('DROP TABLE depth_events');db.execute('DROP TABLE depth_sessions')
             db.execute('PRAGMA user_version=1')
         with Server(exe,root) as s:
             ck(s.call('/api/storage/status')[1]['bar_count']=='2')
@@ -77,7 +78,7 @@ def main(exe,seed):
             ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
             ck(db.execute('PRAGMA quick_check').fetchall()==[('ok',)])
         with closing(sqlite3.connect(path)) as db, db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==5)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==6)
             ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
             db.execute('PRAGMA user_version=999')
         before=path.read_bytes()

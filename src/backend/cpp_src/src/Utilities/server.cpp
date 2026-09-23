@@ -11,6 +11,7 @@ namespace asio = boost::asio;
 #include "history_json.hpp"
 #include "research_json.hpp"
 #include "experiments_json.hpp"
+#include "depth_json.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
@@ -458,6 +459,30 @@ private:
                 return dts::research_http::save(store_,parent.snapshot_id,label,dts::research_http::verified_experiment_config(parent),parent.id);});
         });
 
+        CROW_ROUTE(app_, "/api/depth/subscribe").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"contract_id","venue","rows"});
+                const auto id=dts::history_http::id(j,"contract_id");
+                const auto rows=dts::research_http::bounded_integer(j,"rows",1,10);
+                const auto venue=text(j,"venue");std::lock_guard<std::mutex> lock(broker_mutex_);
+                Json out=dts::depth_http::conventions();out["request_id"]=std::to_string(broker_.subscribe_depth(id,venue,rows));
+                out["source"]=mode_=="mock"?"mock":"ibkr_tws";out["synthetic"]=mode_=="mock";return out;});
+        });
+        CROW_ROUTE(app_, "/api/depth/unsubscribe").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"request_id"});
+                const auto id=dts::history_http::id(j,"request_id");std::lock_guard<std::mutex> lock(broker_mutex_);
+                Json out;out["schema_version"]=1;out["cancelled"]=broker_.unsubscribe_depth(id);return out;});
+        });
+        CROW_ROUTE(app_, "/api/depth/current")([this](const crow::request& req) {
+            return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);
+                auto j=dts::depth_http::current(broker_);j["source"]=mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws";
+                j["synthetic"]=mode_=="mock";return j;});
+        });
+        CROW_ROUTE(app_, "/api/depth/sessions").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{return dts::depth_http::sessions(store_,object(req));});
+        });
+        CROW_ROUTE(app_, "/api/depth/events").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{return dts::depth_http::events(store_,object(req));});
+        });
         CROW_ROUTE(app_, "/api/history/datasets")([this](const crow::request& req) {
             return guarded(req,[&]{Json j;j["datasets"]=dts::history_http::rows(store_.historical_catalog());j["limit"]=200;j["recorded_not_live"]=true;return j;});
         });
