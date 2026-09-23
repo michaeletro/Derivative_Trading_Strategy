@@ -89,3 +89,16 @@ research/liquidity_aware_hedging/data/
 research/liquidity_aware_hedging/outputs/
 *.executed.ipynb
 *.depth-export.json
+
+# Build products of the theoretical paper, not its .tex/.bib sources.
+research/liquidity_aware_hedging/reports/*.pdf
+research/liquidity_aware_hedging/reports/*.aux
+research/liquidity_aware_hedging/reports/*.bbl
+research/liquidity_aware_hedging/reports/*.blg
+research/liquidity_aware_hedging/reports/*.fdb_latexmk
+research/liquidity_aware_hedging/reports/*.fls
+research/liquidity_aware_hedging/reports/*.log
+research/liquidity_aware_hedging/reports/*.out
+research/liquidity_aware_hedging/reports/*.toc
+*.liquidity-manifest.json
+*.liquidity-result.json

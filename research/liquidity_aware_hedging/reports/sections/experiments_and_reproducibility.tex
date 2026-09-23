@@ -1,0 +1,73 @@
+\section{Experimental design and falsifiable comparisons}
+\subsection{Separate empirical and controlled tracks}
+The \textbf{empirical track} records later direct-depth sessions, freezes compatible exports, learns future displayed-cost targets, and compares persistence with predeclared information sets. The \textbf{controlled track} uses declared price/variance and liquidity dynamics to test hedge policies with the existing self-financing ledger. An empirical regression coefficient does not by itself validate the controlled joint simulator.
+
+The initial liquidity experiment holds target, quantity, time step, horizon, age bound, and split fixed. Its main ablation compares history, top, and depth on common eligible examples. A sensitivity analysis can later vary $Q$, $H$, and $A$, with an explicit separation between exploratory and confirmatory datasets. Recording many adjacent events is not a substitute for observing diverse sessions.
+
+For hedging, compare periodic delta, a declared no-trade-band benchmark, baseline-liquidity CVaR, and book-informed CVaR. Hold liability, initial funding, constraints, and evaluation scenarios fixed when comparing decision rules. A different hedge volatility changes initial model premium in the current synthetic lab; this funding effect must not be misreported as policy skill.
+
+\subsection{Primary metrics and failure modes}
+Forecast metrics should include per-date MAE/MSE, paired improvements, negative predictions, retention, and performance in wide-spread or shallow-depth states defined using training/pilot rules. The terminal hedge study should include loss CVaR, mean loss, turnover, financed costs, binding constraints, and ledger residuals. Neither a histogram quantile nor a finite-sample CVaR estimate is a certified population tail bound.
+
+The following failure modes are testable before empirical claims:
+\par\medskip
+\begin{tabularx}{\textwidth}{@{}p{37mm}Y@{}}\toprule
+Failure & Required diagnostic or counterexample\\\midrule
+Future event leaks into a feature & Alter future updates and verify the earlier feature prefix is unchanged\\
+Test set changes the fit & Perturb test labels/features and verify coefficients and validation selections are unchanged\\
+Busy dates dominate evaluation & Report equal-date metrics beside pooled metrics\\
+Missing depth conceals stress & Reconcile exclusion counts and analyze availability by observed state\\
+Reset crosses a label window & Reject the entire affected window, including between-grid invalidation\\
+Predictive improvement lacks decision value & Evaluate identical feasible policies/scenarios with and without the information\\
+Model calibration mistaken for physical forecast & State $\Q$ and scenario-law assumptions separately\\
+Displayed cost mistaken for execution & Preserve the proxy label; do not infer queue position, impact, or fills\\\bottomrule
+\end{tabularx}
+\par\medskip
+
+\subsection{What the synthetic run demonstrates}
+The public fixture generates nine short synthetic dates with structured, mean-reverting latent liquidity conditions and small midpoint changes. Those dynamics are deliberately constructed, not estimated from real market data. Under the default 30-second lookback and horizon, 2,691 examples survive the rules in the tested local run. The deterministic partition uses five training dates, two validation dates, and two test dates. These are integration-test dimensions, not a sample-size recommendation.
+
+The notebook prints and plots forecast diagnostics and verifies exact repeatability within the same environment. It does not display those numbers as empirical evidence. Software tests compare the SVD solution with an independently solved normal equation, verify timing and sample-count identities, reject incompatible or duplicate feeds, and check private no-overwrite outputs. Platform/library floating-point differences may change least-significant numerical digits; source and environment fingerprints are retained.
+
+\section{Repository deliverables and reproducibility}
+\subsection{Files added by this stage}
+\par\medskip
+\begin{tabularx}{\textwidth}{@{}p{63mm}Y@{}}\toprule
+Component & Responsibility\\\midrule
+\texttt{liquidity\_dataset.py} & Receipt-time reconstruction, clock sampling, features, labels, eligibility audit\\
+\texttt{liquidity\_baselines.py} & Date split, train-only scaling, SVD ridge, validation selection, per-date scoring\\
+\texttt{tools/liquidity\_study.py} & Explicit synthetic/private-manifest input and protected result export\\
+\texttt{02\_liquidity\_prediction.ipynb} & Executable Phase II foundation with diagnostics and interpretation\\
+\texttt{tests/liquidity/} & Counterexamples to timing leakage, estimator checks, notebook execution\\
+\texttt{reports/theory\_literature.tex} & This reproducible theoretical and literature document\\\bottomrule
+\end{tabularx}
+\par\medskip
+The new learner reads stopped exports and does not need a running server, IBKR credentials, or a second database. It does not modify the existing market archive. Its results are explicit private JSON files, not a silently added experiment type in the server catalog. No database migration is introduced by this stage.
+
+A real-data manifest lists absolute local export paths, configuration, and all three date partitions. The command refuses mixed feed conventions, duplicate fingerprints, overlapping capture sessions, insufficient dates, and incompatible partitions. Outputs are owner-readable files published without overwrite outside detected Git checkouts. Market-data redistribution rights still require human review. The supplied syllabi and their meeting credentials are not copied into the repository.
+
+\subsection{Run the synthetic demonstration}
+From the existing checkout after obtaining the learning branch:
+\begin{verbatim}
+python3 -m pip install -r \
+  research/liquidity_aware_hedging/requirements.txt
+python3 tools/liquidity_study.py --synthetic \
+  --output "$HOME/.local/share/derivative-lab/learning/demo.json"
+python3 -m jupyterlab \
+  research/liquidity_aware_hedging/notebooks/02_liquidity_prediction.ipynb
+\end{verbatim}
+A pre-existing output path is an error, not permission to overwrite an old run. To run real data, provide \texttt{--manifest /absolute/path/manifest.json} instead of \texttt{--synthetic}. For a private notebook copy, set \texttt{DTS\_REPO\_ROOT} and \texttt{DTS\_LIQUIDITY\_MANIFEST} before starting its kernel. Real-data mode never silently falls back to synthetic observations.
+
+Compile this document with \texttt{latexmk -pdf -interaction=nonstopmode -halt-on-error theory\_literature.tex} from its report directory. The adjacent bibliography supplies the references. The PDF is a working-paper artifact, not a substitute for the AMS 520 notebook or either required presentation.
+
+\section{Conclusion and next validation gate}
+The immediate deliverable is a reproducible baseline for future displayed liquidity, not an end-to-end trading strategy. Its most important properties are explicit observation timing, common-sample comparisons, training-only estimation, predeclared date partitions, visible missingness, and reproducible output. These make a negative result interpretable and a positive result worth further testing.
+
+The next empirical gate is multiple compatible recorded dates with a frozen manifest. The next optimization gate is a constrained CVaR solver with independently checked cash/stock losses and exogenous convex costs. The next volatility gate is a controlled stochastic-volatility/LSV experiment with a validated pricing reference and clear $\Pp/\Q$ assumptions. Only after those gates should the project claim that a liquidity forecast improves the cost--risk frontier, or extend to nonlinear learning and sequential policy optimization.
+
+\section*{AI assistance, authorship, and source limitations}
+\addcontentsline{toc}{section}{AI assistance, authorship, and source limitations}
+This draft and the associated implementation were prepared with substantial AI assistance: research framing, source discovery and synthesis, derivations, Python code, test design, notebook drafting, and LaTeX production. The base repository also contains AI-assisted work. Automated checks are distinct from the student's independent verification and ability to defend the submitted analysis. Michael Perez should review and revise the report and maintain a dated human-contribution log before submission. No instructor approval, teammate contribution, real-data result, or literature novelty is invented.
+
+The syllabus mapping uses the two user-supplied Fall 2026 PDFs only for stated course requirements. The technical literature is externally researched and cited separately. This review reads selected primary papers and official documentation; it is not an exhaustive review of every recent LSV or microstructure method. In particular, theoretical assumptions, data licensing, physical-risk calibration, and actual depth entitlements remain material unresolved requirements for empirical deployment.
+

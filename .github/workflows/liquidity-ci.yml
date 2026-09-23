@@ -1,0 +1,55 @@
+name: Liquidity learning and LaTeX review
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: liquidity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  learning:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Archive public research source only
+        run: git archive --format=tar.gz -o "$RUNNER_TEMP/liquidity-source.tar.gz" HEAD research/liquidity_aware_hedging tools/liquidity_study.py tests/liquidity docs/liquidity-learning.md .github/workflows/liquidity-ci.yml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liquidity-source
+          path: ${{ runner.temp }}/liquidity-source.tar.gz
+          retention-days: 7
+      - name: Install pinned notebook dependencies
+        run: python -m pip install -r research/liquidity_aware_hedging/requirements.txt
+      - name: Leakage counterexamples and regression references
+        run: |
+          python -m unittest discover -s tests/liquidity -p 'test_*.py' -v
+          python tests/depth/reference_tests.py
+      - name: Execute synthetic notebook and CLI
+        run: |
+          python tests/liquidity/notebook_test.py --output "$RUNNER_TEMP/liquidity-synthetic.executed.ipynb"
+          python tools/liquidity_study.py --synthetic --output "$RUNNER_TEMP/liquidity-synthetic.json"
+      - name: Install LaTeX compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y latexmk texlive-latex-recommended texlive-fonts-recommended lmodern
+      - name: Compile theory and literature review
+        working-directory: research/liquidity_aware_hedging/reports
+        run: |
+          latexmk -pdf -interaction=nonstopmode -halt-on-error theory_literature.tex
+          if grep -E 'Overfull|There were undefined|Citation .* undefined|Reference .* undefined' theory_literature.log; then
+            echo 'Unresolved references or overflowing layout'; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liquidity-report-and-synthetic-notebook
+          path: |
+            research/liquidity_aware_hedging/reports/theory_literature.pdf
+            ${{ runner.temp }}/liquidity-synthetic.executed.ipynb
+            ${{ runner.temp }}/liquidity-synthetic.json
+          retention-days: 14

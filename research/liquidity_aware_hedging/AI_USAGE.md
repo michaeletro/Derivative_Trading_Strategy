@@ -21,3 +21,14 @@ Before submission, complete a dated human-contribution log: contributor, exact w
 reviewed commit, derivations understood/reproduced, tests run independently, observed
 failures and fixes, and instructor conditions. The student remains responsible for
 correctness, citations, claims, data rights, and the ability to explain the code.
+
+## Liquidity-learning and theoretical-review increment
+
+AI assistance also includes receipt-time target construction, causal-feature and
+whole-date split rules, SVD residual-ridge baselines, tests, the second notebook,
+primary-source discovery/critical synthesis, mathematical derivations and LaTeX
+production. Synthetic fixtures and automated checks are not human empirical work.
+The PDF is a working draft for independent reading, correction and attribution.
+No real depth session or instructor approval was obtained by this increment.
+The author should verify every cited source and derivation and explicitly record
+which analysis, experimentation and interpretation they performed themselves.

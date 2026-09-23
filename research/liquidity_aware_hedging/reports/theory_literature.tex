@@ -1,0 +1,78 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=25mm,headheight=15pt]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern,microtype}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,longtable,tabularx,array}
+\usepackage{xcolor,fancyhdr}
+\usepackage[round,authoryear]{natbib}
+\usepackage[breaklinks,colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue!50!black]{hyperref}
+\usepackage{url}
+\urlstyle{same}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+\renewcommand{\arraystretch}{1.18}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small Liquidity-aware hedging / Research working paper}
+\fancyhead[R]{\small AMS 518 \& AMS 520}
+\fancyfoot[L]{\footnotesize Theory, literature, and reproducible design}
+\fancyfoot[R]{\thepage}
+\newcommand{\E}{\mathbb E}
+\newcommand{\Pp}{\mathbb P}
+\newcommand{\Q}{\mathbb Q}
+\newcommand{\F}{\mathcal F}
+\newcommand{\G}{\mathcal G}
+\newcommand{\ind}{\mathbf 1}
+\newcommand{\CVaR}{\operatorname{CVaR}}
+\newcommand{\VaR}{\operatorname{VaR}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{remark}[proposition]{Remark}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\hypersetup{pdftitle={Liquidity-Aware Derivative Hedging: Theoretical Analysis and Literature Review},pdfauthor={Prepared for Michael Perez; AI-assisted research draft},pdfsubject={AMS 518 and AMS 520 project research foundation}}
+\begin{document}
+\begin{titlepage}
+\thispagestyle{empty}
+{\small RESEARCH WORKING PAPER \hfill 23 September 2026}\par
+\vspace{22mm}
+{\Huge\bfseries Liquidity-Aware\\[3mm] Derivative Hedging}\par
+\vspace{8mm}
+{\Large Order-Book Learning, CVaR Optimization,\\[2mm] and Local--Stochastic Volatility}\par
+\vspace{9mm}
+{\large Theoretical analysis and critical literature review}\par
+\vspace{15mm}
+\par\medskip
+\begin{tabularx}{\textwidth}{@{}p{34mm}Y@{}}
+Prepared for & Michael Perez\\
+Academic context & AMS 518: Advanced Stochastic Models, Risk Assessment, and Portfolio Optimization; AMS 520: Machine Learning in Quantitative Finance\\
+Research platform & \texttt{michaeletro/Derivative\_Trading\_Strategy}\\
+Implementation & Receipt-time liquidity targets, chronological validation, and persistence/residual-ridge baselines\\
+Status & AI-assisted project draft for review; not a completed empirical study or an instructor-approved combined submission
+\end{tabularx}
+\par\medskip
+\vfill
+\hrule\vspace{4mm}
+\textbf{Evidence boundary.} The accompanying notebook executes on explicitly synthetic fixtures. No real brokerage observations were supplied to the new learning stage during development. The CVaR and local--stochastic-volatility sections below are a theoretical specification and literature synthesis; a CVaR hedge optimizer and an LSV calibration engine are not claimed as implemented.
+\vspace{3mm}
+\textbf{Use before submission.} Independently verify the mathematics, read the cited sources, replace synthetic diagnostics with a properly documented empirical study, record human contributions, and obtain both instructors' conditions for shared-course work and AI assistance.
+\end{titlepage}
+
+\begin{abstract}
+This project investigates whether observable order-book information can improve the cost--risk tradeoff of derivative hedging, and whether any measured benefit survives changes in volatility dynamics. It separates three tasks that are often conflated: forecasting displayed liquidity under an observed information set; choosing a constrained hedge under a specified loss distribution; and valuing a derivative under a risk-neutral model. The implemented next stage constructs clock-time liquidity targets from stopped, integrity-checked displayed-depth exports. It uses only backward-as-of observations, records eligibility losses, splits whole receipt dates, and benchmarks persistence against regularized linear corrections. This report develops the corresponding measurement and estimation theory, derives a convex scenario-CVaR hedge formulation, and explains the role and limits of local--stochastic volatility. A critical review connects order-flow imbalance, order-book prediction, regularization, execution theory, conditional tail risk, particle calibration, and learned hedging. The proposed contribution is a reproducible comparison of information and decision rules, not a claim of a new pricing theorem or a profitable trading system. Synthetic validation supports software correctness and timing invariants; empirical forecasting and downstream hedging benefit remain open tests for the course project.
+\end{abstract}
+\tableofcontents
+\newpage
+
+\input{sections/research_and_literature}
+\input{sections/measurement_and_learning}
+\input{sections/lsv_and_optimization}
+\input{sections/experiments_and_reproducibility}
+\clearpage
+\bibliographystyle{plainnat}
+\bibliography{literature}
+\end{document}
