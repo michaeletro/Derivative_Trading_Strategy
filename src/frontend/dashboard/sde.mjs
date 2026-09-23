@@ -31,7 +31,8 @@ export function mountSde(api,onAccessError) {
   function show(v) {
     result=v;text('sde-analytical',valueText(v.analytical_price));text('sde-exact',valueText(v.exact_price.mean));
     text('sde-count',valueText(v.independent_paths));text('sde-runtime',`${valueText(v.timing.total_ms)} ms`);
-    text('sde-provenance',`${v.engine_version} · seed ${v.request.simulation.seed} · ${v.normal_draws} fine-grid normal draws · ${v.request.model.currency} per payoff unit · source ${v.build.sde_source_sha256.slice(0,12)}`);
+    const exactInterval=v.exact_price.ci_low===null?'unresolved (no observed payoff variation)':`[${valueText(v.exact_price.ci_low)}, ${valueText(v.exact_price.ci_high)}]`;
+    text('sde-provenance',`${v.engine_version} · seed ${v.request.simulation.seed} · ${v.normal_draws} fine-grid normal draws · ${v.request.model.currency} per payoff unit · Exact MC standard error: ${valueText(v.exact_price.standard_error)} · pointwise 95% sampling interval: ${exactInterval} · source ${v.build.sde_source_sha256.slice(0,12)}`);
     $('sde-warnings').replaceChildren(...v.warnings.map(w=>node('p',w)));
     $('sde-path-level').replaceChildren(...v.levels.map((l,i)=>{const n=node('option',`${l.steps} steps`);n.value=String(i);return n;}));
     $('sde-path-number').value='0';

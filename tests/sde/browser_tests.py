@@ -25,6 +25,8 @@ def main(exe):
         result=response.value.json();assert result['kind']=='sde_convergence' and len(result['levels'])==6
         expect(page.locator('#sde-note')).to_contain_text('complete');expect(page.locator('#sde-table tr')).to_have_count(12)
         expect(page.locator('#sde-analytical')).to_contain_text('10.4505836');assert result['independent_paths']==10000
+        expect(page.locator('#sde-provenance')).to_contain_text('Exact MC standard error: 0.14898153')
+        expect(page.locator('#sde-provenance')).to_contain_text('95% sampling interval: [')
         page.locator('#sde-path-level').select_option('2');page.locator('#sde-path-number').select_option('1')
         page.locator('#sde').screenshot(path=str(output/'sde-desktop.png'))
         with page.expect_download() as dl:page.locator('#sde-export').click()
@@ -50,7 +52,8 @@ def main(exe):
         page.locator('#lab-catalog').screenshot(path=str(output/'sde-catalog-desktop.png'))
         page.set_viewport_size({'width':390,'height':844});page.locator('#sde').scroll_into_view_if_needed()
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
-        page.locator('#sde').screenshot(path=str(output/'sde-mobile.png'))
+        page.locator('#sde-provenance').scroll_into_view_if_needed()
+        page.screenshot(path=str(output/'sde-mobile.png'))
         page.set_viewport_size({'width':1440,'height':1000})
         page.locator('#sde-form [name=first_steps]').fill('3');expect(page.locator('#sde-analytical')).to_have_text('—')
         before=sum(r.endswith('/api/sde/run') for r in requests);page.locator('#sde-run').click();expect(page.locator('#sde-note')).to_contain_text('power-of-two')
