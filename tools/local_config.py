@@ -69,6 +69,10 @@ def validate(data: dict) -> dict:
 def profile_paths(name: str):
     if not PROFILE.fullmatch(name): raise ValueError('Invalid profile name')
     home=config_home()
+    resolved=home.expanduser().resolve()
+    source_root=Path(__file__).resolve().parents[1]
+    if resolved==source_root or source_root in resolved.parents or any((p/'.git').exists() for p in (resolved,*resolved.parents)):
+        raise ValueError('Keep private configuration outside every Git checkout; use ~/.config/derivative-lab')
     return home,home/(name+'.json'),home/'dashboard.token'
 
 def load(name: str):

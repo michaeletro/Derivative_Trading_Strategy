@@ -76,3 +76,10 @@ vendor/ibkr/
 *.sqlite3-shm
 *.sqlite.partial*
 recorder.lock
+
+# Local dashboard credentials/profiles must stay outside Git. Defense in depth:
+# ignored files can still be force-added; never commit or paste real credentials.
+dashboard.token
+dashboard.token.*
+.dts-auth/
+.config/derivative-lab/

@@ -3,6 +3,7 @@
 namespace asio = boost::asio;
 #include <crow_all.h>
 #include <dashboard_routes.hpp>
+#include "browser_auth.hpp"
 #include <sqlite3.h>
 #include "pricing_json.hpp"
 #include "greeks_json.hpp"
@@ -204,6 +205,14 @@ public:
             throw std::invalid_argument("Client Portal relay is retired; configure DTS_BROKER instead");
         if (env("DB_FAIL_FAST", "false") == "true" && !assets_.available())
             throw std::runtime_error("Configured asset database unavailable");
+        // Start launch-code expiry after database validation/migration finishes.
+        const auto launch = env("DTS_BROWSER_BOOTSTRAP_CODE");
+        if (!launch.empty()) {
+            if (token_.size() < 24) throw std::invalid_argument("Local auto sign-in requires a configured credential");
+            browser_sessions_.seed(launch, "127.0.0.1:" + std::to_string(port_));
+        }
+        ::unsetenv("DTS_BROWSER_BOOTSTRAP_CODE");
+        ::unsetenv("DTS_LAUNCH_NONCE");
         routes();
         const auto storage=store_.status();
         std::cout << "Time-series database opened: " << storage.database << '\n'
@@ -240,6 +249,8 @@ private:
     crow::SimpleApp app_;
     std::string mode_, token_;
     int port_;
+    dts::local_auth::Sessions browser_sessions_;
+    const std::string launch_nonce_ = env("DTS_LAUNCH_NONCE");
     dts::storage::TimeSeriesStore store_;
     AssetRepository assets_;
     dts::ReadOnlyService broker_;
@@ -275,26 +286,93 @@ private:
     crow::response response(Json body, int status = 200) const {
         crow::response result(std::move(body)); result.code = status;
         result.set_header("Cache-Control", "no-store");
+        result.set_header("Referrer-Policy", "no-referrer");
         result.set_header("X-Content-Type-Options", "nosniff"); return result;
     }
     crow::response message(int status, const char* text_value) const {
         Json j; j["error"] = text_value; return response(std::move(j), status);
     }
-    template<class Function> crow::response guarded(const crow::request& req, Function fn) {
+    std::optional<crow::response> local_guard(const crow::request& req) const {
         const auto host = req.get_header_value("Host");
         if (host != "127.0.0.1:" + std::to_string(port_) && host != "localhost:" + std::to_string(port_))
             return message(403, "Invalid Host header");
         const auto origin = req.get_header_value("Origin");
         if (!origin.empty() && origin != "http://" + host) return message(403, "Cross-origin access denied");
-        if (!token_.empty() && req.get_header_value("Authorization") != "Bearer " + token_)
-            return message(401, "Bearer token required");
+        const auto site = req.get_header_value("Sec-Fetch-Site");
+        if (!site.empty() && site != "same-origin") return message(403, "Cross-origin API access denied");
         if (req.body.size() > 8192) return message(413, "Request too large");
+        return {};
+    }
+    bool browser_request(const crow::request& req, bool mutation = false) const {
+        // SameSite ignores ports. Require exact Origin for mutations and either
+        // exact Origin or same-origin Fetch Metadata for GET cookie auth.
+        const auto origin = req.get_header_value("Origin");
+        const bool exact = origin == "http://" + req.get_header_value("Host");
+        return req.get_header_value("X-DTS-Local-Request") == "1" &&
+            (mutation ? exact : (exact || req.get_header_value("Sec-Fetch-Site") == "same-origin"));
+    }
+    std::string browser_cookie(const crow::request& req) const {
+        return dts::local_auth::cookie_value(req.get_header_value("Cookie"), port_);
+    }
+    bool bearer(const crow::request& req) const {
+        return !token_.empty() && dts::local_auth::equal_secret(req.get_header_value("Authorization"), "Bearer " + token_);
+    }
+    bool browser_session(const crow::request& req) {
+        return browser_request(req, req.method != crow::HTTPMethod::GET) &&
+            browser_sessions_.valid(browser_cookie(req), req.get_header_value("Host"));
+    }
+    template<class Function> crow::response guarded(const crow::request& req, Function fn) {
+        if (auto error = local_guard(req)) return std::move(*error);
+        // An explicitly wrong bearer must not fall back to a valid cookie.
+        if (!token_.empty() && !(req.get_header_value("Authorization").empty() ? browser_session(req) : bearer(req)))
+            return message(401, "Local sign-in or Bearer token required");
         try { return response(fn()); }
         catch (const std::out_of_range&) { return message(404, "Unknown resource or numeric value outside range"); }
         catch (const std::invalid_argument& e) { return message(400, e.what()); }
         catch (const std::length_error& e) { return message(429, e.what()); }
         catch (const std::logic_error& e) { return message(409, e.what()); }
         catch (...) { return message(503, "Service operation unavailable"); }
+    }
+    void auth_routes() {
+        CROW_ROUTE(app_, "/api/auth/status")([this](const crow::request& req) {
+            if (auto error = local_guard(req)) return std::move(*error);
+            Json j; j["schema_version"] = 1; j["local_signin"] = token_.size() >= 24;
+            j["authenticated"] = !token_.empty() && browser_session(req);
+            // Public startup correlation value, NOT an authenticator.
+            j["launch_nonce"] = launch_nonce_; return response(std::move(j));
+        });
+        CROW_ROUTE(app_, "/api/auth/launch").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            if (auto error = local_guard(req)) return std::move(*error);
+            if (token_.size() < 24 || !bearer(req)) return message(401, "Saved local profile credential required");
+            try {
+                dts::pricing::http::keys(object(req), {});
+                Json j; j["schema_version"] = 1; j["code"] = browser_sessions_.issue(req.get_header_value("Host"));
+                j["expires_in_seconds"] = 60; return response(std::move(j));
+            } catch (const std::length_error&) { return message(429, "Too many pending local sign-ins"); }
+              catch (const std::invalid_argument&) { return message(400, "Expected empty JSON object"); }
+              catch (...) { return message(503, "Local sign-in unavailable"); }
+        });
+        CROW_ROUTE(app_, "/api/auth/exchange").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            if (auto error = local_guard(req)) return std::move(*error);
+            if (!browser_request(req, true)) return message(403, "Same-origin browser request required");
+            try {
+                const auto body = object(req); dts::pricing::http::keys(body, {"code"});
+                const auto code = text(body, "code");
+                const auto session = browser_sessions_.exchange(code, req.get_header_value("Host"), browser_cookie(req));
+                if (session.empty()) return message(401, "Local sign-in link expired or already used; reopen from the launcher");
+                Json j; j["schema_version"] = 1; j["authenticated"] = true; j["expires_in_seconds"] = 43200;
+                auto out = response(std::move(j)); out.set_header("Set-Cookie", dts::local_auth::set_cookie(session, port_)); return out;
+            } catch (const std::length_error&) { return message(429, "Too many local browser sessions"); }
+              catch (const std::invalid_argument&) { return message(400, "Invalid local sign-in request"); }
+              catch (...) { return message(503, "Local sign-in unavailable"); }
+        });
+        CROW_ROUTE(app_, "/api/auth/logout").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            if (auto error = local_guard(req)) return std::move(*error);
+            if (!browser_request(req, true)) return message(403, "Same-origin browser request required");
+            browser_sessions_.revoke(browser_cookie(req), req.get_header_value("Host"));
+            Json j; j["signed_out"] = true;
+            auto out = response(std::move(j)); out.set_header("Set-Cookie", dts::local_auth::clear_cookie(port_)); return out;
+        });
     }
     Json status() const {
         Json j; j["mode"] = mode_; j["enabled"] = broker_.enabled();
@@ -305,6 +383,7 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        auth_routes();
         CROW_ROUTE(app_, "/api/hedging/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto request=dts::hedging_http::parse(object(req));
                 std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);

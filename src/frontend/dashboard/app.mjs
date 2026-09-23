@@ -1,3 +1,4 @@
+import {takeLaunchCode, validSessionStatus, reopenMessage} from './local-signin.mjs';
 import {mountHedging} from './hedging.mjs';
 import {mountSde} from './sde.mjs';
 import {mountReplay} from './replay.mjs';
@@ -9,6 +10,8 @@ import {mountPricing} from './pricing.mjs';
 import {POLL_MS, numberText, titleCase, quoteView, sample, validateSnapshot, contractQuery, createApi} from './model.mjs';
 
 const $=id=>document.getElementById(id);
+$('access-title').parentElement.querySelector('p').textContent='The launcher signs in locally using your saved profile. Manual token entry is a fallback, not your IBKR password.';
+$('forget').textContent='Sign out';
 const api=createApi();
 const hedgingLab=mountHedging(api,error=>lock(error.message));
 const sdeLab=mountSde(api,error=>lock(error.message));
@@ -33,7 +36,7 @@ function clearSession() {
   selected=null; histories.clear(); quoteRows.clear(); candidates=[]; pendingResolution=null; requestedPositions=false;
   $('quotes-body').replaceChildren(); $('candidates').replaceChildren(); text('resolution-note',''); positionSignature='';
 }
-function lock(message='Token removed from this tab. The broker session was not disconnected.') {
+function lock(message='This tab is locked. The broker session was not disconnected.') {
   revision++; api.clear(); clearTimeout(timer); unlocked=false; busy=false; current=null; fresh=false; session='';
   clearSession(); $('token').value=''; render(); notify(message);
 }
@@ -101,7 +104,18 @@ $('access-form').addEventListener('submit',async event=>{
   catch(error) { if(version===revision) { lock(error.message); } }
   finally { if(version===revision) { busy=false; render(); schedule(); } }
 });
-$('forget').addEventListener('click',()=>{ lock(); $('token').focus(); });
+$('forget').addEventListener('click',async()=>{
+  // Clear all displayed data immediately, then revoke the cookie server-side.
+  lock('Signing out of the local browser session…');
+  const version=revision, logoutApi=createApi(); logoutApi.useBrowserSession();
+  busy=true; render();
+  try {
+    await logoutApi.request('/api/auth/logout','POST',{});
+    if(version===revision) notify('Signed out. Recording and the broker session were not stopped. '+reopenMessage);
+  } catch {
+    if(version===revision) notify('This tab is locked, but server-side sign-out was not confirmed. Retry Sign out or restart the server.');
+  } finally { logoutApi.clear(); if(version===revision) { busy=false; render(); $('token').focus(); } }
+});
 $('refresh').addEventListener('click',()=>{ notify(''); refresh(); });
 $('connect').addEventListener('click',()=>command(()=>api.request('/api/broker/connect','POST')));
 $('disconnect').addEventListener('click',()=>$('disconnect-dialog').showModal());
@@ -251,7 +265,7 @@ function render() {
   const errorCode=broker?.errors?.at(-1)?.code;
   text('connection-note',!unlocked?'Unlock, then connect explicitly to your configured broker.':!fresh?'Service data is not current. Refresh to inspect the connection.':broker?.worker_failed?'Broker worker failed. Inspect the server before reconnecting.':state==='ready'?`Session ready for read-only requests${errorCode?` · last broker code ${errorCode}`:''}.`:state==='connecting'?'Waiting for the broker API handshake. No automatic reconnect.':broker?.mode==='none'?'Broker disabled. Set DTS_BROKER=tws and restart the server to use IBKR.':`Broker ${state}. Connect only to the intended gateway session.`);
   text('poll-badge',!unlocked?'NOT POLLING':document.hidden?'PAUSED':!fresh?'DATA UNAVAILABLE':'POLLING · 2s');
-  $('unlock').disabled=busy; $('token').disabled=busy; $('forget').disabled=!unlocked;
+  $('unlock').disabled=busy; $('token').disabled=busy; $('forget').disabled=busy;
   $('refresh').disabled=!unlocked||busy; $('connect').disabled=!unlocked||busy||!fresh||!broker?.enabled||['ready','connecting'].includes(state);
   $('disconnect').disabled=!unlocked||busy||!fresh||!broker?.enabled||state==='disconnected';
   $('contract-fields').disabled=!ready()||busy; $('resolve').disabled=Boolean(pendingResolution);
@@ -264,7 +278,25 @@ document.addEventListener('visibilitychange',()=>{
   else if(unlocked) refresh();
 });
 window.addEventListener('pagehide',()=>lock(''));
-window.addEventListener('pageshow',event=>{ if(event.persisted) lock('Re-enter the token after restoring this page.'); });
+window.addEventListener('pageshow',event=>{ if(event.persisted) { lock(''); autoSignIn(); } });
 new ResizeObserver(()=>renderChart()).observe($('chart').parentElement);
 setInterval(()=>{ if(unlocked && !document.hidden) { renderQuotes(); renderChart(); } },1000);
 render();
+
+async function autoSignIn() {
+  revision++; const version=revision;
+  busy=true; render(); api.useBrowserSession();
+  try {
+    const code=takeLaunchCode(window.location,window.history);
+    const state=code ? await api.request('/api/auth/exchange','POST',{code}) : await api.request('/api/auth/status');
+    if(version!==revision) return;
+    if(!validSessionStatus(state)) throw new Error('Local sign-in response is incompatible. Restart the updated server.');
+    if(!state.authenticated) { lock(reopenMessage); return; }
+    unlocked=true; current=null; fresh=false; session=''; clearSession();
+    await readSnapshot(version);
+    if(version===revision) notify('Signed in locally. The saved token was not copied into the page. Connect to the broker only when intended.');
+  } catch(error) {
+    if(version===revision) lock(error.message || reopenMessage);
+  } finally { if(version===revision) { busy=false; render(); schedule(); } }
+}
+autoSignIn();

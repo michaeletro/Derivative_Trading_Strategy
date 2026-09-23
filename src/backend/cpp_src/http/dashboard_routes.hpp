@@ -29,6 +29,7 @@ inline void mount(crow::SimpleApp& app, int port) {
     CROW_ROUTE(app, "/dashboard/<string>")([serve](const crow::request& req, const std::string& name) {
         if (name == "index.html") return serve(req, assets::index_html, "text/html; charset=utf-8");
         if (name == "dashboard.css") return serve(req, assets::dashboard_css, "text/css; charset=utf-8");
+        if (name == "local-signin.mjs") return serve(req, assets::local_signin_mjs, "text/javascript; charset=utf-8");
         if (name == "app.mjs") return serve(req, assets::app_mjs, "text/javascript; charset=utf-8");
         if (name == "model.mjs") return serve(req, assets::model_mjs, "text/javascript; charset=utf-8");
         if (name == "pricing.mjs") return serve(req, assets::pricing_mjs, "text/javascript; charset=utf-8");

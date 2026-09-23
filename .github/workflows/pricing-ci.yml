@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - name: Source snapshot (no vendor SDK, secrets, or runtime data)
         run: |
-          git archive --format=tar.gz -o "$RUNNER_TEMP/research-source.tar.gz" HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing src/backend/cpp_src/storage src/backend/cpp_src/research src/backend/cpp_src/ibkr tools/start_dashboard.py tools/restore_timeseries.py tools/local_config.py tools/configure_dashboard.py
+          git archive --format=tar.gz -o "$RUNNER_TEMP/research-source.tar.gz" HEAD CMakeLists.txt cmake apps tests docs README.md SECURITY.md .github .gitignore .env.example requirements-dev.txt src/frontend/dashboard src/backend/cpp_src/core src/backend/cpp_src/http src/backend/cpp_src/src/Utilities/server.cpp src/backend/cpp_src/src/main.cpp src/backend/cpp_src/headers/Utilities/crow_all.h src/backend/cpp_src/headers/Utilities/server.h src/backend/cpp_src/pricing src/backend/cpp_src/storage src/backend/cpp_src/research src/backend/cpp_src/ibkr tools/start_dashboard.py tools/restore_timeseries.py tools/local_config.py tools/configure_dashboard.py tools/open_dashboard.py
       - uses: actions/upload-artifact@v4
         with:
           name: research-source
@@ -40,7 +40,7 @@ jobs:
           cmake --build build-pricing --parallel 2
           ctest --test-dir build-pricing --output-on-failure
       - name: Frontend rules
-        run: node --test tests/dashboard/model.test.mjs tests/pricing/model.test.mjs tests/greeks/model.test.mjs tests/storage/model.test.mjs tests/history/model.test.mjs tests/replay/model.test.mjs tests/sde/model.test.mjs tests/hedging/model.test.mjs
+        run: node --test tests/dashboard/model.test.mjs tests/pricing/model.test.mjs tests/greeks/model.test.mjs tests/storage/model.test.mjs tests/history/model.test.mjs tests/replay/model.test.mjs tests/sde/model.test.mjs tests/hedging/model.test.mjs tests/auth/model.test.mjs
       - name: Install browser tools
         run: |
           python -m pip install playwright==1.57.0
@@ -56,6 +56,7 @@ jobs:
           python tests/replay/browser_tests.py build-pricing/server build-pricing/research_store_tests
           python tests/sde/browser_tests.py build-pricing/server
           python tests/hedging/browser_tests.py build-pricing/server
+          python tests/auth/browser_tests.py build-pricing/server
       - uses: actions/upload-artifact@v4
         if: always()
         with:

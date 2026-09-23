@@ -77,3 +77,17 @@ market observations and should not be published unintentionally. They exclude
 configured tokens and account/position state. Token removal clears the research UI
 and suppresses pending responses but does not undo a server-side committed save.
 No browser/transport retry is allowed to silently create a duplicate run.
+
+
+## Automatic local browser sessions
+
+The 0.10.1 local sign-in flow is documented in `docs/local-signin.md`, including
+its HTTP-loopback-only and trusted-local-services boundary. The profile token is
+not auto-filled into the DOM or placed in Web Storage. One-use launch tickets
+are exchanged for bounded in-memory server sessions and HttpOnly/SameSite cookies.
+Cookie authentication requires strict same-origin request checks in addition to
+SameSite. Cookies are not port-isolated and not Secure on HTTP; do not expose the
+server remotely. `--no-open-browser` and manual Bearer authentication remain
+available. Local profile creation/loading refuses Git worktrees, and no session
+or token enters the recorded-data archive. The existing manual-token statements
+above apply to manual fallback, not to the new opaque browser-session cookie.

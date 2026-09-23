@@ -85,12 +85,13 @@ function validApiPath(path, method) {
 }
 // The token exists only in this closure. Never use persistent browser storage.
 export function createApi(fetcher = fetch) {
-  let token = '', generation = 0;
+  let token = '', generation = 0, browserSession = false;
   const active = new Set();
   const cancel = () => { generation++; for (const controller of active) controller.abort(); active.clear(); };
   return {
-    setToken(value) { cancel(); token=value; },
-    clear() { cancel(); token=''; },
+    setToken(value) { cancel(); token=value; browserSession=false; },
+    useBrowserSession() { cancel(); token=''; browserSession=true; },
+    clear() { cancel(); token=''; browserSession=false; },
     cancel,
     async request(path, method='GET', data) {
       if (!validApiPath(path,method)) throw new ApiError('Invalid local API path.');
@@ -98,11 +99,12 @@ export function createApi(fetcher = fetch) {
       const timer=setTimeout(() => controller.abort(), 12000);
       try {
         const headers={Accept:'application/json'};
+        if(browserSession) headers['X-DTS-Local-Request']='1';
         if (token) headers.Authorization=`Bearer ${token}`;
         if (data !== undefined) headers['Content-Type']='application/json';
-        const response=await fetcher(path,{method, headers, body:data===undefined ? undefined : JSON.stringify(data), signal:controller.signal, cache:'no-store', credentials:'omit', redirect:'error', mode:'same-origin'});
+        const response=await fetcher(path,{method, headers, body:data===undefined ? undefined : JSON.stringify(data), signal:controller.signal, cache:'no-store', credentials:browserSession?'same-origin':'omit', redirect:'error', mode:'same-origin'});
         if (started !== generation) throw new ApiError('Request superseded.');
-        if (response.status===401 || response.status===403) throw new ApiError('Access rejected. Re-enter your local dashboard token.',response.status);
+        if (response.status===401 || response.status===403) throw new ApiError('Access rejected. Reopen using tools/open_dashboard.py --profile paper-tws, or enter your saved local token.',response.status);
         if (!response.ok) {
           let message=`HTTP ${response.status}`;
           try { const body=await response.json(); if (typeof body.error==='string') message=body.error.slice(0,180); } catch {}

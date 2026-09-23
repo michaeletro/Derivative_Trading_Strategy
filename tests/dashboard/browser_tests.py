@@ -15,7 +15,7 @@ CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'sel
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         assets = {'/': 'index.html', '/dashboard/': 'index.html', '/dashboard/index.html': 'index.html',
-                  '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css', '/dashboard/storage.mjs': 'storage.mjs', '/dashboard/storage-model.mjs': 'storage-model.mjs', '/dashboard/history.mjs': 'history.mjs', '/dashboard/history-model.mjs': 'history-model.mjs', '/dashboard/history.css': 'history.css', '/dashboard/replay.mjs': 'replay.mjs', '/dashboard/replay-model.mjs': 'replay-model.mjs', '/dashboard/replay.css': 'replay.css', '/dashboard/sde.mjs': 'sde.mjs', '/dashboard/sde-model.mjs': 'sde-model.mjs', '/dashboard/sde.css': 'sde.css', '/dashboard/hedging.mjs': 'hedging.mjs', '/dashboard/hedging-model.mjs': 'hedging-model.mjs', '/dashboard/hedging.css': 'hedging.css'}
+                  '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/local-signin.mjs':'local-signin.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css', '/dashboard/storage.mjs': 'storage.mjs', '/dashboard/storage-model.mjs': 'storage-model.mjs', '/dashboard/history.mjs': 'history.mjs', '/dashboard/history-model.mjs': 'history-model.mjs', '/dashboard/history.css': 'history.css', '/dashboard/replay.mjs': 'replay.mjs', '/dashboard/replay-model.mjs': 'replay-model.mjs', '/dashboard/replay.css': 'replay.css', '/dashboard/sde.mjs': 'sde.mjs', '/dashboard/sde-model.mjs': 'sde-model.mjs', '/dashboard/sde.css': 'sde.css', '/dashboard/hedging.mjs': 'hedging.mjs', '/dashboard/hedging-model.mjs': 'hedging-model.mjs', '/dashboard/hedging.css': 'hedging.css'}
         name = assets.get(urlparse(self.path).path)
         if not name:
             self.send_error(404); return
@@ -42,6 +42,10 @@ def main():
         req = route.request; path = urlparse(req.url).path
         calls.append((req.method, path, req.post_data_json if req.post_data else None))
         status = 200; result = {}
+        if path=='/api/auth/status':
+            route.fulfill(status=200,content_type='application/json',body=json.dumps({'schema_version':1,'authenticated':False}));return
+        if path=='/api/auth/logout':
+            route.fulfill(status=200,content_type='application/json',body=json.dumps({'signed_out':True}));return
         if req.headers.get('authorization') != f'Bearer {TOKEN}':
             status = 401; result = {'error': 'Bearer token required'}
         elif fail['status']:
@@ -79,7 +83,7 @@ def main():
             page.goto(origin); expect(page.locator('#session-badge')).to_have_text('LOCKED')
             page.wait_for_timeout(150)
             assert not errors, f'Frontend modules did not initialize: {errors}'
-            assert calls == [], 'Locked page must not inspect API state or connect'
+            assert all(path=='/api/auth/status' for _,path,_ in calls), 'Locked page may check its session, never broker/data state'
             page.screenshot(path=str(shots/'dashboard-desktop.png'), full_page=True)
             page.set_viewport_size({'width':390,'height':844}); page.screenshot(path=str(shots/'dashboard-mobile.png'), full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Page must not overflow mobile viewport'
@@ -123,10 +127,10 @@ def main():
             page.locator('#disconnect').click(); page.locator('#confirm-disconnect').click()
             expect(page.locator('#broker-status')).to_have_text('Disconnected'); expect(page.locator('#subscription-count')).to_have_text('0')
             expect(page.locator('#chart-value')).to_have_text('—'); expect(page.locator('#snapshot-status')).to_have_text('Unavailable')
-            page.locator('#forget').click(); expect(page.locator('#session-badge')).to_have_text('LOCKED')
+            page.locator('#forget').click(); expect(page.locator('#session-badge')).to_have_text('LOCKED'); expect(page.locator('#notice')).to_contain_text('Signed out.')
             count=len(calls);page.wait_for_timeout(2300);assert len(calls)==count, 'Lock must stop polling'
             assert TOKEN not in page.content() and page.evaluate('localStorage.length + sessionStorage.length')==0
-            page.reload();expect(page.locator('#session-badge')).to_have_text('LOCKED');assert len(calls)==count
+            page.reload();expect(page.locator('#session-badge')).to_have_text('LOCKED');page.wait_for_timeout(150);assert all(path=='/api/auth/status' for _,path,_ in calls[count:])
             assert not external, f'Unexpected external requests: {external}'
             assert not errors, f'Browser errors: {errors}'
             browser.close()

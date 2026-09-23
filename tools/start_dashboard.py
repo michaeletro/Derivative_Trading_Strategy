@@ -6,12 +6,14 @@ import fcntl
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import socket
 import subprocess
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from local_config import load as load_profile, ENV_KEYS
+from open_dashboard import start_helper
 
 ROOT=Path(__file__).resolve().parents[1]
 def options(argv=None):
@@ -24,6 +26,10 @@ def options(argv=None):
     p.add_argument('--sdk-root',type=Path)
     p.add_argument('--data-dir',type=Path,help='Persistent local recording directory, independent of checkout')
     p.add_argument('--backup-dir',type=Path,help='Directory for consistent SQLite backups')
+    browser=p.add_mutually_exclusive_group()
+    browser.add_argument('--open-browser',dest='open_browser',action='store_true',help='Open an authenticated local browser tab after startup (default with --profile)')
+    browser.add_argument('--no-open-browser',dest='open_browser',action='store_false',help='Do not open a browser; retain manual access')
+    p.set_defaults(open_browser=None)
     p.add_argument('--dry-run',action='store_true',help='Validate configuration and print non-secret actions only')
     return p.parse_args(argv)
 
@@ -92,6 +98,17 @@ def main(argv=None):
         for cmd in [configure,['cmake','--build',str(build),'--parallel',str(args.jobs)],['ctest','--test-dir',str(build),'--output-on-failure']]:
             subprocess.run(cmd,cwd=ROOT,check=True)
         binary=build/'server'
+        # A profile opts into local auto sign-in; legacy environment-only launches
+        # keep their manual/headless behavior unless --open-browser is explicit.
+        auto_open=args.open_browser if args.open_browser is not None else bool(args.profile)
+        env.pop('DTS_BROWSER_BOOTSTRAP_CODE',None);env.pop('DTS_LAUNCH_NONCE',None)
+        if auto_open:
+            if len(env.get('DTS_API_TOKEN',''))<24:
+                raise ValueError('Auto sign-in requires a saved profile token of at least 24 characters')
+            code=secrets.token_hex(32);nonce=secrets.token_hex(16)
+            env['DTS_BROWSER_BOOTSTRAP_CODE']=code;env['DTS_LAUNCH_NONCE']=nonce
+            start_helper(args.port,code,nonce)
+            print('Automatic browser sign-in enabled; a one-use code opens the tab after this server is ready.',flush=True)
         print(f'Open http://127.0.0.1:{args.port}/#history\nKeep this terminal running; Ctrl+C drains recording and creates a backup; wait for shutdown to finish.',flush=True)
         os.execve(binary,[str(binary)],env)
     except (ValueError,OSError,subprocess.CalledProcessError) as e:

@@ -27,7 +27,7 @@ def main():
             data_dir=str(a.data_dir.expanduser()),sdk_root=str(a.sdk_root.expanduser())))
         print(f'Created {path}\nA private dashboard.token is stored beside the profile; it was not printed.\n'
               f'Launch: python3 tools/start_dashboard.py --profile {a.profile}\n'
-              f'Reveal token locally: python3 tools/configure_dashboard.py --profile {a.profile} --show-token')
+              f'Reopen without token entry: python3 tools/open_dashboard.py --profile {a.profile}')
         return 0
     except (ValueError,OSError) as e:
         print('Setup stopped: '+str(e),file=sys.stderr);return 2
