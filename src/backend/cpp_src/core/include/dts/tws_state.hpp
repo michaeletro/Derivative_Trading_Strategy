@@ -29,9 +29,31 @@ public:
         clear(); state_ = ConnectionState::Disconnected;
     }
     void fail(int code, const std::string& message) {
+        const auto old_depth = depth_id_, old_sequence = depth_sequence_;
         clear(); state_ = ConnectionState::Failed;
+        if (old_depth) {
+            DepthEvent gap; gap.request_id = old_depth; gap.sequence = old_sequence + 1;
+            gap.kind = "gap"; gap.code = code; gap.received = DepthStamp::now(); events_.emplace_back(gap);
+        }
         events_.emplace_back(BrokerError{0, code, message});
         events_.emplace_back(ConnectionEvent{state_});
+    }
+    RequestId depth(const DepthSpec& spec, Clock::time_point now) {
+        require_ready(); spec.validate();
+        if (depth_id_) throw std::logic_error("One depth subscription at a time; stop the previous one");
+        throttle(now); depth_id_ = allocate(); depth_sequence_ = 0;
+        depth_signal("start", 0, DepthStamp::now()); return depth_id_;
+    }
+    void depth_update(DepthEvent event) {
+        if (!depth_id_ || event.request_id != depth_id_) return;
+        event.sequence = ++depth_sequence_; emit(std::move(event));
+    }
+    bool cancel_depth(RequestId id) {
+        if (!depth_id_ || id != depth_id_) return false;
+        depth_signal("stop", 0, DepthStamp::now()); depth_cancels_.push_back(depth_id_); depth_id_ = 0; return true;
+    }
+    std::vector<RequestId> depth_cancellations() {
+        std::vector<RequestId> out; out.swap(depth_cancels_); return out;
     }
     RequestId history(const HistorySpec& spec, HistoryWindow window, Clock::time_point now) {
         require_ready(); spec.validate(window);
@@ -164,9 +186,13 @@ public:
         const auto id = position_request_; position_request_ = 0;
         emit(PositionsComplete{id, position_valid_});
     }
-    void error(RequestId id, int code, const std::string& message) {
+    void error(RequestId id, int code, const std::string& message, DepthStamp stamp = DepthStamp::now()) {
         if (code == 1100 || code == 1101 || code == 1300 || code == 502 || code == 504 || code == 326) {
             fail(code, message); return;
+        }
+        if (depth_id_ && id == depth_id_) {
+            depth_signal(code == 317 ? "reset" : "error", code, stamp);
+            if (code != 317) { depth_cancels_.push_back(depth_id_); depth_id_ = 0; }
         }
         if(history_id_ && id==history_id_) {
             // Errors are request-specific. Do not infer permanent unavailability
@@ -199,6 +225,13 @@ public:
         std::vector<BrokerEvent> out; out.swap(events_); return out;
     }
 private:
+    RequestId depth_id_ = 0;
+    std::uint64_t depth_sequence_ = 0;
+    std::vector<RequestId> depth_cancels_;
+    void depth_signal(const char* kind, int code, DepthStamp stamp) {
+        DepthEvent event; event.request_id = depth_id_; event.sequence = ++depth_sequence_;
+        event.kind = kind; event.code = code; event.received = stamp; emit(std::move(event));
+    }
     RequestId history_id_=0; std::size_t history_count_=0;
     HistorySpec history_spec_; HistoryWindow history_window_; Clock::time_point history_deadline_{};
     std::vector<RequestId> history_cancels_;
@@ -220,7 +253,7 @@ private:
     std::deque<Clock::time_point> requests_;
     void clear() noexcept {
         resolutions_.clear(); subscriptions_.clear(); events_.clear(); requests_.clear();
-        history_id_=0;history_cancels_.clear();
+        history_id_=0;history_cancels_.clear(); depth_id_=0; depth_sequence_=0; depth_cancels_.clear();
         position_request_ = 0; position_seen_ = false; position_valid_ = false;
         // Never reuse request IDs across connections on the same adapter.
     }

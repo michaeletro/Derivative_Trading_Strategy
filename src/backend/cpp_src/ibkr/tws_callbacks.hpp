@@ -14,6 +14,8 @@
 #include "protobufUnix/ErrorMessage.pb.h"
 #include "protobufUnix/HistoricalData.pb.h"
 #include "protobufUnix/HistoricalDataEnd.pb.h"
+#include "protobufUnix/MarketDepth.pb.h"
+#include "protobufUnix/MarketDepthL2.pb.h"
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -110,6 +112,19 @@ public:
     }
     void positionEnd() override { post([](TwsState& s) { s.position_end(); }); }
     void error(int id, time_t, int code, const std::string& message, const std::string&) override { deliver_error(id, code, message); }
+    void updateMktDepth(int id, int position, int operation, int side, double price, Decimal size) override {
+        updateMktDepthL2(id, position, "", operation, side, price, size, false);
+    }
+    void updateMktDepthL2(int id, int position, const std::string& maker, int operation,
+                         int side, double price, Decimal size, bool smart) override {
+        DepthEvent e; e.received = DepthStamp::now(); e.request_id = static_cast<RequestId>(id);
+        e.position = position; e.operation = operation; e.side = side; e.price = price;
+        e.market_maker = maker; e.smart_depth = smart;
+        try { e.size = operation == 2 ? "" : DecimalFunctions::decimalToString(size); deliver_depth(std::move(e)); }
+        catch (const std::exception&) { deliver_error(static_cast<int>(id), -1030, "Invalid native depth payload"); }
+    }
+    void updateMarketDepthProtoBuf(const protobuf::MarketDepth& p) override { proto_depth(p.reqid(), p.marketdepthdata(), p.has_marketdepthdata()); }
+    void updateMarketDepthL2ProtoBuf(const protobuf::MarketDepthL2& p) override { proto_depth(p.reqid(), p.marketdepthdata(), p.has_marketdepthdata()); }
     void historicalData(int id,const ::Bar& bar) override {
         try {
             HistoricalBar b;b.time=bar.time;b.open=bar.open;b.high=bar.high;b.low=bar.low;b.close=bar.close;
@@ -161,13 +176,29 @@ private:
         if (queue_.size() >= 4096) { overflow_ = true; return; }
         queue_.push_back(std::move(action));
     }
+    void deliver_depth(DepthEvent e) {
+        if(e.size.size()>64 || e.market_maker.size()>64 || e.market_maker.find('\0')!=std::string::npos)
+            throw std::invalid_argument("Depth payload exceeds bounds");
+        post([e=std::move(e)](TwsState& s){ s.depth_update(e); });
+    }
+    void proto_depth(int id, const protobuf::MarketDepthData& p, bool present) {
+        DepthEvent e; e.received=DepthStamp::now(); e.request_id=static_cast<RequestId>(id);
+        e.position=p.has_position()?p.position():-1; e.operation=p.has_operation()?p.operation():-1;
+        e.side=p.has_side()?p.side():-1; e.price=p.has_price()?p.price():std::numeric_limits<double>::quiet_NaN();
+        e.size=p.size(); e.market_maker=p.marketmaker(); e.smart_depth=p.issmartdepth();
+        try {
+            if(!present)throw std::invalid_argument("Missing depth payload");
+            deliver_depth(std::move(e));
+        }catch(const std::exception&){deliver_error(id,-1030,"Invalid protobuf depth payload");}
+    }
     void deliver_bar(int id,HistoricalBar b) {b.validate();post([id,b=std::move(b)](TwsState& s){s.historical_bar(static_cast<RequestId>(id),b);});}
     void deliver_contract(int id, dts::Contract c) { post([id, c = std::move(c)](TwsState& s) { s.contract(static_cast<RequestId>(id), c); }); }
     void deliver_position(Position p) { (void)p.marked_value(0.0);post([p = std::move(p)](TwsState& s) { s.position(p); }); }
     void bad_position(std::string reason) { post([reason = std::move(reason)](TwsState& s) { s.bad_position(reason); }); }
     void deliver_error(int id, int code, std::string message) {
         if (message.size() > 1024) message.resize(1024);
-        post([id, code, message = std::move(message)](TwsState& s) {s.error(id > 0 ? static_cast<RequestId>(id) : 0, code, message);});
+        const auto stamp = DepthStamp::now();
+        post([id, code, stamp, message = std::move(message)](TwsState& s) {s.error(id > 0 ? static_cast<RequestId>(id) : 0, code, message, stamp);});
     }
 };
 } // namespace dts::ibkr_detail

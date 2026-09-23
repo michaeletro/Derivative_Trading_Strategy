@@ -79,6 +79,23 @@ int main() {
         CHECK(std::get<HistoricalEnd>(events[0]).status=="failed");
         protobuf::ErrorMessage error; error.set_id(-1); error.set_errorcode(1100); error.set_errormsg("synthetic disconnect");
         callbacks.errorProtoBuf(error); callbacks.drain(state); CHECK(state.state()==ConnectionState::Failed);
+        state.disconnect();state.start(now);callbacks.nextValidId(1);callbacks.drain(state);state.poll();
+        DepthSpec ds;ds.contract=contract;ds.venue="TEST";ds.rows=5;
+        auto did=state.depth(ds,now);state.poll();
+        callbacks.updateMktDepth(static_cast<int>(did),0,0,0,101,DecimalFunctions::stringToDecimal("12.5"));
+        callbacks.updateMktDepthL2(static_cast<int>(did),0,"TEST",0,1,99,DecimalFunctions::stringToDecimal("25"),false);
+        callbacks.drain(state);events=state.poll();CHECK(events.size()==2);
+        CHECK(depth_size(std::get<DepthEvent>(events[0]).size)==12.5);
+        CHECK(std::get<DepthEvent>(events[1]).market_maker=="TEST");
+        CHECK(std::get<DepthEvent>(events[0]).received.monotonic_ns>0);
+        protobuf::MarketDepth md;md.set_reqid(static_cast<int>(did));
+        auto* mdd=md.mutable_marketdepthdata();mdd->set_position(0);mdd->set_operation(1);mdd->set_side(0);mdd->set_price(102);mdd->set_size("3.125");
+        callbacks.updateMarketDepthProtoBuf(md);callbacks.drain(state);events=state.poll();
+        CHECK(events.size()==1 && std::get<DepthEvent>(events[0]).size=="3.125");
+        protobuf::MarketDepthL2 ml2;ml2.set_reqid(static_cast<int>(did));*ml2.mutable_marketdepthdata()=*mdd;ml2.mutable_marketdepthdata()->set_marketmaker("MM");
+        callbacks.updateMarketDepthL2ProtoBuf(ml2);callbacks.drain(state);events=state.poll();CHECK(std::get<DepthEvent>(events[0]).market_maker=="MM");
+        error.set_id(static_cast<int>(did));error.set_errorcode(317);callbacks.errorProtoBuf(error);callbacks.drain(state);events=state.poll();
+        CHECK(std::get<DepthEvent>(events[0]).kind=="reset");
         std::cout << "Native/protobuf callback mapping, BID conversion, and failure checks passed\n";
         return 0;
     } catch(const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

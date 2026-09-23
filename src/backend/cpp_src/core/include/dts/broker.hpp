@@ -1,6 +1,7 @@
 #pragma once
 #include "domain.hpp"
 #include "historical.hpp"
+#include "depth.hpp"
 #include <variant>
 #include <vector>
 
@@ -13,7 +14,7 @@ struct BrokerError { RequestId request_id; int code; std::string message; };
 struct ContractEvent { RequestId request_id; Contract contract; };
 struct ContractsComplete { RequestId request_id; bool success; };
 using BrokerEvent = std::variant<ConnectionEvent, Quote, PositionEvent,
-    PositionsComplete, BrokerError, ContractEvent, ContractsComplete, HistoricalBarEvent, HistoricalEnd>;
+    PositionsComplete, BrokerError, ContractEvent, ContractsComplete, HistoricalBarEvent, HistoricalEnd, DepthEvent>;
 
 struct ContractQuery {
     std::string symbol;
@@ -49,6 +50,10 @@ public:
         throw std::logic_error("Historical acquisition is not supported by this adapter");
     }
     virtual void cancel_history(RequestId) {}
+    virtual RequestId subscribe_depth(const DepthSpec&) {
+        throw std::logic_error("Market depth is not supported by this adapter");
+    }
+    virtual bool unsubscribe_depth(RequestId) { return false; }
     virtual RequestId subscribe(const Contract& contract) = 0;
     virtual bool unsubscribe(RequestId subscription_id) = 0;
     virtual void request_positions(RequestId request_id) = 0;

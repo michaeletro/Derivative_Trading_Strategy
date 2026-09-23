@@ -78,6 +78,12 @@ RequestId TwsBroker::request_history(const HistorySpec& spec,HistoryWindow windo
 void TwsBroker::cancel_history(RequestId id) {
     impl_->session.cancel_history(id); // SDK cancellation is sent by poll().
 }
+RequestId TwsBroker::subscribe_depth(const DepthSpec& spec) {
+    spec.validate(); auto native = ibkr_detail::to_native(spec.contract); native.exchange = spec.venue;
+    const auto id = impl_->session.depth(spec, Clock::now());
+    impl_->client->reqMktDepth(static_cast<int>(id), native, spec.rows, false, TagValueListSPtr{}); return id;
+}
+bool TwsBroker::unsubscribe_depth(RequestId id) { return impl_->session.cancel_depth(id); }
 std::vector<BrokerEvent> TwsBroker::poll() {
     auto& p = *impl_;
     const auto before = p.session.state();
@@ -89,8 +95,10 @@ std::vector<BrokerEvent> TwsBroker::poll() {
         }
         p.callbacks.drain(p.session);
         p.session.expire(Clock::now());
-        if(p.client&&p.client->isConnected())
+        if(p.client&&p.client->isConnected()) {
             for(auto id:p.session.history_cancellations())p.client->cancelHistoricalData(static_cast<int>(id));
+            for(auto id:p.session.depth_cancellations())p.client->cancelMktDepth(static_cast<int>(id), false);
+        }
         if (before != ConnectionState::Ready && p.session.state() == ConnectionState::Ready)
             p.client->reqMarketDataType(p.config.market_data_type);
         if (positions_were_pending && !p.session.positions_pending() && p.client && p.client->isConnected())
