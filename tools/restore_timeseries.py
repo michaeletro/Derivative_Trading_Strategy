@@ -17,7 +17,7 @@ def restore(backup: Path, data_dir: Path) -> Path:
     if data_dir.exists():raise ValueError('Destination already exists. Choose a NEW directory; no file was overwritten')
     if not data_dir.parent.is_dir():raise ValueError('Destination parent directory must already exist')
     with closing(sqlite3.connect(backup.as_uri()+'?mode=ro',uri=True)) as source:
-        if source.execute('PRAGMA application_id').fetchone()[0]!=APPLICATION_ID or source.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3):
+        if source.execute('PRAGMA application_id').fetchone()[0]!=APPLICATION_ID or source.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3,4):
             raise ValueError('Not a supported Derivative Lab time-series backup')
         if source.execute('PRAGMA quick_check').fetchall()!=[('ok',)]:raise ValueError('Backup integrity check failed')
         data_dir.mkdir(mode=0o700,exist_ok=False)

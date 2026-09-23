@@ -9,6 +9,7 @@ namespace asio = boost::asio;
 #include "storage_json.hpp"
 #include "history_json.hpp"
 #include "research_json.hpp"
+#include "experiments_json.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
@@ -304,6 +305,30 @@ private:
         j["errors"] = std::move(errors); return j;
     }
     void routes() {
+        CROW_ROUTE(app_, "/api/sde/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto request=dts::sde_http::parse(object(req));
+                std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Research calculation busy; retry explicitly later");
+                return dts::sde_http::run(request);});
+        });
+        CROW_ROUTE(app_, "/api/experiments/list").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{return dts::experiments_http::catalog(store_,object(req));});
+        });
+        CROW_ROUTE(app_, "/api/experiments/view").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{return dts::experiments_http::view(store_,object(req));});
+        });
+        CROW_ROUTE(app_, "/api/experiments/compute").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::pricing::http::keys(j,{"kind","name","request"});
+                const auto kind=dts::pricing::http::text(j,"kind"),label=dts::research_http::name(j);
+                std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Research calculation busy; reconcile catalog before repeating a save");
+                return dts::experiments_http::compute(store_,kind,label,j["request"]);});
+        });
+        CROW_ROUTE(app_, "/api/experiments/rerun").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
+                if(!lock.owns_lock())throw std::length_error("Research calculation busy; reconcile catalog before repeating a save");
+                return dts::experiments_http::rerun(store_,object(req));});
+        });
         CROW_ROUTE(app_, "/api/research/snapshots/create").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"dataset_id","start_s","end_s","name"});
                 std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);

@@ -11,12 +11,13 @@
   <link rel="stylesheet" href="/dashboard/greeks.css">
   <script type="module" src="/dashboard/app.mjs"></script>
   <link rel="stylesheet" href="/dashboard/replay.css">
+  <link rel="stylesheet" href="/dashboard/sde.css">
 </head>
 <body>
 <a class="skip" href="#overview">Skip to workspace</a>
 <aside class="sidebar">
   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#replay"><span>08</span> Replay &amp; research</a><a href="#roadmap"><span>09</span> Study roadmap</a></nav>
+  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#replay"><span>08</span> Replay &amp; research</a><a href="#sde"><span>09</span> SDE discretization</a><a href="#lab-catalog"><span>10</span> Saved experiments</a><a href="#roadmap"><span>11</span> Study roadmap</a></nav>
   <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes. Market observations are saved locally.</small></div>
 </aside>
 <main id="overview">
@@ -77,7 +78,7 @@
       </div><p class="hint">Use 0.20 for 20% volatility and 0.05 for a 5% rate. Constant coefficients; continuous yield only. No discrete dividends or early exercise.</p></fieldset>
       <button id="pricing-run" class="full-button" type="submit" disabled>Run experiment</button>
       <div class="pricing-files"><button type="button" id="pricing-export" class="secondary" disabled>Export experiment JSON</button><button type="button" id="pricing-import" class="secondary" disabled>Import inputs</button><input id="pricing-file" type="file" accept=".json,application/json" aria-label="Import experiment JSON" hidden></div>
-      <p class="hint">Save the exported file yourself. No server-side experiment database or browser storage is used.</p></form>
+      <p class="hint">Export saves a local JSON file. The Saved experiments workspace can also compute and persist these inputs in the shared catalog.</p></form>
       <div id="pricing-results" aria-busy="false">
         <div class="pricing-summary"><article><p>Analytical BSM</p><strong id="pricing-analytical">—</strong></article><article><p>Monte Carlo estimate</p><strong id="pricing-mc">—</strong></article><article><p>Sampling standard error</p><strong id="pricing-se">—</strong></article><article><p>Pointwise 95% interval</p><strong id="pricing-ci">—</strong></article></div>
         <p id="pricing-metrics" class="hint">No experiment has been run.</p>
@@ -210,7 +211,44 @@
     <div class="replay-grid"><label>Saved run A<select id="experiment-a" disabled></select></label><label>Saved run B<select id="experiment-b" disabled></select></label></div>
     <div class="replay-actions"><button id="experiment-compare" disabled>Compare selected runs</button><button id="experiment-rerun" class="secondary" disabled>Rerun A configuration</button><button id="experiment-export" class="secondary" disabled>Export run A</button></div><p id="experiment-summary" role="status"></p><div class="table-wrap"><table><thead><tr><th>Property</th><th>Run A</th><th>Run B</th></tr></thead><tbody id="experiment-comparison"></tbody></table></div>
   </section>
-  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">09 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
+  <section class="panel sde-lab" id="sde" aria-labelledby="sde-title">
+    <header class="section-heading"><div><p class="eyebrow">09 / Stochastic differential equations</p><h2 id="sde-title">SDE Discretization Lab</h2></div><span class="badge positive">COUPLED BROWNIAN PATHS</span></header>
+    <p class="section-description">Same model. Same Brownian realization. Different numerical schemes. Compare exact GBM, Euler–Maruyama and Milstein under risk-neutral dynamics. Simulations are never recorded as market observations.</p>
+    <div class="sde-layout">      <form id="sde-form"><fieldset id="sde-fields" disabled><legend class="sr-only">SDE experiment model and sampling inputs</legend><div class="form-grid">
+        <label>Option right<select name="right"><option value="call">European call</option><option value="put">European put</option></select></label>
+        <label>Currency label<input name="currency" value="USD" pattern="[A-Z]{3}" maxlength="3" required></label>
+        <label>Spot S₀<input name="spot" value="100" type="number" min="0" max="100000000" step="any" required></label>
+        <label>Strike K<input name="strike" value="100" type="number" min="0.00000001" max="100000000" step="any" required></label>
+        <label>Maturity T (years)<input name="maturity_years" value="1" type="number" min="0" max="30" step="any" required></label>
+        <label>Volatility σ (decimal)<input name="volatility" value="0.2" type="number" min="0" max="3" step="any" required></label>
+        <label>Continuous rate r<input name="rate" value="0.05" type="number" min="-0.5" max="0.5" step="any" required></label>
+        <label>Continuous yield q<input name="dividend_yield" value="0" type="number" min="-0.5" max="0.5" step="any" required></label>
+        <label>Independent paths<input name="paths" value="10000" type="number" min="1000" max="100000" step="1" required></label>
+        <label>Random seed (64-bit)<input name="seed" value="42" pattern="[0-9]{1,20}" maxlength="20" inputmode="numeric" required></label>
+        <label>First time steps<input name="first_steps" type="number" value="8" min="1" max="1024" step="1" required></label>
+        <label>Dyadic levels<input name="levels" type="number" value="6" min="1" max="9" step="1" required></label>
+      </div><p class="hint">Use 0.20 for 20% volatility and 0.05 for a 5% rate. Constant coefficients; continuous yield only. No discrete dividends or early exercise.</p></fieldset><button id="sde-run" type="submit" class="full-button" disabled>Run convergence experiment</button><p id="sde-note" role="status" class="hint">Unlock the dashboard. No broker connection is needed.</p></form>
+      <div><div class="sde-summary"><article><p>Analytical price</p><strong id="sde-analytical">—</strong></article><article><p>Exact-GBM MC</p><strong id="sde-exact">—</strong></article><article><p>Independent paths</p><strong id="sde-count">—</strong></article><article><p>Total runtime</p><strong id="sde-runtime">—</strong></article></div>
+      <p id="sde-provenance" class="hint">No result yet. All prices and diagnostics are calculated by C++.</p><div id="sde-warnings" class="sde-warnings"></div>
+      <div class="lab-toolbar"><h3>Coupled sample path</h3><label>Grid<select id="sde-path-level" aria-label="Path time steps"></select></label><label>Path<select id="sde-path-number"><option value="0">First</option><option value="1">Second</option></select></label></div>
+      <div class="chart-wrap"><canvas id="sde-path-chart" role="img" aria-label="No coupled path yet"></canvas></div><p class="hint">Exact: dashed · Euler: solid · Milstein: dotted. The first two sampled paths are illustrations, not confidence envelopes. Negative approximations are not clipped.</p></div></div>
+    <div class="sde-charts"><article><h3>Strong terminal error</h3><div class="chart-wrap"><canvas id="sde-strong-chart" role="img" aria-label="No terminal errors yet"></canvas></div><p class="hint">Mean absolute terminal-state difference from exact GBM; log steps / log error. Nonpositive log values are omitted, not replaced with a floor.</p></article>
+    <article><h3>Signed payoff discretization bias</h3><div class="chart-wrap"><canvas id="sde-bias-chart" role="img" aria-label="No payoff bias estimates yet"></canvas></div><p class="hint">Paired discounted payoff differences, with pointwise 95% sampling intervals. An interval containing zero does not establish zero bias. Levels are correlated.</p></article>
+    <article><h3>Error versus instrumented kernel time</h3><div class="chart-wrap"><canvas id="sde-cost-chart" role="img" aria-label="No runtime comparison yet"></canvas></div><p class="hint">Kernel milliseconds exclude shared RNG, exact reference and statistics. This is not an equal-total-cost benchmark. No timing speedup claim is inferred.</p></article></div>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="SDE convergence numerical results"><table><thead><tr><th>Steps</th><th>Scheme</th><th>MC price</th><th>Mean |terminal error|</th><th>SE of strong error</th><th>Paired payoff bias</th><th>95% pointwise interval</th><th>Nonpositive paths</th><th>Kernel ms</th></tr></thead><tbody id="sde-table"></tbody></table></div>
+    <div class="actions"><button type="button" id="sde-export" disabled>Export current experiment</button></div>
+  </section>
+  <section class="panel sde-lab" id="lab-catalog" aria-labelledby="catalog-title">
+    <header class="section-heading"><div><p class="eyebrow">10 / Reproducible numerical research</p><h2 id="catalog-title">Saved experiments</h2></div><span class="badge">TYPED · IMMUTABLE</span></header>
+    <p class="section-description">One catalog for option pricing, Greek validation, SDE convergence and existing return/volatility runs. Saving computes the current inputs again on the server; it never accepts browser-supplied results. Existing replay records retain their IDs and fingerprints.</p>
+    <div class="form-grid"><label>Experiment name<input id="lab-name" value="Convergence baseline" maxlength="80"></label><label>Inputs to compute and save<select id="lab-source"><option value="sde_convergence">Current SDE inputs</option><option value="option_pricing">Current Pricing lab inputs</option><option value="greek_validation">Current Greeks lab inputs</option></select></label></div>
+    <div class="actions"><button id="lab-save" type="button" disabled>Compute &amp; save selected type</button><button id="lab-load" type="button" class="secondary" disabled>Load experiment catalog</button><button id="lab-more" type="button" class="secondary" disabled>Load next page</button></div>
+    <p id="lab-note" role="status" class="hint">Return/volatility runs created in Replay &amp; research also appear here. No automatic retention or deletion.</p>
+    <div class="form-grid"><label>Saved run A<select id="lab-a"></select></label><label>Saved run B<select id="lab-b"></select></label></div>
+    <div class="actions"><button id="lab-view" type="button" class="secondary" disabled>Inspect A</button><button id="lab-rerun" type="button" disabled>Rerun A as new child</button><button id="lab-compare" type="button" class="secondary" disabled>Compare A and B</button><button id="lab-export" type="button" class="secondary" disabled>Export saved A</button></div>
+    <p id="lab-detail" class="hint">Select a saved record. Saved outputs are distinct from the unsaved preview above.</p>
+  </section>
+  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">11 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
   <p id="build-info" class="build-info">Build identity: unlock to inspect the running server.</p>
   <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
 </main>

@@ -41,6 +41,11 @@ struct Experiment {
     std::int64_t id = 0, snapshot_id = 0, parent_id = 0, created_ms = 0;
     std::string name, engine_version, config_json, result_json, result_sha256;
 };
+struct NumericalExperiment {
+    std::int64_t id = 0, parent_id = 0, created_ms = 0;
+    std::string kind, name, engine_version, config_json, result_json, result_sha256, record_sha256;
+};
+struct TypedPage { std::vector<Row> rows; std::string next_reference; bool has_more = false; };
 struct RecordedRead { std::int64_t id = 0, inserted = 0; };
 
 // One serialized SQLite connection and one recorder process per data directory.
@@ -77,6 +82,9 @@ public:
     std::int64_t save_experiment(const Experiment& experiment);
     Experiment experiment(std::int64_t experiment_id) const;
     Page experiment_catalog(std::int64_t after_id=0, int limit=100) const;
+    std::int64_t save_numerical_experiment(const NumericalExperiment&);
+    NumericalExperiment numerical_experiment(std::int64_t id) const;
+    TypedPage typed_experiment_catalog(const std::string& kind = "", const std::string& after = "", int limit = 100) const;
     Status status() const;
     Page catalog(std::int64_t after_id = 0, int limit = 100) const;
     Page history(std::int64_t series_id, std::int64_t after_id = 0,

@@ -1,3 +1,19 @@
+## SDE Discretization Lab (0.9.0)
+
+The `feature/sde-discretization-lab` increment adds coupled exact-GBM,
+Euler-Maruyama and Milstein experiments, paired error diagnostics, and a shared
+catalog for SDE, pricing, Greek and existing replay experiments. Read
+[the runbook](docs/sde-discretization.md) before launching: recognized archives
+upgrade to schema 4 after a required verified pre-migration backup. Existing
+observations and replay records are retained; old binaries refuse the new schema.
+This is numerical research, not strategy execution or live account risk.
+
+```bash
+python3 tools/start_dashboard.py --profile paper-tws --mode research
+```
+
+Open the profile's local dashboard at `#sde`. No new profile or token is needed.
+
 # Derivative Trading Strategy
 
 ## Replay & Research Lab (0.8.0)
@@ -10,11 +26,10 @@ triggered by this research workspace. Daily replay is ordinal; minute bars use a
 modeled bar-end availability convention. This is retrospective research, not
 point-in-time strategy backtesting or listed-option P&L.
 
-**Existing archives upgrade to schema 3 after a verified pre-migration backup.**
-Older schema-only binaries refuse the upgraded archive. Read the [replay runbook
-and migration/rollback instructions](docs/replay-research.md) before first launch.
-The catalog added here stores return/volatility diagnostics; pricing/Greeks
-experiments still use their existing JSON exports.
+**The current application uses schema 4; review the [current migration
+instructions](docs/sde-discretization.md) before first launch.** The replay
+workspace retains its snapshot-backed return/volatility records. The shared
+Saved experiments catalog also exposes these records without rewriting them.
 
 ```bash
 python3 tools/start_dashboard.py --profile paper-tws
@@ -66,9 +81,11 @@ platform. **This is a read-only development system, not a production trading bot
 The dashboard includes an offline European Black–Scholes–Merton / exact-GBM
 Monte Carlo lab with seeded plain/antithetic sampling, sampling-error estimates,
 convergence visualization and JSON experiment export/import. It never connects
-to a broker or prices listed American contracts. Records are files you export,
-not a server-side database. See [the pricing lab runbook](docs/pricing-lab.md)
-for assumptions, input units, reproducibility limits, tests and run commands.
+to a broker or prices listed American contracts. JSON export/import remains
+available; the shared Saved experiments workspace can explicitly recompute and
+persist pricing inputs. See [the pricing model runbook](docs/pricing-lab.md)
+for mathematical assumptions and [the current catalog runbook](docs/sde-discretization.md)
+for persistence, migration and startup instructions.
 
 ## Implemented
 
