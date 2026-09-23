@@ -38,6 +38,8 @@ def main(exe):
         page.locator('#lab-catalog').screenshot(path=str(output/'hedging-catalog.png'))
         page.set_viewport_size({'width':390,'height':844});page.locator('#hedge-provenance').scroll_into_view_if_needed()
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
+        assert page.locator('#hedging .sde-summary').evaluate('(el) => el.scrollWidth <= el.clientWidth+1')
+        assert page.locator('#hedging .sde-summary strong').evaluate_all('(els) => els.every(el => el.scrollWidth <= el.clientWidth+1)')
         page.screenshot(path=str(output/'hedging-mobile.png'))
         page.set_viewport_size({'width':1440,'height':1050})
         page.locator('#hedge-form [name=cost_bps]').fill('5');expect(page.locator('#hedge-premium')).to_have_text('—')
