@@ -22,6 +22,8 @@ jobs:
           curl --fail --location --retry 3 --max-time 120 https://interactivebrokers.github.io/downloads/twsapi_macunix.1045.01.zip -o "$RUNNER_TEMP/ibapi.zip"
           echo '56ea048911052e86d6621ab712957c790fce6d547bc2a55900136ae4f6835941  '"$RUNNER_TEMP/ibapi.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/ibapi.zip" -d "$RUNNER_TEMP/ibapi"
+      - name: Verify depth callback declarations in pinned SDK
+        run: grep -i 'Depth.*ProtoBuf\|updateMktDepth' "$RUNNER_TEMP/ibapi/IBJts/source/cppclient/client/EWrapper_prototypes.h"
       - name: Configure full native build
         run: cmake -S . -B build-native -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDTS_BUILD_SERVER=ON -DDTS_WITH_IBKR=ON -DIBKR_API_ROOT="$RUNNER_TEMP/ibapi/IBJts"
       - name: Build SDK, adapter and server
