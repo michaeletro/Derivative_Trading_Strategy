@@ -1,0 +1,116 @@
+\section{Derivative risk: local and stochastic volatility}\label{sec:lsv}
+\subsection{Separate the pricing and scenario measures}
+Let $\Q$ be a selected pricing measure and $\Pp$ the distribution used for physical-risk or controlled scenario evaluation. A risk-neutral European value is
+\[
+ V(t,s,v)=\E^{\Q}\!\left[e^{-\int_t^T r_u\,du}g(S_T)\mid S_t=s,v_t=v\right].
+\]
+A risk calculation such as $\CVaR_\alpha^{\Pp}(L)$ requires an explicitly specified $\Pp$ distribution. A fitted option surface does not identify the variance risk premium or all physical drifts. Using identical parameters under both measures is permissible as a \emph{declared controlled experiment}, not as an empirical conclusion.
+
+\subsection{Local volatility and the option surface}
+For deterministic rates/yields and a sufficiently smooth, arbitrage-consistent call surface $C(K,T)$, the local-variance expression is
+\begin{equation}
+ \sigma_{\mathrm{loc}}^2(T,K)=
+ \frac{C_T+(r_T-q_T)K C_K+q_T C}{\tfrac12 K^2 C_{KK}}.\label{eq:dupire}
+\end{equation}
+The forward relation and local interpretation are reviewed by \citet{dupire2010}. The denominator is related to a risk-neutral density; noisy second strike derivatives are not harmless input noise. A candidate empirical surface needs convention checks, monotonicity/convexity controls, maturity consistency, and a disclosed smoothing procedure. This project does not claim an arbitrage-free market surface has been collected or fitted.
+
+\subsection{LSV dynamics and the leverage relation}
+Consider the representative model
+\begin{align}
+ \frac{dS_t}{S_t}&=(r_t-q_t)dt+\ell(t,S_t)\sqrt{v_t}\,dW_t^{S,\Q},\\
+ dv_t&=\kappa(\theta-v_t)dt+\xi\sqrt{v_t}\,dW_t^{v,\Q},\qquad
+ d\langle W^{S,\Q},W^{v,\Q}\rangle_t=\rho\,dt.
+\end{align}
+The stochastic-variance component is Heston-type \citep{heston1993}; the leverage function $\ell$ supplies a local component. Conditional on $S_t=s$, instantaneous stock variance is
+\[
+ s^2\ell^2(t,s)\E^{\Q}[v_t\mid S_t=s].
+\]
+Matching this conditional variance to the projected local model yields the calibration identity
+\begin{equation}
+ \ell^2(t,s)\E^{\Q}[v_t\mid S_t=s]=\sigma_{\mathrm{loc}}^2(t,s).\label{eq:leverage}
+\end{equation}
+The projection interpretation requires suitable hypotheses; it is not an unconditional existence statement for arbitrary coefficients \citep{gyongy1986,jourdain2020}.
+
+Equation~\eqref{eq:leverage} is nonlinear in the model law: the conditional expectation depends on trajectories generated using $\ell$ itself. One kernel approximation would take
+\[
+ \widehat m_\varepsilon(t,s)=
+ \frac{\sum_{j=1}^N v_t^{(j)}K_\varepsilon(S_t^{(j)}-s)}
+      {\sum_{j=1}^N K_\varepsilon(S_t^{(j)}-s)}.
+\]
+Sparse tails can make this estimate unstable. Particle variance reduction, consistent PDE methods, and regularized conditional-expectation approximations address related numerical problems \citep{cozma2019,wyns2016,bayer2024}. Bandwidths, denominator floors, boundary handling, and variance-discretization choices must be reported as numerical assumptions, with calibration error measured afterward. A positive floor is not proof of exact calibration.
+
+\subsection{What a single stock hedge cannot remove}
+For a sufficiently regular $V$, its diffusion exposure under the displayed model contains
+\[
+ V_s\,S\ell\sqrt v\,dW^S+V_v\,\xi\sqrt v\,dW^v.
+\]
+Writing $dW^v=\rho dW^S+\sqrt{1-\rho^2}\,dW^\perp$ shows that a stock-only minimum local-variance projection, under the specified instantaneous covariance, is
+\begin{equation}
+ h^{\mathrm{proj}}=V_s+\frac{\rho\xi}{S\ell}V_v,\label{eq:hedgeprojection}
+\end{equation}
+when $S\ell\sqrt v\ne0$. It follows by minimizing the variance of the option diffusion minus $h\,dS$. The unspanned component remains
+$V_v\xi\sqrt{v(1-\rho^2)}dW^\perp$.
+
+This derivation is an \emph{instantaneous quadratic-risk} result, not the constrained CVaR solution below. A chosen pricing delta $V_s$ and a minimum-variance projected hedge need not agree. Under different physical covariance assumptions the relevant projection also changes. An oracle experiment may use the simulated $v_t$; a practically observable policy may not silently receive that latent state. Estimated variance and true simulated variance must be separate information sets.
+
+Matching European price marginals via \eqref{eq:leverage} cannot guarantee the same hedge-error law. Nor does it identify any joint relationship between variance, spread, and depth. A controlled LSV study should initially hold a declared liquidity model fixed, then stress dependence rather than attaching unrelated historical books to arbitrary simulated prices and calling the result empirical.
+
+\section{Self-financing hedging and the CVaR decision layer}
+\subsection{Account for trades before optimizing them}
+For one hypothetical short option, let $W_t$ be stock-plus-cash hedge wealth just before a trade, $h_{\mathrm{old}}$ the previous holding, $h$ the new holding, and $u=h-h_{\mathrm{old}}$. Assume $q=0$, fractional shares, symmetric funding at a deterministic rate, and exogenous scenarios. These simplify the first case study; they are not assertions about broker financing.
+
+After paying current trading cost $C_t(u)$, the cash account is
+\[
+ B_t^+=W_t-C_t(u)-hS_t.
+\]
+For $R=e^{r\Delta}$ and scenario $j$ with stock $S'_j$, marked option liability $V'_j$, and future stock-liquidation cost $C'_j(-h)$, the horizon loss is
+\begin{align}
+ L_j(h)&=V'_j-\{R B_t^+ +hS'_j-C'_j(-h)\}\nonumber\\
+       &=\underbrace{V'_j-RW_t}_{b_j}
+          -h\underbrace{(S'_j-RS_t)}_{g_j}
+          +R C_t(h-h_{\mathrm{old}})+C'_j(-h).\label{eq:loss}
+\end{align}
+For receding-horizon use, liquidation in this expression is a horizon valuation convention. The realized policy ledger charges only trades actually executed; a hypothetical liquidation cost must not be debited at every replanning step unless liquidation occurs. A terminal horizon uses the payoff in place of $V'_j$. Interior liability marks and terminal settlement must not both be charged as cash payments. No hidden cash injection makes an infeasible hedge appear funded.
+
+The future forecast has a meaningful role in $C'_j$, not in replacing the observed cost $C_t$ of a trade now. A 30-second mean-cost prediction is not enough to determine the joint scenario law of $(S'_j,V'_j,C'_j)$. The first learning stage establishes only a point-prediction interface; conditional residual scenarios and dependence calibration remain to be implemented.
+
+\subsection{Convex costs from displayed rows}
+For a static ordered book and zero fixed fees, the displayed cost of buying quantity $u\geq0$ is the integral of nondecreasing ask-minus-mid marginal prices. Selling $u<0$ gives an analogous signed cost. On the available-size domain the combined function is convex and piecewise linear: its slope increases from negative bid-side slopes to positive ask-side slopes.
+
+\begin{proposition}[Convex scenario hedge problem]
+Suppose current and horizon costs are convex functions of the signed stock trades, scenario values and probabilities are exogenous, and the feasible holding set is convex. Then each $L_j(h)$ in \eqref{eq:loss} is convex. The scenario-CVaR minimization in $(h,\eta)$ is jointly convex.
+\end{proposition}
+\begin{proof}
+The first two terms in \eqref{eq:loss} are affine. Positive scaling preserves convexity of $C_t$, and composition with an affine map preserves convexity of both costs. For each $j$, $\max\{L_j(h)-\eta,0\}$ is the maximum of two convex functions. A nonnegative weighted sum plus the affine function $\eta$ is convex.
+\end{proof}
+This is an application of standard convex composition rules \citep{boyd2004}. Nonlinear option values across scenarios do not make dependence on the \emph{decision} $h$ nonconvex when those scenario liabilities are fixed. Conversely, a fixed fee per nonzero trade, integer lots, decision-dependent market impact, or an unrestricted learned cost curve can invalidate the continuous convex formulation.
+
+\subsection{CVaR and the auxiliary threshold}
+For integrable loss $L$ and fixed $0\leq\alpha<1$, use
+\begin{equation}
+ \CVaR_\alpha(L)=\inf_{\eta\in\mathbb R}
+ \left\{\eta+\frac{1}{1-\alpha}\E[(L-\eta)^+]\right\}.\label{eq:cvar}
+\end{equation}
+For $0<\alpha<1$, an integrable real-valued loss has finite quantile minimizers. At $\alpha=0$, the infimum equals $\E[L]$ but need not be attained by a finite threshold when losses are unbounded below; a finite empirical sample does attain it. The representation underlies scenario optimization \citep{rockafellar2000}. The confidence level $\alpha$ is chosen; $\eta$ is optimized and need not be unique. Atoms require tail-mass allocation, so $\E[L\mid L\geq\VaR_\alpha]$ is not a generally interchangeable definition.
+
+For fixed $h$, the subgradient interval in $\eta$ is
+\[
+ \left[\frac{\Pp(L(h)<\eta)-\alpha}{1-\alpha},
+       \frac{\Pp(L(h)\leq\eta)-\alpha}{1-\alpha}\right].
+\]
+Thus a minimizer satisfies $\Pp(L(h)<\eta)\leq\alpha\leq\Pp(L(h)\leq\eta)$. For example, loss zero with probability $.95$ and loss ten with probability $.05$ has lower $.95$-quantile zero and CVaR ten; every $\eta\in[0,10]$ minimizes the auxiliary expression. A unique threshold should not be inferred from an optimizer's arbitrary selection within this interval.
+
+With equal-probability scenarios, a proposed AMS 518 problem is
+\begin{align}
+ \min_{h,\eta,z}\quad&\eta+\frac{1}{N(1-\alpha)}\sum_{j=1}^N z_j\label{eq:lp}\\
+ \text{s.t.}\quad& z_j\geq L_j(h)-\eta,\quad z_j\geq0,\nonumber\\
+ &h_{\min}\leq h\leq h_{\max},\quad |h-h_{\mathrm{old}}|\leq Q_{\max},\nonumber\\
+ &C_t(h-h_{\mathrm{old}})\leq B.\nonumber
+\end{align}
+Piecewise-linear costs can be represented with epigraph variables to obtain an LP. $Q_{\max}$ should not exceed the displayed-size domain without an additional cost model. Holdings must also remain in the domain of each modeled future liquidation cost, or an additional conservative cost/capacity treatment must be specified. Cardinality or nonzero-trade fees require a separately stated mixed-integer or nonconvex extension.
+
+\subsection{Why predicting mean liquidity is not predicting tail risk}
+Consider a cost variable that is always one, and another that is zero with probability $.9$ and ten with probability $.1$. Both have mean one, but their $.95$-CVaRs are one and ten. No mean predictor can distinguish their tail implications from that mean alone. Similarly, independent sampling of price and liquidity shocks can miss joint stress precisely where a hedge needs liquidity.
+
+Future work must therefore specify a conditional residual law or scenario generator, include adverse dependence sensitivity, and measure calibration on later dates. A learned cost model should preserve the intended monotonic/convex quantity structure or supply scenario coefficients to a known convex family. Calling a repeated one-step solution ``optimal terminal CVaR hedging'' would also overstate the result: the proposed policy is receding-horizon unless a multistage formulation and time-consistency treatment are provided.
+

@@ -1,0 +1,90 @@
+\section{Research question, course mapping, and evidence}
+\subsection{A decision problem rather than a collection of models}
+The central question is:
+\begin{quote}
+Does order-book information improve held-out liquidity forecasts sufficiently to change constrained hedge decisions, and do those changes improve the hedging cost--risk frontier under explicitly specified volatility dynamics?
+\end{quote}
+The causal chain to investigate is measurement $\rightarrow$ prediction $\rightarrow$ scenario construction $\rightarrow$ decision $\rightarrow$ self-financing accounting. Each arrow requires a separate test. Better forecast accuracy does not logically imply better tail-risk control, and an option-calibrated process does not automatically supply real-world probabilities of loss.
+
+The minimum experiment uses one underlying, one declared direct depth feed, one stock hedge instrument, and one hypothetical European option liability. A 30-second horizon and a fixed displayed trade quantity are initial research settings, not market constants. The code defaults to 100 shares and one-second sampling; pilot evidence must establish whether that quantity is observable before it is frozen for held-out evaluation. Passive queue-position fills, market impact, full option-chain calibration, and live order submission are outside the first scope.
+
+\subsection{Source-grounded academic requirements}
+The supplied AMS 518 syllabus requires each student to complete and present a numerical project. Its objectives include constrained optimization, transaction costs, financial systems with uncertain outcomes, and numerical case studies; listed topics include hedging, replication, quantile methods, and CVaR regression/estimation. Its project AI policy requires clear acknowledgement \citep[pp.~2--3]{ams518}. The proposed contribution is therefore an optimization case study, not only a forecast-error table.
+
+The supplied AMS 520 syllabus requires an interactive Colab/Jupyter report, three presentations, and code/documentation in GitHub without data credentials. Phase I concerns literature, collection, and cleaning; Phase II concerns EDA and first empirical results; the stated milestones are Lecture 10, Lecture 22, and the final-exam day \citep[pp.~2--3]{ams520}. The proposed contribution is time-respecting liquidity prediction and its downstream decision value. The supplied materials do not establish permission for identical cross-course submissions, a specific AMS 520 AI policy, or the details of the separately referenced AMS 518 project requirements. Those gaps are not filled by inference.
+
+\par\medskip
+\begin{tabularx}{\textwidth}{@{}p{24mm}YY@{}}
+\toprule
+Layer & AMS 518 emphasis & AMS 520 emphasis\\\midrule
+Shared input & Defined losses and liquidity constraints & Observed features, targets, and timing\\
+Method & Convex scenario-CVaR optimization & Regularization and temporal generalization\\
+Evidence & Feasible cost--risk comparisons & Held-out forecasts and information ablations\\
+Submission & Distinct numerical case study & Interactive notebook and presentations\\\bottomrule
+\end{tabularx}
+\par\medskip
+
+\subsection{What is established at this increment}
+The base research platform at revision \texttt{8f35475b} records displayed-depth events and reconstructs them in C++ and Python. The new learning modules add feature/target alignment and persistence/ridge experiments. No new database schema, server route, order capability, or subscription purchase is required. The new pipeline reads exported files offline. The theoretical optimizer, conditional cost distribution, fitted nonlinear model, and LSV simulator/calibration remain subsequent work.
+
+Throughout this report, \emph{source result} means a finding attributed to a cited work; \emph{derivation} means an argument shown here under stated assumptions; and \emph{design choice} means an implementation or proposed experiment specific to this project. Synthetic fixtures establish neither actual feed quality nor an out-of-sample market advantage.
+
+\section{Critical literature review}
+\subsection{Order-book state and order-flow information}
+\citet{cont2014} study the relation between best-quote order-flow imbalance (OFI), depth, and short-interval price changes. Their parsimonious representation motivates an interpretable flow feature rather than an immediate dependence on a large neural network. The transfer to this project is limited: contemporaneous price impact is not the same target as future displayed trading cost. A variable constructed over the forecast interval would be unavailable when the forecast is made. Here OFI is accumulated only over a trailing interval ending at the decision time.
+
+\citet{gould2016} examine queue imbalance for the direction of the next mid-price movement, using logistic models and distinguishing large- and small-tick behavior. This supports testing a simple imbalance baseline and checking instrument dependence. It does not establish that imbalance forecasts a 30-second spread, that five broker-provided rows reproduce an exchange queue, or that a directional classifier improves option hedging after costs. The project changes both the response variable and the observation mechanism; results must be re-established on its own data.
+
+\citet{zhang2019} combine convolutional and recurrent components for order-book price prediction. Their work is a relevant nonlinear benchmark direction, not a reason to skip persistence, linear baselines, or data diagnostics. In this project a neural model would require sufficient independent sessions, stable feed conventions, and a predeclared validation protocol. A success on a published benchmark is not a performance guarantee for a limited direct-depth feed with local receipt timestamps.
+
+\subsection{Regularization, validation, and dependence}
+The shrinkage perspective of \citet{hoerl1970} motivates ridge regression when correlated features make unregularized coefficients unstable. The project uses an SVD-based solution of a specified mean-loss objective, preserving its scaling convention explicitly. Ridge is a controlled statistical baseline, not a structural model of exchange behavior. Its penalty is chosen on validation dates rather than on the final test interval.
+
+Train-only preprocessing is necessary because transformations estimated on a test set expose information unavailable during fitting. The official scikit-learn guidance highlights this leakage mechanism \citep{sklearnpitfalls}. The implementation does not require scikit-learn: its scaler and ridge coefficients are explicit NumPy objects, so their dependence on training rows is directly testable.
+
+\citet{diebold1995} develop forecast comparisons that allow serially correlated errors and general loss functions. \citet{politis1994} provide a resampling construction for weakly dependent stationary observations. These works motivate dependence-aware inference, but their assumptions cannot be replaced by a large raw event count. The current code reports per-date and pooled errors and paired per-date loss differences; it does not report IID significance tests. A block-bootstrap or long-run-variance analysis is future empirical work, with block choice and nonstationarity diagnostics documented rather than hidden.
+
+\subsection{Liquidity costs and optimal execution}
+\citet{almgren2001} separate transaction-cost effects from price-risk exposure over a liquidation horizon and study the tradeoff through an efficient frontier. The useful lesson here is architectural: execution conditions belong in the decision objective and constraints, not as an afterthought deducted from a frictionless hedge. However, an observed static book-crossing calculation is not an identified permanent or temporary impact model. This project initially excludes the feedback from its own trades to subsequent books. That small-agent assumption must be retained in any interpretation.
+
+\subsection{Tail-risk optimization and learned hedging}
+\citet{rockafellar2000} supply the auxiliary-threshold representation that makes scenario CVaR amenable to optimization. The project uses this representation in its proposed constrained hedge problem. It does not equate minimizing CVaR with minimizing VaR, optimizing the confidence level, or finding a globally optimal multistage strategy.
+
+\citet{buehler2018} formulate learned hedging under trading frictions and convex risk objectives. This connects prediction to sequential decisions and motivates a later policy-learning comparison. It does not eliminate the need for correct cash accounting, nonanticipating observations, a defensible scenario distribution, or a feasible policy benchmark. Deep reinforcement learning is therefore an extension after the explicit constrained optimizer, not the dependency on which the initial submission rests.
+
+\subsection{Local volatility and stochastic volatility}
+\citet{dupire2010} describes the relation between European option prices across strike/maturity and local volatility. \citet{heston1993} provides a stochastic-volatility valuation framework with spot/variance correlation. The models address derivative valuation, not the empirical identification of order-book event intensities. Their role here is to generate controlled alternative derivative-risk environments while the hedge policy and liquidity assumptions are held inspectable.
+
+The distinction between marginals and dynamics is fundamental. \citet{gyongy1986} establishes a mimicking result under stated hypotheses: suitable Markov coefficients can reproduce one-dimensional marginal distributions of an It\^o process. Equality of these marginals does not establish equality of transition laws, path-dependent prices, hedge errors, or the joint distribution with liquidity. Section~\ref{sec:lsv} derives the leverage identity while retaining these boundaries.
+
+\subsection{LSV calibration is an inverse problem, not an input field}
+\citet{cozma2019} develop a control-variate particle approach for a hybrid local--stochastic-volatility model with stochastic rates, building on the Guyon--Henry-Labord\`ere particle approach. This motivates a later numerical calibration experiment and attention to conditional-expectation error. The initial course target is narrower: deterministic rates and a controlled leverage function or a synthetic calibration target.
+
+\citet{wyns2016} study an adjoint approach to matching a discretized local-volatility model. This provides an alternative to particle calibration and a reminder that forward and backward discretizations must be consistent. A finite-grid calibration identity is not automatically an error-free continuum calibration.
+
+\citet{jourdain2020} address existence in a calibrated regime-switching setting. It should not be cited as an unrestricted existence theorem for every Heston-type leverage specification. \citet{bayer2024} study regularized conditional-expectation approximation through reproducing-kernel Hilbert spaces for singular LSV McKean--Vlasov problems. Together these works show why denominator regularization, conditioning diagnostics, and numerical stability belong in the LSV study; the review does not claim those algorithms have been reproduced in this repository.
+
+\subsection{Research gap being tested, not novelty being asserted}
+The selected literature justifies the ingredients but does not settle this project's question. Its contribution is a controlled link between a particular observable feed, future liquidity prediction, and constrained derivative hedging. The relevant ablation is not simply ``linear versus deep.'' It is whether top-of-book and additional recorded depth improve forecasts beyond current cost/price history, and whether that improvement remains useful once constraints and tail outcomes are evaluated.
+
+This is a targeted critical review, not a systematic or exhaustive survey. No ``first ever'' claim is made. A negative result is scientifically useful when the data boundary, policy comparison, and uncertainty are reported correctly.
+
+\begin{longtable}{@{}p{31mm}p{53mm}p{66mm}@{}}
+\caption{Literature-to-experiment map. Each implication is a proposed test, not an imported empirical conclusion.}\label{tab:literature}\\
+\toprule
+Source family & Relevant mechanism & Project test / principal limitation\\\midrule
+\endfirsthead
+\toprule Source family & Relevant mechanism & Project test / principal limitation\\\midrule
+\endhead
+Cont et al.; Gould--Bonart & Flow and state imbalance contain different information & Compare trailing OFI with static imbalance; do not use forecast-interval flow\\
+DeepLOB & Nonlinear spatial/temporal feature extraction & Deferred benchmark; small proprietary samples may not support the architecture\\
+Hoerl--Kennard & Shrink correlated predictors & Tune ridge only on validation dates; coefficients are not causal estimates\\
+Diebold--Mariano; Politis--Romano & Dependence-aware forecast comparison & Treat overlapping errors as dependent; per-date replication matters\\
+Almgren--Chriss & Liquidity cost versus exposure risk & Do not relabel displayed-depth walking as a calibrated impact model\\
+Rockafellar--Uryasev & Convex scenario tail-loss objective & Optimize holdings and threshold at fixed confidence, not the confidence itself\\
+Deep Hedging & Risk-based policy learning with frictions & Compare against a transparent constrained policy and a reconciled ledger\\
+Dupire; Heston; Gy\"ongy & Marginal calibration and alternative variance dynamics & Test model sensitivity; matching vanilla prices does not match hedge dynamics\\
+Cozma et al.; Wyns--in 't Hout; Bayer et al. & Numerical conditional expectations and consistent calibration & Validate on a known synthetic target before fitting sparse market quotes\\
+\bottomrule
+\end{longtable}
+

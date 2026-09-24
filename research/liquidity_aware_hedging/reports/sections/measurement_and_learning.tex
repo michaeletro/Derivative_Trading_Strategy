@@ -1,0 +1,141 @@
+\section{Measurement: what the recorder actually observes}
+\subsection{Displayed depth is not an individual-order book}
+Let the available reconstructed book be
+\[
+B_t=\{(b_{t,k},q^b_{t,k}),(a_{t,k},q^a_{t,k}): k=1,\ldots,K_t\},
+\]
+with descending bids, ascending asks, and nonnegative displayed sizes. The current adapter requests a bounded number of rows from one direct USD equity/ETF feed. Rows may refer to market makers; equal-price rows are aggregated when a top-price quantity is required. There is no individual-order identifier or verified passive queue position.
+
+IBKR's documentation warns that its depth feed does not guarantee every quoted price and excludes odd lots. It also describes book clearing after depth-reset message 317 \citep{ibkrdepth}. Accordingly the code calls a structurally acceptable state \texttt{two\_sided\_unverified}. This name is substantive: it does not certify completeness, freshness of every row, or an executable fill. Requested rows are a bound, not proof that all those rows arrived.
+
+\subsection{Observation filtration and clocks}
+An archived event has a local sequence, a local monotonic receipt time $\tau_i$, a wall-clock receipt coordinate $u_i$, and an operation/side/row payload. Define
+\[
+\G_t=\sigma\{E_i:\tau_i\leq t\}.
+\]
+The reconstruction at time $t$ must be a function of $\G_t$. This is an \emph{observed-feed filtration}, not the exchange's information filtration. Feed latency, aggregation, missing upstream events, and process scheduling can separate the two.
+
+A regular monotonic grid $t_j=t_0+j\delta$ avoids giving busy periods more regression weight merely because more events arrived. The last eligible index is
+\begin{equation}
+ i(t)=\max\{i:\tau_i\leq t\}.\label{eq:asof}
+\end{equation}
+All events with a tied receipt time are applied in archived sequence before sampling that instant. A forward or nearest-time join is forbidden. Wall time is used for date grouping and time-of-day features; duration is measured with the monotonic clock. A backward clock is rejected. A material inconsistency between clock increments breaks the continuity segment.
+
+\begin{proposition}[Prefix nonanticipation]
+Suppose reconstruction is deterministic, grid evaluation uses \eqref{eq:asof}, and features depend only on reconstructed observations in $[t-L,t]$. Altering events whose receipt times exceed $t$ cannot alter those feature values at $t$.
+\end{proposition}
+\begin{proof}
+Every selected event index is at most $i(t)$. Deterministic reconstruction of that prefix is unchanged by an alteration outside it. Each trailing feature is a deterministic function of unchanged prefix states. No statement is made about whether a future-dependent label remains eligible after the alteration.
+\end{proof}
+
+The last sentence matters. A model feature can be causal while the \emph{evaluation sample} is selected using future data availability. Those are different issues, addressed below.
+
+\subsection{Continuity and age rules}
+A reset, gap, terminal marker, or invalid event state creates a new segment or invalidates the state. A lookback or prediction horizon cannot cross such a break, even if the next sampled book appears plausible. No interpolation recreates deleted or missing rows.
+
+The pipeline also requires both sides to have received an update within an explicit bound $A$ seconds at sampled times. A new ask update cannot refresh the bid-side clock. This is only a \emph{side-update age} rule: a deep bid update can make the side's clock recent while a different bid row is old. Row-level age, exchange-time synchronization, and true quote lifetime remain unverified. The default $A=5$ seconds is a conservative experiment setting that must be reported and sensitivity-tested.
+
+\section{Liquidity targets and observable features}
+\subsection{Spread and displayed crossing cost}
+For an uncrossed, unlocked two-sided state, define
+\[
+ m_t=\frac{a_{t,1}+b_{t,1}}{2},\qquad s_t=a_{t,1}-b_{t,1}.
+\]
+For a fixed positive quantity $Q$, let $x^+_{t,k}(Q)$ be the amount consumed at ask row $k$ when the rows are walked in order, with $0\leq x^+_{t,k}\leq q^a_{t,k}$ and $\sum_kx^+_{t,k}=Q$. Define $x^-_{t,k}$ similarly for a sale. The dollar proxies are
+\begin{align}
+ c_t^+(Q)&=\sum_k a_{t,k}x^+_{t,k}(Q)-Qm_t,\\
+ c_t^-(Q)&=Qm_t-\sum_k b_{t,k}x^-_{t,k}(Q).
+\end{align}
+They exist only when the recorded side has sufficient size. The normalized quantities are
+\begin{equation}
+ z_t^{\pm}(Q)=10^4\frac{c_t^{\pm}(Q)}{Qm_t},\qquad
+ z_t^{s}=10^4\frac{s_t}{m_t}.\label{eq:costbps}
+\end{equation}
+The code supports a chosen one of \texttt{buy\_cost\_bps}, \texttt{sell\_cost\_bps}, or \texttt{spread\_bps}. Its default primary response is
+\[
+ Y_t=z_{t+H}^{+}(Q),\qquad H=30\text{ seconds}.
+\]
+The midpoint in the label denominator is the midpoint at the label time. It is not a future input to the predictor; it is part of the definition of the future outcome.
+
+These proxies exclude delay to order arrival, disappearing displayed size, hidden liquidity, price impact, broker fees, and actual execution mechanics. They measure future \emph{displayed conditions}. They are not transaction-cost observations from executed trades. Nor is forecasting $z_t$ from a contemporaneous book a genuine forecast; persistence uses that directly observable quantity as its benchmark.
+
+\subsection{Static imbalance and trailing flow}
+Aggregate all rows at the best bid and ask to obtain $q_t^{b,0}$ and $q_t^{a,0}$. Top imbalance is
+\[
+ I_t^0=\frac{q_t^{b,0}-q_t^{a,0}}{q_t^{b,0}+q_t^{a,0}}.
+\]
+Total recorded-depth imbalance replaces these top quantities with sums over all observed rows. ``Total'' here always means total \emph{recorded} depth.
+
+For consecutive structurally eligible events with best prices $b_i,a_i$ and top quantities $q_i^b,q_i^a$, the implemented OFI increment follows the best-quote construction of \citet{cont2014}:
+\begin{align}
+ e_i={}&\ind_{\{b_i\geq b_{i-1}\}}q_i^b-\ind_{\{b_i\leq b_{i-1}\}}q_{i-1}^b\nonumber\\
+ &-\ind_{\{a_i\leq a_{i-1}\}}q_i^a+\ind_{\{a_i\geq a_{i-1}\}}q_{i-1}^a.
+\end{align}
+It is accumulated on $(t-L,t]$ and divided by the current total best-price quantity. It is not signed trade volume: quote changes need not identify whether an execution or cancellation occurred. In this implementation the flow accumulation restarts after invalid states.
+
+\subsection{Predeclared information sets}
+Every model uses the same eligible examples. The nested groups are:
+\par\medskip
+\begin{tabularx}{\textwidth}{@{}p{25mm}Y@{}}\toprule
+Group & Inputs available at decision time\\\midrule
+History & Current chosen target, trailing midpoint log return, sample standard deviation of trailing grid log returns, UTC time-of-day sine/cosine\\
+Top & History plus spread, best-price imbalance, log best bid/ask quantities, scaled trailing OFI\\
+Depth & Top plus recorded-depth imbalance and log total bid/ask quantities\\\bottomrule
+\end{tabularx}
+\par\medskip
+The history group is therefore \emph{not} a strictly price-only baseline: it includes the observed current liquidity target. This is intentional, because incremental prediction should beat an informative persistence benchmark. Size transformations use $\log(1+q)$. Trailing return standard deviation is unannualized and is not passed into a pricing model.
+
+\subsection{Future availability creates a selected population}
+Let $A_t$ denote eligibility: valid and sufficiently recent states throughout the feature and horizon windows, the same reconstruction segment and UTC date, and enough displayed size at the endpoints for the chosen target. The first regression estimates
+\[
+ \E[Y_t\mid X_t=x,A_t=1],
+\]
+not automatically $\E[Y_t\mid X_t=x]$. Future capacity or outages can depend on stress. Dropping precisely those intervals can make the measured sample easier and conceal economically important tail cases.
+
+The output therefore records disjoint exclusion counts: warmup/right boundary, invalid or stale features, invalid or stale horizon, cross-date windows, insufficient current depth, insufficient future depth, and eligible rows. Counts reconcile to the clock grid. This is transparency, not a statistical correction. A later availability model and a conservative policy for unpriced depth are needed before claiming an unconditional decision benefit. No missing label is changed to zero, and no prediction can justify trading beyond observed capacity.
+
+\section{Regularized forecasting and temporal validation}
+\subsection{A correction to persistence}
+Write $y_i$ for the future target and $p_i$ for its contemporaneous value. Persistence is $\widehat y_i=p_i$. Ridge models the residual $d_i=y_i-p_i$:
+\begin{equation}
+ \min_{b,\beta}\frac1n\sum_{i\in\mathcal T}(d_i-b-z_i^\top\beta)^2
+              +\lambda\norm{\beta}_2^2,\quad\lambda>0.\label{eq:ridge}
+\end{equation}
+Only training rows $\mathcal T$ determine feature means and population-standard-deviation scales. Constant or numerically near-constant scales are replaced by one; no future row determines that decision. The intercept is unpenalized. The positive penalty controls unstable directions, in the spirit of \citet{hoerl1970}.
+
+If $Z=U\operatorname{diag}(s_j)V^\top$ is the training SVD and $d_c=d-\bar d\mathbf1$, then
+\begin{equation}
+ \widehat\beta=V\operatorname{diag}\left(\frac{s_j}{s_j^2+n\lambda}\right)U^\top d_c,
+ \qquad \widehat b=\bar d.\label{eq:svd}
+\end{equation}
+This follows by differentiating \eqref{eq:ridge} and resolving the positive-definite quadratic in singular-vector coordinates. The implementation uses \eqref{eq:svd}, not an explicit inverse of $Z^\top Z$. A library whose objective uses a \emph{sum} rather than a mean would require penalty $n\lambda$ for the same fit.
+
+Predictions are $p_i+\widehat b+z_i^\top\widehat\beta$. Negative predictions are counted, not silently clipped. They are evidence of a mismatch between an unconstrained conditional-mean baseline and a nonnegative response. Any later clipping or constrained regression must be predeclared and evaluated consistently, not chosen after viewing test errors.
+
+\subsection{Whole-date partitions and information intervals}
+All captures on one UTC receipt date belong to a single partition. Training dates precede validation dates, which precede test dates. For each eligible example define its complete information/label interval
+\[
+ J_t=[t-L,t+H].
+\]
+The builder excludes windows crossing a receipt date. The splitter additionally checks that the last earlier-partition label precedes the first later-partition feature-window start. No random row split or row-count gap substitutes for this time check.
+
+Real-data manifests must explicitly declare every eligible date in exactly one of the three partitions. Synthetic mode uses a deterministic date allocation only for integration tests. Three dates are a software minimum, not adequate evidence of generalization. Dates with no usable labels require investigation; the code refuses an incompatible explicit partition instead of inventing observations.
+
+Within each predeclared information set, $\lambda$ is selected on equal-date validation MSE from a fixed candidate list. The final feature-family selection also uses validation only; all declared families are shown on the test set as ablations. The initial implementation retains the training-only fits rather than refitting on validation. Repeatedly changing the target, quantity, filter, or model after reading test scores would invalidate the holdout even though the code's initial split was correct.
+
+\begin{proposition}[Test-set noninterference in fitting]
+With a fixed partition and candidate set, the fitted scalers and coefficients in \eqref{eq:ridge}, and a selection rule depending only on validation losses, are invariant to changes in test features or labels.
+\end{proposition}
+\begin{proof}
+The scaler and SVD depend only on training arrays. Validation predictions depend on those fixed estimates and validation features; validation losses use validation labels. None of those functions has the test arrays as an argument. The test arrays enter only the final scoring operation. This is tested by perturbing test labels and feature magnitudes.
+\end{proof}
+
+\subsection{Metrics and what they do not prove}
+The code reports pooled MAE, RMSE, bias, negative-prediction fraction, and per-date errors. Hyperparameter selection uses
+\[
+ \operatorname{MacroMSE}=\frac1D\sum_{d=1}^{D}\frac1{n_d}\sum_{i\in d}(\widehat y_i-y_i)^2.
+\]
+This gives each date equal evaluation weight even when retention or collection duration differs. Model fitting remains row-weighted, an explicit distinction. For each test date it also reports the paired squared-error difference relative to persistence on the same examples.
+
+With $H=30$ and $\delta=1$, adjacent forecasts share much of the same horizon and trailing history. The observations are not IID. Date aggregation reduces one source of pseudo-replication but does not establish independence across days. Dependence-aware tests and resampling require their own assumptions \citep{diebold1995,politis1994}. No $p$-value or claimed confidence interval for improvement is emitted by this baseline implementation.
+

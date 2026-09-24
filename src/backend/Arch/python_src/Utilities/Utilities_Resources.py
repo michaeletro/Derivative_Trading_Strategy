@@ -1,32 +1,8 @@
-"""
-This module contains the resources for the Utilities module, which are used to store the API key and headers for the API connection.
+"""Compatibility exports for legacy callers; never store provider secrets here."""
+import os
 
-Attributes:
------------
-apiKey : str
-    The API key for authentication.
-payload : dict
-    The payload for the API request.
-headers : dict
-    The headers for the API request, including various HTTP headers required for making requests to the Polygon API.
-"""
-
-apiKey = "oIpqVdgJYK9nldqQ5j8JiPXxVVZptz0a"
+# New clients read the environment at construction time. This alias remains for
+# older notebooks; importing this module does not require a funded/data account.
+apiKey = os.environ.get("POLYGON_API_KEY", "")
 payload = {}
-headers = {
-    'Accept': 'text/json',
-    'Sec-Fetch-Site': 'same-site',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Sec-Fetch-Mode': 'cors',
-    'Host': 'api.polygon.io',
-    'Origin': 'https://polygon.io',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15',
-    'Referer': 'https://polygon.io/',
-    'Connection': 'keep-alive',
-    'Sec-Fetch-Dest': 'empty',
-    'X-Polygon-Edge-User-Agent': 'useragent',
-    'X-Polygon-Edge-IP-Address': '8.8.8.8',
-    'X-Polygon-Edge-ID': 'sample_edge_id'
-}
-
+headers = {"Accept": "application/json"}

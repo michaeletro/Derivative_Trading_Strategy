@@ -1,0 +1,13 @@
+#pragma once
+namespace dts::pricing::build {
+inline constexpr const char* hedging_source_sha256 = "@hedging_fingerprint@";
+inline constexpr const char* sde_source_sha256 = "@sde_fingerprint@";
+inline constexpr const char* research_source_sha256 = "@research_fingerprint@";
+inline constexpr char application_version[] = "@PROJECT_VERSION@";
+inline constexpr char revision[] = "@pricing_revision@";
+inline constexpr char dirty[] = "@pricing_dirty@";
+inline constexpr char source_sha256[] = "@pricing_fingerprint@";
+inline constexpr char compiler[] = "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@";
+inline constexpr char platform[] = "@CMAKE_SYSTEM_NAME@ @CMAKE_SYSTEM_PROCESSOR@";
+inline constexpr char configuration[] = "@CMAKE_BUILD_TYPE@";
+}

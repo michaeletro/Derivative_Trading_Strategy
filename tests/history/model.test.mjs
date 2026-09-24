@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {windowFromFields,validateHistory,formatHistoryTime} from '../../src/frontend/dashboard/history-model.mjs';
+test('daily dates use half-open UTC coordinates',()=>assert.equal(windowFromFields('2026-01-05','2026-01-06','1 day').end_s-windowFromFields('2026-01-05','2026-01-06','1 day').start_s,86400));
+test('minute input is UTC not machine zone',()=>assert.equal(windowFromFields('2026-01-05T12:00','2026-01-05T13:00','1 min').start_s,Date.UTC(2026,0,5,12)/1000));
+test('invalid dates and large windows refused',()=>{for(const [a,b,k] of [['2026-02-30','2026-03-05','1 day'],['2026-01-05','2025-01-05','1 day'],['2026-01-05T00:00','2026-01-07T00:00','1 min']])assert.throws(()=>windowFromFields(a,b,k));});
+const expected={dataset_id:'1',start_s:1767571200,end_s:1767657600};
+const fixture=()=>({...expected,bar_size:'1 day',recorded_not_live:true,complete_market_history:false,requests:[],uncovered_intervals:[],bars:[{coordinate_s:1767571200,open:100,high:102,low:99,close:101}]});
+test('saved view identity must match request',()=>{assert.ok(validateHistory(fixture(),expected));assert.throws(()=>validateHistory({...fixture(),dataset_id:'2'},expected));});
+test('null, nonfinite, inconsistent and unordered candles rejected',()=>{for(const row of [{...fixture().bars[0],close:null},{...fixture().bars[0],low:200},{...fixture().bars[0],open:Infinity}])assert.throws(()=>validateHistory({...fixture(),bars:[row]},expected));assert.throws(()=>validateHistory({...fixture(),bars:[...fixture().bars,...fixture().bars]},expected));});
+test('no false completeness or live label',()=>{assert.throws(()=>validateHistory({...fixture(),complete_market_history:true},expected));assert.throws(()=>validateHistory({...fixture(),recorded_not_live:false},expected));});
+test('daily date display does not invent exchange timestamp',()=>assert.equal(formatHistoryTime(1767571200,'1 day'),'2026-01-05'));

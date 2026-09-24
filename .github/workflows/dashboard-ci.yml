@@ -1,0 +1,47 @@
+name: Dashboard and local API
+on:
+  push:
+    branches: [feature/ibkr-foundation-20260922]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: dashboard-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  dashboard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Native HTTP dependencies (no IBKR session)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build libasio-dev libboost-system-dev libsqlite3-dev
+      - name: Build and test actual HTTP server
+        run: |
+          cmake -S . -B build-dashboard -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDTS_BUILD_SERVER=ON -DDTS_WITH_IBKR=OFF
+          cmake --build build-dashboard --parallel 2
+          ctest --test-dir build-dashboard --output-on-failure
+      - name: Presentation and token-isolation unit tests
+        run: node --test tests/dashboard/model.test.mjs
+      - name: Install pinned browser test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Browser acceptance (synthetic fixtures, never IBKR)
+        env:
+          DTS_SCREENSHOT_DIR: dashboard-screenshots
+        run: python tests/dashboard/browser_tests.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-fixture-screenshots
+          path: dashboard-screenshots/
+          if-no-files-found: ignore

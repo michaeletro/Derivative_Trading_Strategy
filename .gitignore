@@ -53,3 +53,52 @@ config.json
 *.backup
 *.orig
 *.rej
+
+# Local configuration, SDKs, and CMake output
+.venv/
+.env.*
+!.env.example
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+Testing/
+compile_commands.json
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+vendor/ibkr/
+
+# Persistent market data lives outside the checkout; never commit it or its WAL.
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite.partial*
+recorder.lock
+
+# Local dashboard credentials/profiles must stay outside Git. Defense in depth:
+# ignored files can still be force-added; never commit or paste real credentials.
+dashboard.token
+dashboard.token.*
+.dts-auth/
+.config/derivative-lab/
+
+# Local course data/outputs are private; explicit source notebooks remain tracked.
+research/liquidity_aware_hedging/data/
+research/liquidity_aware_hedging/outputs/
+*.executed.ipynb
+*.depth-export.json
+
+# Build products of the theoretical paper, not its .tex/.bib sources.
+research/liquidity_aware_hedging/reports/*.pdf
+research/liquidity_aware_hedging/reports/*.aux
+research/liquidity_aware_hedging/reports/*.bbl
+research/liquidity_aware_hedging/reports/*.blg
+research/liquidity_aware_hedging/reports/*.fdb_latexmk
+research/liquidity_aware_hedging/reports/*.fls
+research/liquidity_aware_hedging/reports/*.log
+research/liquidity_aware_hedging/reports/*.out
+research/liquidity_aware_hedging/reports/*.toc
+*.liquidity-manifest.json
+*.liquidity-result.json
