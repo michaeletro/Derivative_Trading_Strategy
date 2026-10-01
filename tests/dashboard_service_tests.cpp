@@ -8,12 +8,13 @@ class FixtureBroker final : public dts::IBroker {
     dts::RequestId next_ = 1;
 public:
     int subscription_calls = 0;
+    void set_state(dts::ConnectionState state) { state_ = state; }
     void connect() override { state_ = dts::ConnectionState::Ready; }
     void disconnect() noexcept override { state_ = dts::ConnectionState::Disconnected; events_.clear(); }
     dts::ConnectionState state() const noexcept override { return state_; }
     dts::RequestId resolve(const dts::ContractQuery&) override {
         const auto request = next_++;
-        dts::Contract c; c.id = 42; c.symbol = "DEMO"; c.exchange = "SIM"; c.currency = "USD"; c.multiplier = 1;
+        dts::Contract c; c.id = 41 + request; c.symbol = "DEMO"; c.exchange = "SIM"; c.currency = "USD"; c.multiplier = 1;
         events_.push_back(dts::ContractEvent{request,c}); events_.push_back(dts::ContractsComplete{request,true}); return request;
     }
     dts::RequestId subscribe(const dts::Contract&) override { ++subscription_calls; return next_++; }
@@ -43,6 +44,29 @@ int main() {
         CHECK(service.positions().status == dts::SnapshotStatus::Unavailable);
         service.connect(); CHECK(service.generation() > generation);
         CHECK(service.subscriptions().empty());
+        const auto bounded_request = service.resolve(query); service.poll();
+        const auto bounded_id = service.resolution(bounded_request).contracts.front().id;
+        transport->set_state(dts::ConnectionState::Connecting);
+        const int calls_before = transport->subscription_calls;
+        bool not_ready = false;
+        try { service.subscribe(bounded_id); } catch (const std::logic_error&) { not_ready = true; }
+        CHECK(not_ready && transport->subscription_calls == calls_before && service.subscriptions().empty());
+        transport->set_state(dts::ConnectionState::Ready);
+        const auto first = service.subscribe(bounded_id);
+        for (int i = 1; i < 16; ++i) {
+            const auto next = service.resolve(query); service.poll();
+            service.subscribe(service.resolution(next).contracts.front().id);
+        }
+        CHECK(service.subscribe(bounded_id) == first);
+        CHECK(service.subscriptions().size() == 16 && transport->subscription_calls == calls_before + 16);
+        const auto overflow = service.resolve(query); service.poll();
+        const auto overflow_id = service.resolution(overflow).contracts.front().id;
+        bool full = false;
+        try { service.subscribe(overflow_id); } catch (const std::length_error&) { full = true; }
+        CHECK(full && transport->subscription_calls == calls_before + 16 && service.subscriptions().size() == 16);
+        CHECK(service.unsubscribe(first));
+        service.subscribe(overflow_id);
+        CHECK(service.subscriptions().size() == 16 && transport->subscription_calls == calls_before + 17);
         std::cout << "Dashboard service views, duplicate intent, generation and invalidation checks passed\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
