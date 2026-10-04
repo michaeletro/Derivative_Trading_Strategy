@@ -40,7 +40,9 @@ def main(exe):
             ck(not any(path.startswith('/api/depth') for method,path,body in calls))
             page.locator('#ob-refresh').click()
             expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')
-            expect(page.locator('#ob-contract-fields')).to_be_disabled()
+            # Assert actual controls: Playwright does not classify the fieldset itself as a disabled control.
+            expect(page.locator('#ob-symbol')).to_be_disabled()
+            expect(page.locator('#ob-resolve')).to_be_disabled()
             page.locator('#ob-recordings-tab').click()
             expect(page.locator('#ob-sessions input')).to_have_count(4)
             page.locator(f'#ob-sessions input[value="{ids[0]}"]').check()
