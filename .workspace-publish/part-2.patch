@@ -1,0 +1,216 @@
+diff --git a/src/frontend/dashboard/app.mjs b/src/frontend/dashboard/app.mjs
+index 8081a38..11a81e4 100644
+--- a/src/frontend/dashboard/app.mjs
++++ b/src/frontend/dashboard/app.mjs
+@@ -1,3 +1,4 @@
++import {mountOrderbook} from './orderbook.mjs';
+ import {takeLaunchCode, validSessionStatus, reopenMessage} from './local-signin.mjs';
+ import {mountHedging} from './hedging.mjs';
+ import {mountSde} from './sde.mjs';
+@@ -13,6 +14,7 @@ const $=id=>document.getElementById(id);
+ $('access-title').parentElement.querySelector('p').textContent='The launcher signs in locally using your saved profile. Manual token entry is a fallback, not your IBKR password.';
+ $('forget').textContent='Sign out';
+ const api=createApi();
++const orderbookLab=mountOrderbook(api,error=>lock(error.message));
+ const hedgingLab=mountHedging(api,error=>lock(error.message));
+ const sdeLab=mountSde(api,error=>lock(error.message));
+ const pricingLab=mountPricing(api,error=>lock(error.message));
+@@ -243,6 +245,7 @@ function renderChart() {
+   ctx.stroke();ctx.fillStyle=css.getPropertyValue('--accent');for(const p of valid) {ctx.beginPath();ctx.arc(x(p),y(p),2,0,Math.PI*2);ctx.fill();}
+ }
+ function render() {
++  orderbookLab.setAccess(unlocked);orderbookLab.update(fresh?current:null);
+   hedgingLab.setAccess(unlocked);
+   sdeLab.setAccess(unlocked);
+   pricingLab.setAccess(unlocked);
+diff --git a/src/frontend/dashboard/index.html b/src/frontend/dashboard/index.html
+index 93edaca..0fa2d25 100644
+--- a/src/frontend/dashboard/index.html
++++ b/src/frontend/dashboard/index.html
+@@ -13,12 +13,13 @@
+   <link rel="stylesheet" href="/dashboard/replay.css">
+   <link rel="stylesheet" href="/dashboard/sde.css">
+   <link rel="stylesheet" href="/dashboard/hedging.css">
++  <link rel="stylesheet" href="/dashboard/orderbook.css">
+ </head>
+ <body>
+ <a class="skip" href="#overview">Skip to workspace</a>
+ <aside class="sidebar">
+   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
+-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#replay"><span>08</span> Replay &amp; research</a><a href="#sde"><span>09</span> SDE discretization</a><a href="#hedging"><span>10</span> Delta hedging</a><a href="#lab-catalog"><span>11</span> Saved experiments</a><a href="#roadmap"><span>12</span> Study roadmap</a></nav>
++  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#orderbook"><span>OB</span> Order book &amp; research</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#replay"><span>08</span> Replay &amp; research</a><a href="#sde"><span>09</span> SDE discretization</a><a href="#hedging"><span>10</span> Delta hedging</a><a href="#lab-catalog"><span>11</span> Saved experiments</a><a href="#roadmap"><span>12</span> Study roadmap</a></nav>
+   <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes. Market observations are saved locally.</small></div>
+ </aside>
+ <main id="overview">
+@@ -55,6 +56,42 @@
+       <p class="hint">A symbol is a query, not a unique contract.</p><p id="resolution-note" role="status"></p><div id="candidates" aria-label="Resolved contract candidates"></div>
+     </section>
+   </div>
++  <section class="panel ob-workspace" id="orderbook" aria-labelledby="ob-title">
++    <header class="section-heading"><div><p class="eyebrow">Market microstructure / Capture → research</p><h2 id="ob-title">Order book &amp; research</h2></div><span id="ob-source" class="badge">NOT LOADED</span></header>
++    <p class="section-description">Inspect displayed liquidity. Record explicitly. Evaluate models on completed sessions. No order submission or automatic strategy execution.</p>
++    <div class="ob-toolbar"><button id="ob-refresh" class="secondary" disabled>Load / refresh workspace</button><label class="ob-check"><input id="ob-watch" type="checkbox" disabled> Watch book (1s display polls)</label><span id="ob-state" class="hint">Unlock the dashboard to inspect this workspace.</span></div>
++    <p id="ob-notice" role="status" aria-live="polite"></p>
++    <div class="ob-tabs" role="tablist" aria-label="Order book workspace"><button id="ob-live-tab" role="tab" aria-selected="true" aria-controls="ob-live-panel" type="button">Live book</button><button id="ob-recordings-tab" role="tab" aria-selected="false" aria-controls="ob-recordings-panel" type="button">Recordings &amp; models</button><button id="ob-results-tab" role="tab" aria-selected="false" aria-controls="ob-results-panel" type="button">Results</button></div>
++    <div id="ob-live-panel" role="tabpanel" aria-labelledby="ob-live-tab">
++      <div class="ob-live-grid"><form id="ob-contract-form"><fieldset id="ob-contract-fields" disabled><legend>1 · Resolve a direct equity</legend><div class="form-grid"><label>Symbol<input id="ob-symbol" value="AAPL" maxlength="32" pattern="[A-Za-z0-9. -]{1,32}" required></label><label>Direct venue<select id="ob-venue"><option value="BATS">BATS / Cboe BZX</option><option value="IEX">IEX</option></select></label></div><button id="ob-resolve" type="submit">Resolve candidates</button></fieldset><p id="ob-resolution" class="hint">No instrument selected. Resolution never subscribes automatically.</p><div id="ob-candidates"></div></form>
++      <div class="ob-capture"><h3>2 · Record selected contract</h3><p id="ob-selected">Select a returned USD stock explicitly.</p><label>Requested rows per side<input id="ob-rows" type="number" min="1" max="10" step="1" value="10" disabled></label><div class="actions"><button id="ob-start" disabled>Start recording</button><button id="ob-stop" class="secondary" disabled>Stop / clear request</button></div><p class="hint">One direct request at a time. Closing this tab does not stop capture or disk growth. A start acknowledgement is not proof of depth delivery.</p></div></div>
++      <p id="ob-live-identity" class="ob-caption">No live book loaded.</p><p id="ob-quality" class="hint">Native receipt has not been verified.</p>
++      <div class="ob-metrics"><div><span>Displayed spread</span><strong id="ob-spread">—</strong></div><div><span>Venue midpoint</span><strong id="ob-midpoint">—</strong></div><div><span>Visible size</span><strong id="ob-depth">—</strong></div><div><span>Depth imbalance</span><strong id="ob-imbalance">—</strong></div></div>
++      <div class="ob-ladders"><div><h3 class="ob-bid">Bid liquidity</h3><div class="table-scroll"><table><thead><tr><th>Price</th><th>Reported size</th><th>Cumulative</th></tr></thead><tbody id="ob-bids"></tbody></table></div></div><div><h3 class="ob-ask">Ask liquidity</h3><div class="table-scroll"><table><thead><tr><th>Price</th><th>Reported size</th><th>Cumulative</th></tr></thead><tbody id="ob-asks"></tbody></table></div></div></div>
++      <p class="hint">Equal-price rows are aggregated for display. Requested rows are not guaranteed distinct levels. Receipt age measures the last event, not each row. No event-level OFI is estimated from these screen polls.</p>
++    </div>
++    <div id="ob-recordings-panel" role="tabpanel" aria-labelledby="ob-recordings-tab" hidden>
++      <header class="ob-subheading"><h3>Recorded sessions</h3><button id="ob-more" class="secondary" disabled>Load next page</button></header>
++      <p id="ob-catalog-note" class="hint">Load the workspace to browse the archive. Only stopped sessions can be selected.</p>
++      <div class="table-scroll"><table><thead><tr><th>Select</th><th>Session / instrument</th><th>Venue / source</th><th>Capture start (UTC)</th><th>Rows</th><th>Events</th><th>State</th></tr></thead><tbody id="ob-sessions"></tbody></table></div>
++      <form id="ob-research-form"><fieldset id="ob-research-fields" disabled><legend>Offline analysis of selected recordings</legend>
++      <div class="form-grid ob-settings"><label>Operation<select name="mode" id="ob-mode"><option value="inspect">Inspect book &amp; coverage</option><option value="compare">Compare prediction models</option></select></label><label>Target<select name="target"><option value="buy_cost_bps">Future buy crossing cost (bps)</option><option value="sell_cost_bps">Future sell crossing cost (bps)</option><option value="spread_bps">Future spread (bps)</option></select></label><label>Quantity (reported units)<input name="quantity" type="number" min="0.000001" max="1000000000" value="100" step="any" required></label><label>Diagnostic price levels<input name="levels" type="number" min="1" max="10" value="5" required></label><label>Grid step (seconds)<input name="step_seconds" type="number" min="1" max="60" value="1" required></label><label>Prediction horizon (seconds)<input name="horizon_seconds" type="number" min="1" max="1800" value="30" required></label><label>Trailing lookback (seconds)<input name="lookback_seconds" type="number" min="2" max="1800" value="30" required></label><label>Maximum side age (seconds)<input name="max_side_age_seconds" type="number" min="0.001" max="60" step="any" value="5" required></label></div>
++      <div id="ob-partitions" hidden><h3>Predeclare chronological UTC date partitions</h3><p class="hint">Separate dates by commas or newlines. All eligible dates must appear exactly once. Inspect source coverage first: archive start dates are not a verified trading calendar. No random split or test-based model selection.</p><div class="ob-three"><label>Training dates<textarea name="train" rows="3" placeholder="YYYY-MM-DD, YYYY-MM-DD"></textarea></label><label>Validation dates<textarea name="validation" rows="3" placeholder="YYYY-MM-DD"></textarea></label><label>Test dates<textarea name="test" rows="3" placeholder="YYYY-MM-DD"></textarea></label></div></div>
++      <label class="ob-check"><input name="synthetic" type="checkbox"> I explicitly permit selected mock recordings (synthetic, not market evidence).</label>
++      <p id="ob-selection-note" class="hint">No recordings selected.</p><button id="ob-run" type="submit">Run offline analysis</button></fieldset></form>
++      <p id="ob-worker-note" class="hint">Worker capability not inspected. Acquisition and model fitting use separate processes.</p>
++      <p class="hint">Persistence, residual ridge and nearest-neighbor comparisons reuse the existing date-partitioned engine. HAR needs a separate complete daily panel; the synthetic CVaR case remains separate from observed liquidity.</p>
++    </div>
++    <div id="ob-results-panel" role="tabpanel" aria-labelledby="ob-results-tab" hidden>
++      <header class="ob-subheading"><h3>Research runs</h3><button id="ob-jobs-refresh" class="secondary" disabled>Refresh runs</button></header><p id="ob-job-note" class="hint">No research runs loaded.</p><div id="ob-jobs" class="ob-job-list"></div>
++      <article id="ob-result" hidden><header class="ob-subheading"><h3>Completed analysis</h3><button id="ob-download" class="secondary" disabled>Download result JSON</button></header><p id="ob-result-label"></p><p id="ob-result-config" class="hint"></p>
++      <label>Recorded capture<select id="ob-result-session"></select></label><label>Replay displayed state<input id="ob-result-scrub" type="range" min="0" value="0"></label><p id="ob-result-frame" class="ob-caption"></p>
++      <div class="ob-ladders"><div><h3>Recorded bids</h3><div class="table-scroll"><table><thead><tr><th>Price</th><th>Size</th><th>Cumulative</th></tr></thead><tbody id="ob-result-bids"></tbody></table></div></div><div><h3>Recorded asks</h3><div class="table-scroll"><table><thead><tr><th>Price</th><th>Size</th><th>Cumulative</th></tr></thead><tbody id="ob-result-asks"></tbody></table></div></div></div>
++      <div class="ob-plots"><div><h3>Recorded midpoint</h3><svg id="ob-result-price" viewBox="0 0 520 180" role="img" aria-label="Recorded midpoint with invalid periods omitted"></svg></div><div><h3>Recorded depth imbalance</h3><svg id="ob-result-imb" viewBox="0 0 520 180" role="img" aria-label="Recorded depth imbalance with invalid periods omitted"></svg></div></div>
++      <p class="hint">Replay and charts are decimated for display, never for fitting. Missing/invalid intervals are not fills. The offline report does not receive new live ticks.</p><div id="ob-comparison"></div>
++      <details><summary>Coverage, exclusions and partial-session variance</summary><pre id="ob-result-coverage"></pre></details><details><summary>Evaluation, paired-date errors and Cont diagnostic</summary><pre id="ob-result-evaluation"></pre></details><details><summary>Frozen request, source hashes and implementation identity</summary><pre id="ob-result-provenance"></pre></details></article>
++    </div>
++  </section>
+   <section class="panel positions" id="positions" aria-labelledby="positions-title">
+     <header class="section-heading"><div><p class="eyebrow">03 / Broker holdings</p><h2 id="positions-title">Position snapshot</h2></div><button id="snapshot" class="secondary" disabled>Request snapshot</button></header>
+     <p class="section-description" id="position-description">Unavailable until a request completes. One native snapshot per connection; not continuous reconciliation.</p>
+diff --git a/src/frontend/dashboard/orderbook-model.mjs b/src/frontend/dashboard/orderbook-model.mjs
+new file mode 100644
+index 0000000..3512627
+--- /dev/null
++++ b/src/frontend/dashboard/orderbook-model.mjs
+@@ -0,0 +1,114 @@
++// Display-only rules. Offline estimation stays in the shared Python research engine.
++const finite = x => typeof x === 'number' && Number.isFinite(x);
++export const id = x => typeof x === 'string' && /^[1-9][0-9]{0,17}$/.test(x);
++export const jobId = x => typeof x === 'string' && /^[a-f0-9]{32}$/.test(x);
++export const terminal = s => ['stop','error','gap','interrupted'].includes(s);
++const fail = message => { throw new Error(message); };
++const number = (x,lo,hi) => finite(x) && x>=lo && x<=hi;
++const size = x => typeof x==='string' && x.length<=64 && /^[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(x)
++  && Number.isFinite(Number(x)) && Number(x)>=0 && Number(x)<1e30 && (Number(x)===0 ? !/[1-9]/.test(x.split(/[eE]/)[0]) : Number(x)>=1e-12);
++export function parseDepth(p) {
++  if (!p || p.schema_version!==1 || p.kind!=='displayed_depth' || p.complete_exchange_book!==false || p.individual_orders!==false
++      || p.direct_depth_only!==true || p.time_basis!=='local_callback_receipt' || p.exchange_timestamp!==null
++      || !['ibkr_tws','mock','disabled'].includes(p.source) || typeof p.available!=='boolean'
++      || p.synthetic!==(p.source==='mock')) fail('Incompatible displayed-depth response; no book accepted.');
++  if(!p.available) { if(p.book!==null) fail('Unavailable depth cannot contain rows.'); return p; }
++  if(!id(p.request_id)||!id(p.contract_id)||typeof p.venue!=='string'||!/^[A-Z0-9._-]{1,32}$/.test(p.venue)||p.venue==='SMART'
++      || !Number.isInteger(p.requested_rows)||!number(p.requested_rows,1,10)||typeof p.active!=='boolean'||typeof p.structural_valid!=='boolean'
++      ||typeof p.quality!=='string'||p.quality.length>100||typeof p.sequence!=='string'||!/^\d{1,20}$/.test(p.sequence)
++      ||typeof p.epoch!=='string'||!/^\d{1,20}$/.test(p.epoch)
++      ||typeof p.last_receipt_unix_us!=='string'||!/^\d{1,20}$/.test(p.last_receipt_unix_us)
++      ||(p.last_event_age_ms!==null&&!number(p.last_event_age_ms,0,1e12))) fail('Invalid displayed-depth metadata.');
++  for(const key of ['bids','asks']) {
++    if(!Array.isArray(p.book?.[key])||p.book[key].length>p.requested_rows) fail('Invalid displayed row count.');
++    for(const row of p.book[key]) if(!number(row.price,1e-12,1e12)||!size(row.size)||typeof row.market_maker!=='string'||row.market_maker.length>64)
++      fail('Invalid displayed price or size.');
++  }
++  return p;
++}
++export function aggregate(rows) {
++  const result=[];
++  for(const r of rows) {
++    const last=result.at(-1);
++    if(last?.price===r.price) last.size+=Number(r.size);
++    else result.push({price:r.price,size:Number(r.size)});
++  }
++  let sum=0;return result.map(r=>({...r,cumulative:sum+=r.size}));
++}
++export function depthView(p,elapsed=0) {
++  const empty={usable:false,reason:'No depth request',bids:[],asks:[],spread:null,midpoint:null,depth:null,imbalance:null,microprice:null};
++  if(!p?.available) return empty;
++  const bids=aggregate(p.book.bids),asks=aggregate(p.book.asks);
++  const state={...empty,bids,asks,source:p.source};
++  if(!p.active||!p.structural_valid||p.quality!=='two_sided_unverified') return {...state,reason:p.quality};
++  if(!finite(elapsed)||elapsed<0||p.last_event_age_ms===null||p.last_event_age_ms+elapsed>5000) return {...state,reason:'Stale last-event age — row freshness is not established'};
++  if(!bids.length||!asks.length||bids.some((r,i)=>r.size<=0||(i&&r.price>bids[i-1].price))
++      ||asks.some((r,i)=>r.size<=0||(i&&r.price<asks[i-1].price))||bids[0].price>=asks[0].price) return {...state,reason:'Invalid, one-sided, locked or crossed book'};
++  const bd=bids.at(-1).cumulative,ad=asks.at(-1).cumulative;
++  return {...state,usable:true,reason:p.synthetic?'SYNTHETIC MOCK — not market data':'Two-sided displayed book; completeness unverified',
++    spread:asks[0].price-bids[0].price,midpoint:(asks[0].price+bids[0].price)/2,depth:bd+ad,imbalance:(bd-ad)/(bd+ad),
++    microprice:(asks[0].price*bids[0].size+bids[0].price*asks[0].size)/(bids[0].size+asks[0].size)};
++}
++export function sessionPage(p) {
++  if(!p||p.schema_version!==1||!Array.isArray(p.rows)||p.rows.length>100||typeof p.has_more!=='boolean'
++     ||typeof p.next_after_id!=='string'||!/^\d{1,18}$/.test(p.next_after_id)) fail('Invalid recording catalog.');
++  const seen=new Set();
++  for(const r of p.rows) {
++    if(!id(r.session_id)||seen.has(r.session_id)||!id(r.contract_id)||!['ibkr_tws','mock'].includes(r.source)
++       ||![...['recording'],...['stop','error','gap','interrupted']].includes(r.state)||typeof r.symbol!=='string'||typeof r.venue!=='string'
++       ||!/^\d{1,20}$/.test(r.event_count)||!Number.isInteger(r.requested_rows)||!number(r.requested_rows,1,10)
++       ||!number(r.started_ms,0,1e15)||(r.ended_ms!==null&&!number(r.ended_ms,0,1e15))) fail('Invalid recording metadata.');
++    seen.add(r.session_id);
++  }
++  if(p.has_more && (!p.rows.length||p.next_after_id!==p.rows.at(-1).session_id)) fail('Recording cursor did not advance.');
++  return p;
++}
++function dates(text) {
++  const d=String(text).trim().split(/[\s,]+/).filter(Boolean);
++  if(!d.length||d.length>100||d.some(x=>!/^\d{4}-\d{2}-\d{2}$/.test(x)||!Number.isFinite(Date.parse(x))||new Date(x).toISOString().slice(0,10)!==x)) fail('Enter complete ISO UTC dates for each partition.');
++  return d;
++}
++export function researchRequest(form, selected) {
++  if(!selected.length||selected.length>24||new Set(selected.map(s=>s.session_id)).size!==selected.length||selected.some(s=>!id(s.session_id)||!terminal(s.state)))
++    fail('Select 1..24 completed recordings; active captures cannot be analyzed.');
++  const first=selected[0];
++  if(selected.some(s=>['source','contract_id','venue','requested_rows','contract_route','currency'].some(k=>s[k]!==first[k])))
++    fail('Keep instrument, venue, source, row limit, route and currency identical within one experiment.');
++  if(first.source==='mock' && !form.synthetic) fail('Explicitly acknowledge synthetic recordings before using mock data.');
++  const c=Object.fromEntries(['quantity','levels','step_seconds','horizon_seconds','lookback_seconds','max_side_age_seconds'].map(k=>[k,Number(form[k])]));
++  c.target=form.target;
++  if(!number(c.quantity,1e-12,1e9)||!number(c.max_side_age_seconds,1e-12,60)||!['buy_cost_bps','sell_cost_bps','spread_bps'].includes(c.target)) fail('Invalid quantity, target or stale limit.');
++  for(const [key,lo,hi] of [['levels',1,10],['step_seconds',1,60],['horizon_seconds',1,1800],['lookback_seconds',2,1800]])
++    if(!Number.isInteger(c[key])||!number(c[key],lo,hi)) fail('Time and level settings must be integers within their bounds.');
++  if(c.horizon_seconds%c.step_seconds||c.lookback_seconds%c.step_seconds||300%c.step_seconds||c.lookback_seconds/c.step_seconds<2)
++    fail('Step must divide the horizon, lookback and 300 seconds, with at least two trailing returns.');
++  if(!['inspect','compare'].includes(form.mode)) fail('Choose diagnostics or model comparison.');
++  let split=null;
++  if(form.mode==='compare') {
++    split=Object.fromEntries(['train','validation','test'].map(k=>[k,dates(form[k])]));
++    const all=[...split.train,...split.validation,...split.test];
++    if(all.some((d,i)=>i&&d<=all[i-1])) fail('Date partitions must be unique and chronological: training, then validation, then test.');
++  }
++  return {schema_version:1,mode:form.mode,session_ids:selected.map(s=>s.session_id),source:first.source,configuration:c,split};
++}
++export function parseJobs(p) {
++  if(!p||p.schema_version!==1||!Array.isArray(p.jobs)||p.jobs.length>50||typeof p.has_more!=='boolean') fail('Invalid research catalog.');
++  for(const j of p.jobs) if(!jobId(j.job_id)||!['running','complete','failed','cancelled','interrupted','timeout'].includes(j.state)
++    ||!['inspect','compare'].includes(j.mode)||!['ibkr_tws','mock'].includes(j.source)||!Array.isArray(j.session_ids)||j.session_ids.some(x=>!id(x))) fail('Invalid research job metadata.');
++  return p;
++}
++export function parseResult(r) {
++  if(!r||r.schema_version!==1||r.kind!=='orderbook_workspace_result'||!['ibkr_tws','synthetic'].includes(r.source)
++     ||!Array.isArray(r.sessions)||r.sessions.length>24||!r.request||!Array.isArray(r.source_hashes)) fail('Incompatible research result.');
++  let frames=0;
++  for(const s of r.sessions) {
++    if(!s.identity||!id(s.identity.session_id)||!Array.isArray(s.frames)) fail('Invalid result identity.');
++    frames+=s.frames.length;
++    for(const f of s.frames) {
++      if(typeof f.usable!=='boolean'||!number(f.unix_us,0,1e16)||!Array.isArray(f.bids)||!Array.isArray(f.asks)||f.bids.length>10||f.asks.length>10) fail('Invalid replay frame.');
++      for(const [p,q] of [...f.bids,...f.asks]) if(!number(p,1e-12,1e12)||!size(q)) fail('Invalid replay row.');
++    }
++  }
++  if(frames>1600) fail('Research display exceeds the bounded frame limit.');
++  return r;
++}
+diff --git a/src/frontend/dashboard/orderbook.css b/src/frontend/dashboard/orderbook.css
+new file mode 100644
+index 0000000..bbac209
+--- /dev/null
++++ b/src/frontend/dashboard/orderbook.css
+@@ -0,0 +1,3 @@
++.ob-workspace{margin:24px 0;scroll-margin-top:24px}.ob-workspace h3{margin:12px 0}.ob-workspace fieldset{border:1px solid var(--border);padding:16px;border-radius:8px;margin:12px 0}.ob-workspace legend{padding:0 8px;font-size:13px;font-weight:650}.ob-workspace label{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--muted)}.ob-workspace input,.ob-workspace select,.ob-workspace textarea{width:100%;min-width:0;box-sizing:border-box}.ob-workspace textarea{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:10px;font:inherit;resize:vertical}.ob-workspace .ob-check{display:flex;flex-direction:row;align-items:center;gap:9px;margin:12px 0}.ob-check input{width:16px;height:16px}.ob-toolbar,.ob-subheading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.ob-toolbar{justify-content:flex-start}.ob-tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);padding:12px 0;margin:8px 0 18px}.ob-tabs button{background:transparent;color:var(--muted);border:1px solid transparent}.ob-tabs button[aria-selected=true]{color:var(--text);border-color:var(--accent);background:var(--surface)}.ob-live-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}.ob-capture{padding:14px 0}.ob-capture label{max-width:220px}.ob-capture .actions{margin:16px 0}.ob-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:22px 0}.ob-metrics>div{padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}.ob-metrics span{color:var(--muted);font-size:11px;display:block}.ob-metrics strong{font-size:25px;font-variant-numeric:tabular-nums;display:block;margin-top:5px}.ob-ladders,.ob-plots{display:grid;grid-template-columns:1fr 1fr;gap:24px}.ob-bid{color:#7fc9b2}.ob-ask{color:#dfac8a}.ob-ladders th,.ob-ladders td{text-align:right;position:relative}.ob-ladders th:first-child,.ob-ladders td:first-child{text-align:left}.ob-caption{font-size:13px;color:var(--text);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.ob-workspace .table-scroll{max-width:100%}.ob-workspace #ob-notice{color:#dfac8a;min-height:1em;line-height:1.6}.ob-three{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:15px 0}.ob-settings{grid-template-columns:repeat(4,minmax(0,1fr))}.ob-job-list{display:grid;gap:10px;margin:16px 0}.ob-job{padding:12px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.ob-job p{margin:2px 0}.ob-job small{display:block;color:var(--muted);overflow-wrap:anywhere}.ob-workspace pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:380px;overflow:auto;background:var(--bg);padding:14px}.ob-workspace details{margin:16px 0}.ob-workspace summary{cursor:pointer;color:var(--muted)}.ob-plots svg{width:100%;height:180px;background:var(--bg);border:1px solid var(--border);border-radius:6px}.ob-plots polyline{fill:none;stroke:var(--accent);stroke-width:1.5}.ob-plots text{fill:var(--muted);font:11px system-ui}.ob-ladder-stale{opacity:.5}.ob-workspace [hidden]{display:none!important}.ob-selected-model{background:rgba(127,201,178,.08)}#ob-result-session{margin:8px 0 15px}#ob-result-scrub{accent-color:var(--accent);margin:9px 0}#ob-candidates{display:grid;gap:8px;margin-top:12px}#ob-candidates button{white-space:normal;text-align:left}.ob-synthetic{color:#dfac8a;font-weight:700}
++@media(max-width:1100px){.ob-settings{grid-template-columns:repeat(2,minmax(0,1fr))}.ob-metrics{grid-template-columns:repeat(2,1fr)}}
++@media(max-width:700px){.ob-live-grid,.ob-ladders,.ob-plots,.ob-three{grid-template-columns:1fr}.ob-tabs{flex-wrap:wrap}.ob-tabs button{flex:1;padding:9px;font-size:12px}.ob-toolbar{align-items:flex-start}.ob-capture{padding:0}.ob-metrics{gap:8px}.ob-metrics strong{font-size:21px}.ob-workspace fieldset{padding:10px}.ob-settings{gap:12px}.ob-workspace td,.ob-workspace th{padding:9px}.ob-subheading{gap:8px}.ob-workspace{min-width:0}.ob-job>div{max-width:100%}}

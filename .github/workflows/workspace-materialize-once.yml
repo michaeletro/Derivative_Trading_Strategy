@@ -1,0 +1,61 @@
+# One-time, hash-locked source transport. Removed from the final feature tree.
+# Does not merge, force-push, execute project code, or write to the feature/main ref.
+name: Materialize checked workspace source once
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  materialize:
+    if: github.repository == 'michaeletro/Derivative_Trading_Strategy' && github.event.pull_request.number == 20 && github.event.pull_request.head.ref == 'feature/orderbook-workspace-20261004' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply exact tested source to immutable base and publish candidate only
+        env:
+          PUBLISH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          patch = b''.join(pathlib.Path(f'.workspace-publish/part-{i}.patch').read_bytes() for i in range(6))
+          # Repair one known transport-only leading space, then require exact bytes.
+          patch = patch.replace(b'\n diff --git a/tests/workspace/http_tests.py', b'\ndiff --git a/tests/workspace/http_tests.py')
+          assert len(patch) == 153495
+          assert hashlib.sha256(patch).hexdigest() == '98fdd0cb205634d6d0a1cdac93a3c3f2aa911187bf4c9fddd1ea673d7b3d3c42'
+          raw = pathlib.Path('.workspace-publish/expected-blobs.json').read_bytes()
+          assert hashlib.sha256(raw).hexdigest() == 'e4bc31be7f9d722867014d18b8d10623f0d9cae5bdcdd7c7990a4ca754e76855'
+          expected = json.loads(raw)
+          destination = 'refs/heads/automation/orderbook-workspace-source-20261004'
+          assert not git('ls-remote', '--heads', 'origin', destination), 'Candidate branch already exists; nothing overwritten'
+          target = pathlib.Path(os.environ['RUNNER_TEMP'])/'workspace-source.patch'
+          target.write_bytes(patch)
+          git('checkout', '--detach', '195f1d9c6643a878e8a18675225473a757b206f3')
+          git('apply', '--index', '--check', str(target))
+          git('apply', '--index', str(target))
+          changed = set(git('diff', '--cached', '--name-only').splitlines())
+          assert changed == set(expected)
+          assert all(not p.startswith('.github/') for p in changed)
+          for path, sha in expected.items():
+              assert git('hash-object', path) == sha, path
+          git('config', 'user.name', 'github-actions[bot]')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'Materialize hash-verified order-book workspace source for review')
+          token = os.environ.pop('PUBLISH_TOKEN')
+          auth = base64.b64encode(('x-access-token:'+token).encode()).decode()
+          env = dict(os.environ, GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0='AUTHORIZATION: basic '+auth)
+          completed = subprocess.run(['git', 'push', 'origin', 'HEAD:'+destination], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+          if completed.returncode:
+              raise SystemExit('Candidate-only push failed; no force update or other branch attempted')
+          print('Candidate commit:', git('rev-parse', 'HEAD'))
+          print('Candidate tree:', git('rev-parse', 'HEAD^{tree}'))
+          print('Verified all 20 source blob hashes. No application code was executed in this job.')
+          PY

@@ -1,0 +1,415 @@
+diff --git a/tests/workspace/browser_tests.py b/tests/workspace/browser_tests.py
+new file mode 100644
+index 0000000..797b3e1
+--- /dev/null
++++ b/tests/workspace/browser_tests.py
+@@ -0,0 +1,163 @@
++"""Browser -> actual Crow -> actual model worker, plus labelled live protocol fixtures.
++
++All captures are synthetic. This never connects to IBKR or verifies entitlements.
++"""
++from __future__ import annotations
++import json
++import os
++from pathlib import Path
++import sys
++import tempfile
++from urllib.parse import urlparse
++from playwright.sync_api import sync_playwright, expect
++from http_tests import Server, fixture, helper
++
++
++def main(exe):
++    checks=0
++    def ck(x):
++        nonlocal checks
++        assert x
++        checks+=1
++    shots=Path(os.environ.get('DTS_SCREENSHOT_DIR','/tmp/workspace-screenshots'));shots.mkdir(parents=True,exist_ok=True)
++    with tempfile.TemporaryDirectory() as t, sync_playwright() as p:
++        root=Path(t);ids,days,_=fixture(exe,root)
++        with Server(exe,root,DTS_RESEARCH_PYTHON=sys.executable) as server:
++            executable=os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE')
++            browser=p.chromium.launch(**({'executable_path':executable} if executable else {}))
++            context=browser.new_context(viewport={'width':1480,'height':1060},reduced_motion='reduce',accept_downloads=True)
++            page=context.new_page();errors=[];calls=[];external=[]
++            page.on('pageerror',lambda e:errors.append(str(e)))
++            page.on('request',lambda r:calls.append((r.method,urlparse(r.url).path,r.post_data)))
++            page.on('request',lambda r:external.append(r.url) if not r.url.startswith(server.origin) else None)
++            page.on('dialog',lambda d:d.accept())
++            page.goto(server.origin+'/#orderbook')
++            expect(page.locator('#ob-refresh')).to_be_disabled()
++            ck(all(path=='/api/auth/status' for method,path,body in calls if path.startswith('/api/')))
++            page.locator('#token').fill(helper.TOKEN);page.locator('#unlock').click()
++            expect(page.locator('#http-status')).to_have_text('Available')
++            expect(page.locator('#ob-refresh')).to_be_enabled()
++            ck(not any(path.startswith('/api/depth') for method,path,body in calls))
++            page.locator('#ob-refresh').click()
++            expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')
++            expect(page.locator('#ob-contract-fields')).to_be_disabled()
++            page.locator('#ob-recordings-tab').click()
++            expect(page.locator('#ob-sessions input')).to_have_count(4)
++            page.locator(f'#ob-sessions input[value="{ids[0]}"]').check()
++            page.locator('#ob-run').click();expect(page.locator('#ob-notice')).to_contain_text('acknowledge synthetic')
++            ck(not any(method=='POST' and path=='/api/depth/research/jobs' for method,path,body in calls))
++            page.locator('[name=synthetic]').check()
++            page.locator('#ob-run').click()
++            expect(page.locator('#ob-results-tab')).to_have_attribute('aria-selected','true')
++            expect(page.locator('#ob-jobs').get_by_role('button',name='Open result')).to_have_count(1,timeout=30000)
++            page.locator('#ob-jobs').get_by_role('button',name='Open result').click()
++            expect(page.locator('#ob-result-label')).to_contain_text('SYNTHETIC')
++            expect(page.locator('#ob-comparison')).to_contain_text('Diagnostics only')
++            expect(page.locator('#ob-result-bids tr')).to_have_count(5)
++            page.locator('#ob-result-scrub').fill('30')
++            expect(page.locator('#ob-result-frame')).to_contain_text('recorded, not live')
++            page.locator('#ob-recordings-tab').click()
++            for sid in ids:page.locator(f'#ob-sessions input[value="{sid}"]').check()
++            page.locator('#ob-mode').select_option('compare')
++            for part,v in [('train',days[:2]),('validation',days[2:3]),('test',days[3:])]:
++                page.locator('#ob-partitions [name='+part+']').fill(', '.join(v))
++            # Invalid overlapping dates are rejected before any mutation.
++            page.locator('#ob-partitions [name=test]').fill(days[0]);count=len(calls)
++            page.locator('#ob-run').click();expect(page.locator('#ob-notice')).to_contain_text('unique and chronological')
++            ck(not any(method=='POST' and path=='/api/depth/research/jobs' for method,path,body in calls[count:]))
++            page.locator('#ob-partitions [name=test]').fill(days[-1])
++            # Watch polling remains on while fitting: it must not starve job polling.
++            page.locator('#ob-watch').check()
++            page.locator('#ob-run').click()
++            comparison=page.locator('#ob-jobs .ob-job').filter(has_text='Model comparison')
++            expect(comparison.get_by_role('button',name='Open result')).to_have_count(1,timeout=30000)
++            comparison.get_by_role('button',name='Open result').click()
++            expect(page.locator('#ob-comparison table tr')).to_have_count(8)
++            expect(page.locator('#ob-comparison')).to_contain_text('knn_depth')
++            expect(page.locator('#ob-result-config')).to_contain_text('horizon 30s')
++            expect(page.locator('#ob-result-session option')).to_have_count(4)
++            page.locator('#orderbook').screenshot(path=str(shots/'orderbook-research-synthetic-desktop.png'))
++            with page.expect_download() as download:page.locator('#ob-download').click()
++            output=root/'result.json';download.value.save_as(output);result=json.loads(output.read_text())
++            ck(result['evaluation']['split']==dict(train=days[:2],validation=days[2:3],test=days[3:]))
++            ck(helper.TOKEN not in output.read_text())
++            ck(result['source']=='synthetic')
++            page.set_viewport_size({'width':390,'height':844})
++            ck(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
++            page.locator('#orderbook').screenshot(path=str(shots/'orderbook-research-synthetic-mobile.png'))
++            page.set_viewport_size({'width':1480,'height':1060})
++            ck(not any(path in ('/api/broker/connect','/api/depth/subscribe','/api/depth/unsubscribe','/ib/send') for _,path,_ in calls))
++            page.locator('#forget').click();expect(page.locator('#ob-result')).to_be_hidden()
++            expect(page.locator('#ob-refresh')).to_be_disabled();ck(page.locator('#ob-result-bids').inner_text()=='')
++            ck(page.locator('#ob-result-evaluation').inner_text()=='')
++            page.locator('#token').fill(helper.TOKEN);page.locator('#unlock').click()
++            expect(page.locator('#ob-refresh')).to_be_enabled();page.locator('#ob-refresh').click()
++            expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')
++            page.locator('#ob-results-tab').click();expect(page.locator('#ob-jobs .ob-job')).to_have_count(2)
++            comparison=page.locator('#ob-jobs .ob-job').filter(has_text='Model comparison')
++            comparison.get_by_role('button',name='Open result').click()
++            expect(page.locator('#ob-comparison table tr')).to_have_count(8)
++            ck(page.evaluate('localStorage.length===0 && sessionStorage.length===0'))
++            ck(not errors);ck(not external)
++            # Separate mock-protocol test for live controls: no actual native feed.
++            state={'active':False,'seq':0,'stale':False,'source':'mock','fail_start':False}
++            native_routes=[]
++            def live_route(route):
++                req=route.request;path=urlparse(req.url).path;native_routes.append((req.method,path))
++                if path=='/api/dashboard':
++                    data=server.call(path)[1];data['broker'].update(mode='mock',state='ready',simulation=True,enabled=True)
++                elif path=='/api/contracts/resolve':data={'request_id':17}
++                elif path=='/api/contracts/requests/17':data={'status':'complete','contracts':[dict(contract_id=9001,symbol='SYNTHETIC',security_type='STK',currency='USD',exchange='BATS',multiplier=1)]}
++                elif path=='/api/depth/subscribe':
++                    if state['fail_start']:route.abort();return
++                    state['active']=True;data={'request_id':'23'}
++                elif path=='/api/depth/unsubscribe':state['active']=False;data={'cancelled':True}
++                else:
++                    state['seq']+=1
++                    data=dict(schema_version=1,kind='displayed_depth',complete_exchange_book=False,individual_orders=False,
++                        direct_depth_only=True,time_basis='local_callback_receipt',exchange_timestamp=None,
++                        source=state['source'],synthetic=state['source']=='mock',available=state['active'],book=None)
++                    if state['active']:
++                        data.update(request_id='23',contract_id='9001',venue='BATS',requested_rows=10,active=True,
++                            structural_valid=True,quality='two_sided_unverified',sequence=str(state['seq']),epoch='1',
++                            last_receipt_unix_us=str(1700000000000000+state['seq']*1000),last_event_age_ms=6000 if state['stale'] else 0,
++                            book=dict(bids=[dict(price=99.99-i*.01,size=str(200+50*i),market_maker='') for i in range(10)],
++                                      asks=[dict(price=100.01+i*.01,size=str(150+60*i),market_maker='') for i in range(10)]))
++                route.fulfill(status=200,content_type='application/json',body=json.dumps(data))
++            for route in ('**/api/dashboard','**/api/contracts/**','**/api/depth/current','**/api/depth/subscribe','**/api/depth/unsubscribe'):page.route(route,live_route)
++            page.locator('#refresh').click();expect(page.locator('#broker-status')).to_have_text('Ready')
++            page.locator('#ob-refresh').click();expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')
++            page.locator('#ob-live-tab').click();page.locator('#ob-symbol').fill('SYNTHETIC')
++            page.locator('#ob-resolve').click()
++            expect(page.locator('#ob-candidates button')).to_have_count(1,timeout=8000)
++            ck(not any(path=='/api/depth/subscribe' for _,path in native_routes))
++            page.locator('#ob-candidates button').click();expect(page.locator('#ob-start')).to_be_enabled()
++            page.locator('#ob-start').click();expect(page.locator('#ob-bids tr')).to_have_count(10)
++            expect(page.locator('#ob-source')).to_have_text('SYNTHETIC MOCK')
++            expect(page.locator('#ob-start')).to_be_disabled()
++            page.wait_for_timeout(1800);ck('Advancing native' not in page.locator('#ob-quality').inner_text())
++            page.locator('#orderbook').screenshot(path=str(shots/'orderbook-live-synthetic-desktop.png'))
++            page.set_viewport_size({'width':390,'height':844});ck(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
++            page.locator('#orderbook').screenshot(path=str(shots/'orderbook-live-synthetic-mobile.png'))
++            page.set_viewport_size({'width':1480,'height':1060})
++            state['stale']=True;expect(page.locator('#ob-quality')).to_contain_text('Stale',timeout=8000)
++            expect(page.locator('#ob-midpoint')).to_have_text('—')
++            state['stale']=False
++            page.locator('#ob-watch').uncheck();count=len(native_routes);page.wait_for_timeout(1200)
++            ck(not any(path=='/api/depth/unsubscribe' for _,path in native_routes[count:]))
++            page.locator('#ob-stop').click();expect(page.locator('#ob-stop')).to_be_disabled()
++            ck(any(path=='/api/depth/unsubscribe' for _,path in native_routes))
++            # A lost POST acknowledgement must block retries until explicit reconciliation.
++            state['fail_start']=True;page.locator('#ob-start').click()
++            expect(page.locator('#ob-notice')).to_contain_text('refresh to reconcile')
++            expect(page.locator('#ob-start')).to_be_disabled()
++            ck(sum(path=='/api/depth/subscribe' for _,path in native_routes)==2)
++            state['fail_start']=False;page.locator('#ob-refresh').click();expect(page.locator('#ob-start')).to_be_enabled()
++            page.locator('#forget').click();expect(page.locator('#ob-refresh')).to_be_disabled()
++            ck(page.locator('#ob-bids').inner_text()=='No usable displayed rows')
++            ck(not errors);ck(not external)
++            browser.close()
++    print(f'{checks} browser acceptance assertions passed, plus Playwright expectations; synthetic only')
++
++
++if __name__=='__main__':main(sys.argv[1])
+diff --git a/tests/workspace/helpers.py b/tests/workspace/helpers.py
+new file mode 100644
+index 0000000..9b3c671
+--- /dev/null
++++ b/tests/workspace/helpers.py
+@@ -0,0 +1,62 @@
++"""Disposable synthetic archives only. Never call these helpers on user data."""
++from pathlib import Path
++from contextlib import closing
++import sqlite3
++import sys
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path[:0] = [str(ROOT/'tools'), str(ROOT/'research/liquidity_aware_hedging')]
++from liquidity_baselines import synthetic_sessions
++
++
++def request(ids=('1',), mode='inspect', split=None, source='mock'):
++    return dict(schema_version=1, mode=mode, session_ids=list(ids), source=source, split=split,
++                configuration=dict(quantity=100., levels=5, step_seconds=1, horizon_seconds=30,
++                    lookback_seconds=30, max_side_age_seconds=5., target='buy_cost_bps'))
++
++
++def seed(database, days=4, seconds=120):
++    """Seed the production depth schema (or an already initialized test archive)."""
++    data = synthetic_sessions(days=days, seconds=seconds)
++    database = Path(database); database.parent.mkdir(parents=True, exist_ok=True)
++    with closing(sqlite3.connect(database)) as db, db:
++        if not db.execute("SELECT name FROM sqlite_master WHERE name='depth_sessions'").fetchone():
++            schema = (ROOT/'src/backend/cpp_src/storage/include/dts/depth_schema.hpp').read_text().split('R"SQL(')[1].split(')SQL"')[0]
++            db.execute('CREATE TABLE runs(run_id INTEGER PRIMARY KEY)')
++            db.execute('INSERT INTO runs VALUES(1)')
++            db.executescript(schema)
++        run_id = db.execute('SELECT run_id FROM runs LIMIT 1').fetchone()[0]
++        ids=[]
++        for p in data:
++            s=p['session']; events=p['events']
++            sid=db.execute('''INSERT INTO depth_sessions(run_id,source,native_id,contract_id,symbol,currency,
++                   contract_route,venue,requested_rows,smart_depth,started_ms,ended_ms,state,last_sequence,event_count)
++                   VALUES(?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)''',
++                (run_id,'mock','workspace-fixture-'+s['session_id'],s['contract_id'],s['symbol'],'USD',
++                 s['contract_route'],s['venue'],s['requested_rows'],int(events[0]['received_unix_us'])//1000,
++                 int(events[-1]['received_unix_us'])//1000,s['state'],int(s['last_sequence']),len(events))).lastrowid
++            ids.append(str(sid))
++            db.executemany('''INSERT INTO depth_events(session_id,local_sequence,kind,origin,received_unix_us,
++               received_monotonic_ns,operation,side,position,price,price_repr,size,market_maker,smart_depth,code)
++               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
++               [(sid,int(e['sequence']),e['kind'],e['origin'],int(e['received_unix_us']),int(e['received_monotonic_ns']),
++                 e['operation'],e['side'],e['position'],e['price'],e['price_repr'],e['size'],e['market_maker'],e['smart_depth'],e['code']) for e in events])
++    return ids
++
++
++def frozen_test_inputs(job, req, payloads=None):
++    """Emulate the C++ snapshot protocol with synthetic files, never user data."""
++    import copy
++    import hashlib
++    import orderbook_workspace_worker as worker
++    payloads = payloads if payloads is not None else synthetic_sessions(days=4, seconds=120)
++    sources = []
++    for sid in req['session_ids']:
++        p = copy.deepcopy(payloads[int(sid) - 1])
++        p['session']['session_id'] = sid
++        p.pop('sha256', None)
++        name = 'capture-' + sid + '.json'
++        worker.write_json(job / name, p, 80_000_000)
++        sources.append(dict(file=name, sha256=hashlib.sha256((job/name).read_bytes()).hexdigest()))
++    worker.write_json(job / 'inputs.json', dict(schema_version=1, exports=sources), 16384)
++    return payloads
+ diff --git a/tests/workspace/http_tests.py b/tests/workspace/http_tests.py
+new file mode 100644
+index 0000000..b8b6b78
+--- /dev/null
++++ b/tests/workspace/http_tests.py
+@@ -0,0 +1,172 @@
++"""Actual C++ HTTP -> frozen recorder snapshot -> isolated worker. Synthetic only."""
++from __future__ import annotations
++from contextlib import closing
++from datetime import datetime, timezone
++import importlib.util
++import json
++import os
++from pathlib import Path
++import sqlite3
++import sys
++import tempfile
++import time
++
++from helpers import ROOT, seed, request
++_spec=importlib.util.spec_from_file_location('storage_http',ROOT/'tests/storage/http_tests.py')
++helper=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(helper)
++Server=helper.Server
++from depth_capture import export_session
++import orderbook_workspace_worker as worker
++
++BASE='/api/depth/research'
++
++
++def wait(server,jid,timeout=25):
++    deadline=time.monotonic()+timeout
++    while time.monotonic()<deadline:
++        code,result=server.call(BASE+'/jobs/'+jid)
++        assert code==200,(code,result)
++        if result['state']!='running':return result
++        time.sleep(.05)
++    raise AssertionError('Research job did not finish within test deadline')
++
++
++def fixture(exe,root,days=4,seconds=120):
++    # The production archive is EXCLUSIVELY locked. Seed test data only after
++    # clean shutdown; never weaken the recorder's locking mode for this workflow.
++    with Server(exe,root,DTS_RESEARCH_PYTHON=''):pass
++    db=root/'data/timeseries.sqlite3'
++    ids=seed(db,days=days,seconds=seconds)
++    with closing(sqlite3.connect(db)) as con:
++        rows=con.execute('SELECT session_id,started_ms FROM depth_sessions ORDER BY session_id').fetchall()
++        dates=[datetime.fromtimestamp(ms/1000,timezone.utc).date().isoformat() for _,ms in rows]
++        before=con.execute('SELECT count(*),sum(local_sequence) FROM depth_events').fetchone()
++    return ids,dates,before
++
++
++class Client:
++    def __init__(self,server):self.s=server
++    def call(self,path,body):
++        code,value=self.s.call(path,body);assert code==200;return value
++
++
++def main(exe):
++    checks=0
++    def ck(value):
++        nonlocal checks
++        assert value
++        checks+=1
++    with tempfile.TemporaryDirectory() as t:
++        root=Path(t);ids,days,before=fixture(exe,root)
++        partitions=dict(train=days[:2],validation=days[2:3],test=days[3:])
++        with Server(exe,root,DTS_RESEARCH_PYTHON=sys.executable,SHOULD_NOT_REACH_WORKER='sentinel-private-value') as s:
++            for path,body in [(BASE+'/status',None),(BASE+'/jobs',None),(BASE+'/jobs',request()),
++                              (BASE+'/jobs/'+'a'*32,None),(BASE+'/jobs/'+'a'*32+'/result',None),
++                              (BASE+'/jobs/'+'a'*32+'/cancel',{})]:
++                ck(s.call(path,body,auth=False)[0]==401)
++                ck(s.call(path,body,Origin='https://untrusted.invalid')[0]==403)
++                ck(s.call(path,body,Host='evil.invalid')[0]==403)
++            ck(s.call(BASE+'/status')[1]['enabled'])
++            ck(s.call(BASE+'/jobs')[1]['jobs']==[])
++            for payload in ({},{**request(),'command':'touch /tmp/no'},request(['../1']),request(['1','1']),
++                            request(source='ibkr_tws'),request(mode='compare')):
++                ck(s.call(BASE+'/jobs',payload)[0]==400)
++            ck(s.call(BASE+'/jobs',request(['999']))[0]==404)
++            ck(not s.call(BASE+'/status')[1]['busy'])
++            reference={sid:export_session(Client(s),sid) for sid in ids}
++            # Recorder remains locked against independent SQLite readers.
++            with closing(sqlite3.connect(root/'data/timeseries.sqlite3',timeout=.05)) as con:
++                try:con.execute('SELECT count(*) FROM depth_events');raise AssertionError('Exclusive recording policy changed')
++                except sqlite3.OperationalError:checks+=1
++            code,job=s.call(BASE+'/jobs',request([ids[0]]));ck(code==200);jid=job['job_id']
++            ck(s.call(BASE+'/jobs',request([ids[0]]))[0]==429)
++            ck(s.call(BASE+'/jobs/'+jid+'/result')[0]==409)
++            ended=wait(s,jid);assert ended['state']=='complete',ended;checks+=1
++            jobdir=root/'data/orderbook-research'/jid
++            actual=worker.load_snapshots(jobdir,request([ids[0]]))
++            ck(actual[0]==reference[ids[0]])
++            ck(jobdir.stat().st_mode & 0o777 == 0o700)
++            ck(all(p.stat().st_mode & 0o777 == 0o600 for p in jobdir.glob('*.json')))
++            result=s.call(BASE+'/jobs/'+jid+'/result')[1]
++            ck(result['kind']=='orderbook_workspace_result' and result['source']=='synthetic')
++            ck(result['liquidity']['status']=='diagnostics_only')
++            ck(s.call(BASE+'/jobs/'+jid+'/cancel',{})[1]['cancel_requested'] is False)
++            ck(helper.TOKEN not in json.dumps(result))
++            ck('sentinel-private-value' not in json.dumps(result))
++            code,job=s.call(BASE+'/jobs',request(ids,mode='compare',split=partitions));ck(code==200)
++            model_id=job['job_id'];ended=wait(s,model_id);assert ended['state']=='complete',ended;checks+=1
++            actual=worker.load_snapshots(root/'data/orderbook-research'/model_id,request(ids,mode='compare',split=partitions))
++            for sid,p in zip(ids,actual):ck(reference[sid]==p)
++            result=s.call(BASE+'/jobs/'+model_id+'/result')[1]
++            ck(result['liquidity']['status']=='evaluated')
++            ck(result['evaluation']['split']==partitions)
++            ck(len(result['liquidity']['models'])==7)
++            ck(s.call('/health')[0]==200)
++            # Explicit cancellation during preparation. It is NOT a capture stop.
++            job=s.call(BASE+'/jobs',request(ids,mode='compare',split=partitions))[1]
++            ck(s.call(BASE+'/jobs/'+job['job_id']+'/cancel',{})[1]['cancel_requested'])
++            ck(wait(s,job['job_id'])['state']=='cancelled')
++            ck(s.call(BASE+'/jobs/'+job['job_id']+'/result')[0]==409)
++            ck(s.call('/api/depth/sessions',{})[1]['rows'][0]['state']=='stop')
++            # Wait until a new worker actually exists before testing credential isolation.
++            job=s.call(BASE+'/jobs',request(ids,mode='compare',split=partitions))[1]
++            deadline=time.monotonic()+10;observed_child=False
++            while time.monotonic()<deadline:
++                children=[]
++                for proc in Path('/proc').glob('[0-9]*'):
++                    try:
++                        status=(proc/'status').read_text()
++                        if f'PPid:\t{s.process.pid}\n' in status:children.append(proc.name)
++                    except FileNotFoundError:pass
++                for pid in children:
++                    try:
++                        cmd=Path(f'/proc/{pid}/cmdline').read_bytes()
++                        if b'orderbook_workspace_worker' not in cmd:continue
++                        env=Path(f'/proc/{pid}/environ').read_bytes()
++                        ck(b'SHOULD_NOT_REACH_WORKER' not in env and helper.TOKEN.encode() not in env)
++                        fds=[]
++                        for fd in Path(f'/proc/{pid}/fd').iterdir():
++                            try:fds.append(os.readlink(fd))
++                            except FileNotFoundError:pass
++                        ck(not any('recorder.lock' in f or 'timeseries.sqlite' in f or f.startswith('socket:') for f in fds))
++                        observed_child=True
++                    except FileNotFoundError:pass
++                if observed_child:break
++                time.sleep(.01)
++            ck(observed_child)
++            ck(s.call(BASE+'/jobs/'+job['job_id']+'/cancel',{})[1]['cancel_requested'])
++            ck(wait(s,job['job_id'])['state']=='cancelled')
++            # Completed result bytes must match the separately stored hash.
++            path=jobdir/'result.json';original=path.read_bytes()
++            path.write_bytes(original+b' ');ck(s.call(BASE+'/jobs/'+jid+'/result')[0]==503);path.write_bytes(original)
++            ck(s.call(BASE+'/jobs/'+jid+'/result')[0]==200)
++            for sid in ids:ck(export_session(Client(s),sid)==reference[sid])
++            # Running work is marked interrupted on crash/restart, never rerun.
++            job=s.call(BASE+'/jobs',request(ids,mode='compare',split=partitions))[1];interrupted=job['job_id']
++            s.process.kill();s.process.wait(timeout=5)
++        with Server(exe,root,DTS_RESEARCH_PYTHON=sys.executable) as s:
++            ck(s.call(BASE+'/jobs/'+model_id)[1]['state']=='complete')
++            ck(s.call(BASE+'/jobs/'+model_id+'/result')[1]['evaluation']['split']==partitions)
++            ck(s.call(BASE+'/jobs/'+interrupted)[1]['state']=='interrupted')
++            ck(not s.call(BASE+'/status')[1]['busy'])
++        with closing(sqlite3.connect(root/'data/timeseries.sqlite3')) as con:
++            ck(con.execute('PRAGMA user_version').fetchone()[0]==6)
++            ck(con.execute('SELECT count(*),sum(local_sequence) FROM depth_events').fetchone()==before)
++    with tempfile.TemporaryDirectory() as t:
++        root=Path(t);ids,days,_=fixture(exe,root,days=6,seconds=1200)
++        with Server(exe,root,DTS_RESEARCH_PYTHON=sys.executable,DTS_RESEARCH_TIMEOUT_SECONDS='1') as s:
++            r=request(ids,mode='compare',split=dict(train=days[:4],validation=days[4:5],test=days[5:]))
++            started=time.monotonic();code,job=s.call(BASE+'/jobs',r);ck(code==200)
++            ck(s.call('/health')[0]==200);ck(time.monotonic()-started<2)
++            ended=wait(s,job['job_id']);assert ended['state']=='timeout',ended;checks+=1
++            ck(not s.call(BASE+'/status')[1]['busy'])
++    with tempfile.TemporaryDirectory() as t:
++        root=Path(t);fixture(exe,root)
++        with Server(exe,root,DTS_RESEARCH_PYTHON='') as s:
++            ck(not s.call(BASE+'/status')[1]['enabled'])
++            ck(s.call(BASE+'/jobs',request())[0]==409)
++            ck(len(s.call('/api/depth/sessions',{})[1]['rows'])==4)
++    print(f'{checks} real HTTP/frozen-snapshot/worker/lifecycle checks passed (synthetic captures only)')
++
++
++if __name__=='__main__':main(sys.argv[1])
