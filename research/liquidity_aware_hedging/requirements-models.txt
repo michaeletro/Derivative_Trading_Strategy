@@ -1,0 +1,5 @@
+# Offline analytical CLI/test dependencies, independently usable without Jupyter or IBKR.
+# Validated here with Python 3.13, NumPy 2.3.5, SciPy 1.17.0.
+numpy==2.3.5
+pandas==2.2.3
+scipy==1.17.0
