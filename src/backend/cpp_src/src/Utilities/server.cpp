@@ -12,6 +12,7 @@ namespace asio = boost::asio;
 #include "research_json.hpp"
 #include "experiments_json.hpp"
 #include "depth_json.hpp"
+#include "orderbook_jobs.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
 #include <dts/mock_broker.hpp>
@@ -201,7 +202,9 @@ public:
     Application() : mode_(env("DTS_BROKER", "none")), token_(env("DTS_API_TOKEN")),
         port_(integer(env("HTTP_PORT", "8080"), 1024, 65535)),
         store_(dts::storage::Config::from_environment(), mode_),
-        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()), history_(store_) {
+        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()), history_(store_),
+        orderbook_jobs_(store_, env("DTS_RESEARCH_PYTHON"), DTS_ORDERBOOK_WORKER_PATH,
+            integer(env("DTS_RESEARCH_TIMEOUT_SECONDS", "180"), 1, 300)) {
         if (env("ENABLE_IB_WS", "false") != "false" && env("ENABLE_IB_WS") != "0")
             throw std::invalid_argument("Client Portal relay is retired; configure DTS_BROKER instead");
         if (env("DB_FAIL_FAST", "false") == "true" && !assets_.available())
@@ -256,6 +259,7 @@ private:
     AssetRepository assets_;
     dts::ReadOnlyService broker_;
     dts::storage::HistoricalManager history_;
+    dts::orderbook_jobs::Manager orderbook_jobs_;
     // Non-secret instance identifier prevents charts joining observations across restarts.
     const std::string instance_ = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     std::mutex broker_mutex_, database_mutex_, pricing_mutex_;
@@ -280,6 +284,7 @@ private:
 #endif
     }
     void stop() noexcept {
+        orderbook_jobs_.shutdown();
         { std::lock_guard<std::mutex> lock(broker_mutex_); stopping_ = true; }
         wake_.notify_all();
         if (worker_.joinable()) worker_.join();
@@ -385,6 +390,24 @@ private:
     }
     void routes() {
         auth_routes();
+        CROW_ROUTE(app_, "/api/depth/research/status")([this](const crow::request& req) {
+            return guarded(req, [&] { return orderbook_jobs_.status(); });
+        });
+        CROW_ROUTE(app_, "/api/depth/research/jobs").methods(crow::HTTPMethod::GET, crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                if (req.method == crow::HTTPMethod::POST) return orderbook_jobs_.submit(object(req), store_);
+                return orderbook_jobs_.list();
+            });
+        });
+        CROW_ROUTE(app_, "/api/depth/research/jobs/<string>")([this](const crow::request& req, const std::string& id) {
+            return guarded(req, [&] { return orderbook_jobs_.get(id); });
+        });
+        CROW_ROUTE(app_, "/api/depth/research/jobs/<string>/result")([this](const crow::request& req, const std::string& id) {
+            return guarded(req, [&] { return orderbook_jobs_.result(id); });
+        });
+        CROW_ROUTE(app_, "/api/depth/research/jobs/<string>/cancel").methods(crow::HTTPMethod::POST)([this](const crow::request& req, const std::string& id) {
+            return guarded(req, [&] { dts::history_http::fields(object(req), {}); return orderbook_jobs_.cancel(id); });
+        });
         CROW_ROUTE(app_, "/api/hedging/run").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto request=dts::hedging_http::parse(object(req));
                 std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);

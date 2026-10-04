@@ -14,7 +14,7 @@ TOKEN = 'dashboard-test-fixture-token-not-a-credential'
 CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; worker-src 'none'"
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
-        assets = {'/': 'index.html', '/dashboard/': 'index.html', '/dashboard/index.html': 'index.html',
+        assets = {'/dashboard/orderbook.mjs': 'orderbook.mjs', '/dashboard/orderbook-model.mjs': 'orderbook-model.mjs', '/dashboard/orderbook.css': 'orderbook.css', '/': 'index.html', '/dashboard/': 'index.html', '/dashboard/index.html': 'index.html',
                   '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/local-signin.mjs':'local-signin.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css', '/dashboard/storage.mjs': 'storage.mjs', '/dashboard/storage-model.mjs': 'storage-model.mjs', '/dashboard/history.mjs': 'history.mjs', '/dashboard/history-model.mjs': 'history-model.mjs', '/dashboard/history.css': 'history.css', '/dashboard/replay.mjs': 'replay.mjs', '/dashboard/replay-model.mjs': 'replay-model.mjs', '/dashboard/replay.css': 'replay.css', '/dashboard/sde.mjs': 'sde.mjs', '/dashboard/sde-model.mjs': 'sde-model.mjs', '/dashboard/sde.css': 'sde.css', '/dashboard/hedging.mjs': 'hedging.mjs', '/dashboard/hedging-model.mjs': 'hedging-model.mjs', '/dashboard/hedging.css': 'hedging.css'}
         name = assets.get(urlparse(self.path).path)
         if not name:
