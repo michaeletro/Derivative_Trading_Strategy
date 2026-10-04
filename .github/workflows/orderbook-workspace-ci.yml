@@ -1,0 +1,21 @@
+name: Order-book workspace
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  source-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked development source only
+        run: |
+          git archive --format=tar.gz -o "$RUNNER_TEMP/workspace-source.tar.gz" HEAD CMakeLists.txt cmake apps src/backend/cpp_src src/frontend/dashboard src/frontend/package.json tools research/liquidity_aware_hedging tests docs requirements-dev.txt README.md .github/workflows .gitignore LICENSE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-source
+          path: ${{ runner.temp }}/workspace-source.tar.gz
+          retention-days: 3
