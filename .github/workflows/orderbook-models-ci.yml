@@ -1,0 +1,41 @@
+name: Order-book analysis and model lab
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  model-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline analytical dependencies
+        run: |
+          python -m pip install -r research/liquidity_aware_hedging/requirements-models.txt
+          python -m pip install nbformat==5.10.4 nbclient==0.10.4 ipykernel==7.2.0
+      - name: Established learning tests and new analytical tests
+        run: |
+          python -m unittest discover -s tests/liquidity -p 'test_*.py' -v
+          python -m unittest discover -s tests/orderbook -p 'test_*.py' -v
+          python -m compileall -q tools/orderbook_lab.py research/liquidity_aware_hedging/orderbook
+      - name: Synthetic reports and output-free notebook execution
+        run: |
+          python tools/orderbook_lab.py demo --quantity 200 --output "$RUNNER_TEMP/book-demo"
+          python tools/orderbook_lab.py hedge-demo --output "$RUNNER_TEMP/hedge-demo"
+          python tests/orderbook/notebook_smoke.py --output "$RUNNER_TEMP/orderbook-synthetic.executed.ipynb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orderbook-lab-synthetic
+          path: |
+            ${{ runner.temp }}/book-demo/report.html
+            ${{ runner.temp }}/hedge-demo/report.html
+            ${{ runner.temp }}/orderbook-synthetic.executed.ipynb
+          retention-days: 7
