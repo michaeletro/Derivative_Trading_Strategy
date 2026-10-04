@@ -50,6 +50,9 @@ def prepare(args):
             if line.startswith('CMAKE_HOME_DIRECTORY:INTERNAL=') and Path(line.split('=',1)[1]).resolve()!=ROOT:
                 raise ValueError('This build directory belongs to another checkout; choose --build-dir with a different path')
     env=dict(os.environ,HTTP_PORT=str(args.port),DTS_BROKER='tws' if args.mode=='tws' else 'none',ENABLE_IB_WS='false')
+    # Preserve the virtual-environment path (resolving a symlink loses its site-packages).
+    # The server passes a sanitized environment to this fixed offline worker.
+    env['DTS_RESEARCH_PYTHON'] = str(Path(sys.executable).absolute())
     if args.profile:
         # Explicit profile is authoritative over stale shell exports. CLI overrides profile paths/mode/HTTP port.
         for field,key in ENV_KEYS.items():

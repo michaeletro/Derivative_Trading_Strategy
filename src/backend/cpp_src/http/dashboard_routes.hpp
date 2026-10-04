@@ -27,6 +27,9 @@ inline void mount(crow::SimpleApp& app, int port) {
     // Registering both explicitly makes startup fail with a duplicate handler.
     CROW_ROUTE(app, "/dashboard/")([serve](const crow::request& req) { return serve(req, assets::index_html, "text/html; charset=utf-8"); });
     CROW_ROUTE(app, "/dashboard/<string>")([serve](const crow::request& req, const std::string& name) {
+        if (name == "orderbook.mjs") return serve(req, assets::orderbook_mjs, "text/javascript; charset=utf-8");
+        if (name == "orderbook-model.mjs") return serve(req, assets::orderbook_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "orderbook.css") return serve(req, assets::orderbook_css, "text/css; charset=utf-8");
         if (name == "index.html") return serve(req, assets::index_html, "text/html; charset=utf-8");
         if (name == "dashboard.css") return serve(req, assets::dashboard_css, "text/css; charset=utf-8");
         if (name == "local-signin.mjs") return serve(req, assets::local_signin_mjs, "text/javascript; charset=utf-8");

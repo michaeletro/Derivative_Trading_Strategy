@@ -1,3 +1,16 @@
+## Integrated Order Book & Research workspace
+
+Read [the current workspace runbook](docs/orderbook-workspace.md). The existing
+browser dashboard now includes explicit direct-depth controls, a stopped-recording
+browser, and offline diagnostics/model-comparison jobs backed by the existing
+Python research modules. Open `/#orderbook` after launching from the model-enabled
+virtual environment. Current local profiles and the schema-6 archive are reused.
+
+Research jobs freeze completed captures through the recorder's sole connection;
+a separate bounded worker fits models without broker credentials or archive writes.
+This adds no live forecast service, execution, subscription purchase, or claim of
+actual BZX/IEX acceptance. The runbook below describes previous increments.
+
 ## AMS 518 / AMS 520 displayed-depth foundation (0.11.0)
 
 Read [the joint proposal](research/liquidity_aware_hedging/proposal.md) and
