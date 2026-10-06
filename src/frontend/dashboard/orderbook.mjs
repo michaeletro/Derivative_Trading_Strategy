@@ -68,6 +68,7 @@ export function mountOrderbook(api,onAccessError) {
     if($('collection-refresh'))$('collection-refresh').disabled=!unlocked||busy;
     $('ob-more').disabled=!unlocked||busy||!hasMore;
     $('ob-jobs-refresh').disabled=!unlocked||busy;
+    for(const button of $('ob-jobs').querySelectorAll('button'))button.disabled=!unlocked||busy;
     $('ob-research-fields').disabled=!unlocked||busy||!loaded||needsReconcile||!capability?.enabled||!!capability?.busy;
     $('ob-run').disabled=!selectedIds.size;
     for(const el of $('ob-sessions').querySelectorAll('input')) el.disabled=!unlocked||busy||!terminal(sessions.find(s=>s.session_id===el.value)?.state);
@@ -311,10 +312,10 @@ export function mountOrderbook(api,onAccessError) {
         if(/clock|monotonic/i.test(j.error)&&j.mode!=='describe')info.append(make('p','Timing checks blocked this run. Choose Describe depth, slope & distributions in Recordings & models to study event-ordered book characteristics with the clock warning retained.','ob-recorder-warning'));
       }
       card.append(info);
-      if(j.state==='complete'){const b=make('button','Open result','secondary');b.disabled=!unlocked;b.addEventListener('click',()=>work(async rev=>{
+      if(j.state==='complete'){const b=make('button','Open result','secondary');b.disabled=!unlocked||busy;b.addEventListener('click',()=>work(async rev=>{
         result=parseResult(await read(`/api/depth/research/jobs/${j.job_id}/result`,'GET',undefined,rev));resultJob=j.job_id;renderResult();tab('results');
       }));card.append(b);}
-      if(j.state==='running'){const b=make('button','Cancel research','secondary');b.disabled=!unlocked;b.addEventListener('click',()=>{
+      if(j.state==='running'){const b=make('button','Cancel research','secondary');b.disabled=!unlocked||busy;b.addEventListener('click',()=>{
         if(!window.confirm('Cancel this offline research job? Recording and archived market data will remain unchanged.'))return;
         work(async rev=>{await read(`/api/depth/research/jobs/${j.job_id}/cancel`,'POST',{},rev);await loadJobs(rev);},true);
       });card.append(b);}
