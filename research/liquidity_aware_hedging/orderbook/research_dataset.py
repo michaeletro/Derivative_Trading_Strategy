@@ -26,6 +26,7 @@ import exchange_calendars as xcals
 from depth_replay import Book, TERMINAL
 from . import LabError, VERSION
 from .descriptive import ROOT, _integer, _levels
+from .proposal_features import MEASUREMENT_VERSION, proposal_shape
 
 MAX_SESSION_EVENTS = 10_000_000
 MAX_EVENTS = 20_000_000
@@ -44,6 +45,9 @@ class DatasetConfig:
     levels: int = 5
     return_seconds: int = 60
     max_side_age_seconds: float = 5.
+    preset: str = "legacy"
+    quantity_unit: str = "feed_reported"
+    shares_confirmed: bool = False
 
     def __post_init__(self):
         if type(self.levels) is not int or not 1 <= self.levels <= 5:
@@ -53,6 +57,12 @@ class DatasetConfig:
         age = self.max_side_age_seconds
         if type(age) not in (int, float) or not math.isfinite(age) or not 0 < age <= 60:
             raise LabError('Research side-age limit must be positive and at most 60 seconds')
+        if self.preset not in ('legacy', 'proposal_oct2026') or self.quantity_unit not in ('feed_reported', 'shares') or type(self.shares_confirmed) is not bool:
+            raise LabError('Invalid measurement preset or quantity-unit confirmation')
+        if self.preset == 'proposal_oct2026' and (self.levels != 5 or self.quantity_unit != 'shares' or not self.shares_confirmed):
+            raise LabError('Proposal measurements require five levels and explicit confirmation that source quantities are shares')
+        if self.preset == 'legacy' and (self.quantity_unit != 'feed_reported' or self.shares_confirmed):
+            raise LabError('Legacy measurements retain unconfirmed feed-reported units')
 
 
 @dataclass(frozen=True)
@@ -241,6 +251,10 @@ PAIR_FIELDS = ['session_id', 'session_date', 'origin_block_index', 'target_block
                'target_bpv', 'target_rv', 'target_positive_excess', 'target_first_hour', 'target_last_hour', 'pressure_model_eligible']
 
 
+PROPOSAL_FEATURE_FIELDS = ['slope_l5', 'bid_slope_l5', 'ask_slope_l5', 'near_two_of_five_share']
+PROPOSAL_BLOCK_FIELDS = [key + '_mean' for key in PROPOSAL_FEATURE_FIELDS] + ['qualified_duration_us', 'measurement_version', 'quantity_unit', 'weighting']
+PROPOSAL_PAIR_FIELDS = [key + '_mean' for key in PROPOSAL_FEATURE_FIELDS] + ['measurement_version', 'quantity_unit', 'weighting']
+
 def _private_output(output, create=True):
     path = Path(output).expanduser().absolute()
     resolved = path.resolve()
@@ -271,6 +285,11 @@ def _replay(source, audit, cfg, writers):
                          return_count=0, expected_returns=1800 // cfg.return_seconds,
                          rv=None, bpv=None, positive_excess=None, _midpoints={},
                          _sums=dict(depth=0., proportional_spread=0., near_depth_share=0., bid_depth=0., ask_depth=0.))
+            if cfg.preset == 'proposal_oct2026':
+                block['_sums'].update({key: 0. for key in PROPOSAL_FEATURE_FIELDS})
+                block['_weighted'] = {key: 0. for key in block['_sums']}
+                block['qualified_duration_us'] = 0
+                block.update(measurement_version=MEASUREMENT_VERSION, quantity_unit='shares', weighting='state_duration')
             blocks.append(block)
             lookup[(date, index)] = block
     starts = [block['start_unix_us'] for block in blocks]
@@ -282,6 +301,7 @@ def _replay(source, audit, cfg, writers):
     last_side = {0: None, 1: None}
     previous_sequence = 0
     previous_wall = first
+    duration_cursor = first
     previous_quote = previous_epoch = None
     quality_events, exclusions = Counter(), Counter()
     interval_ofi, interval_transitions = 0., 0
@@ -301,6 +321,7 @@ def _replay(source, audit, cfg, writers):
     def consume(event):
         nonlocal previous_sequence, previous_wall, previous_quote, previous_epoch, interval_ofi, interval_transitions
         wall, seq, kind = int(event['received_unix_us']), int(event['sequence']), event['kind']
+        integrate_duration(wall)
         contiguous = seq == previous_sequence + 1
         if not contiguous:
             mark_interval(previous_wall, wall, 'local_sequence_gap')
@@ -357,9 +378,41 @@ def _replay(source, audit, cfg, writers):
                       proportional_spread=(asks[0][0] - bids[0][0]) / mid,
                       near_depth_share=(bids[0][1] + asks[0][1]) / (bd + ad), best_depth=bids[0][1] + asks[0][1],
                       bid_age_seconds=(time - last_side[1]) / US, ask_age_seconds=(time - last_side[0]) / US)
+        if cfg.preset == 'proposal_oct2026':
+            try:
+                values.update(proposal_shape(bids, asks))
+            except LabError as error:
+                return None, str(error)
         if not all(math.isfinite(value) for value in values.values()):
             raise LabError('Research measurements exceed finite numeric precision')
         return values, ''
+
+    def integrate_duration(until):
+        # Advance before each callback mutates the book and at grid boundaries.
+        # Thus sub-second states retain their actual observed durations.
+        nonlocal duration_cursor
+        if cfg.preset != 'proposal_oct2026' or until <= duration_cursor:
+            return
+        start = duration_cursor
+        duration_cursor = until
+        values, reason = sample(start)
+        valid_end = start
+        if values is not None:
+            valid_end = min(until, last, min(last_side.values()) + round(cfg.max_side_age_seconds * US))
+        first_index = max(0, bisect_right(starts, start) - 1)
+        for block in blocks[first_index:]:
+            if block['start_unix_us'] >= until:
+                break
+            left, right = max(start, block['start_unix_us']), min(until, block['end_unix_us'])
+            if right <= left:
+                continue
+            accepted = max(0, min(right, valid_end) - left)
+            if accepted:
+                block['qualified_duration_us'] += accepted
+                for key in block['_weighted']:
+                    block['_weighted'][key] += values[key] * accepted
+            if accepted < right - left:
+                block['reasons'].add(reason or 'stale_side_duration')
 
     for date, opening, closing in days:
         active_blocks = [b for b in blocks if b['session_date'] == date]
@@ -382,6 +435,7 @@ def _replay(source, audit, cfg, writers):
                 interval_transitions = interval_depth_samples = 0
                 interval_bad.clear()
                 interval_bad.add('opening_endpoint')
+            integrate_duration(time)
             values, reason = sample(time)
             coverage['grid_points'] += 1
             if reason:
@@ -441,12 +495,17 @@ def _replay(source, audit, cfg, writers):
             block['reasons'].add('incomplete_state_grid')
         if not complete:
             block['reasons'].add('incomplete_return_grid')
+        if cfg.preset == 'proposal_oct2026' and block['qualified_duration_us'] != BLOCK_US:
+            block['reasons'].add('incomplete_state_duration')
         block['qualified'] = not block['reasons']
         if block['qualified']:
             block.update(block_variation(points))
             coverage['qualified_blocks'] += 1
         for key, total in block.pop('_sums').items():
             block[key + '_mean'] = total / block['feature_rows'] if block['feature_rows'] else None
+        if cfg.preset == 'proposal_oct2026':
+            for key, total in block.pop('_weighted').items():
+                block[key + '_mean'] = total / block['qualified_duration_us'] if block['qualified_duration_us'] else None
         del block['_midpoints']
         block['reasons'] = sorted(block['reasons'])
         writers['blocks'].write({**block, 'reasons': ';'.join(block['reasons']), 'qualified': int(block['qualified'])})
@@ -463,6 +522,8 @@ def _replay(source, audit, cfg, writers):
                     near_depth_share_mean=origin['near_depth_share_mean'], target_bpv=target['bpv'], target_rv=target['rv'],
                     target_positive_excess=target['positive_excess'], target_first_hour=int(target['block_index'] < 2),
                     target_last_hour=int(target['start_unix_us'] >= closing - 3600 * US), pressure_model_eligible=0)
+        if cfg.preset == 'proposal_oct2026':
+            pair.update({key: origin[key] for key in PROPOSAL_PAIR_FIELDS})
         pairs.append(pair)
         writers['pairs'].write(pair)
     coverage.update(forecast_pairs=len(pairs), trading_days=len({b['session_date'] for b in final_blocks if b['qualified']}))
@@ -491,8 +552,10 @@ def build_dataset(sources, cfg, output):
     if planned > MAX_GRID_POINTS:
         raise LabError('Research dataset exceeds one million one-second grid points; select fewer recordings')
     folder = _private_output(output)
+    proposal = cfg.preset == 'proposal_oct2026'
     writers = {name: _Csv(folder, name, fields, compress=name in ('features', 'minutes')) for name, fields in
-               [('features', FEATURE_FIELDS), ('minutes', MINUTE_FIELDS), ('blocks', BLOCK_FIELDS), ('pairs', PAIR_FIELDS)]}
+               [('features', FEATURE_FIELDS + (PROPOSAL_FEATURE_FIELDS if proposal else [])), ('minutes', MINUTE_FIELDS),
+                ('blocks', BLOCK_FIELDS + (PROPOSAL_BLOCK_FIELDS if proposal else [])), ('pairs', PAIR_FIELDS + (PROPOSAL_PAIR_FIELDS if proposal else []))]}
     sessions = []
     all_blocks, all_pairs = [], []
     qualified_keys = set()
@@ -532,10 +595,13 @@ def build_dataset(sources, cfg, output):
                    trading_days=len({b['session_date'] for b in all_blocks if b['qualified']}))
     overlaps = sum(max(left['first_unix_us'], right['first_unix_us']) < min(left['last_unix_us'], right['last_unix_us'])
                    for index, left in enumerate(audits) for right in audits[index + 1:])
-    paths = [Path(__file__), ROOT / 'research/liquidity_aware_hedging/depth_replay.py', Path(__file__).with_name('descriptive.py')]
+    paths = [Path(__file__), ROOT / 'research/liquidity_aware_hedging/depth_replay.py', Path(__file__).with_name('descriptive.py'), Path(__file__).with_name('proposal_features.py')]
     return dict(kind='orderbook_research_dataset', version=VERSION,
         source='synthetic' if sources[0].source == 'mock' else 'ibkr_tws', config={**asdict(cfg), 'state_seconds': 1, 'block_seconds': 1800,
-            'calendar': 'XNYS', 'clock_policy': 'strict_receipt', 'bpv_finite_sample_correction': True},
+            'calendar': 'XNYS', 'clock_policy': 'strict_receipt', 'bpv_finite_sample_correction': True,
+            'measurement_version': MEASUREMENT_VERSION if proposal else 'legacy_grid_v1',
+            'weighting': 'state_duration' if proposal else 'one_second_grid',
+            'quantity_confirmation': 'user_attested_shares_not_independently_verified' if proposal else 'unconfirmed_feed_reported'},
         code_hashes={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths},
         source_hashes=[s.entry['sha256'] for s in sources], sessions=sessions, artifacts=artifacts,
         dataset=dict(summary=summary, pressure_status='components_only_not_model_eligible',
@@ -543,12 +609,15 @@ def build_dataset(sources, cfg, output):
             warnings=['Selected recording windows overlap. Rows retain their recording identities; duplicated qualified blocks are rejected and recordings are never stitched.'] if overlaps else [],
             definitions={'depth': 'Total displayed size across the same fixed K distinct prices on each side, in feed-reported units.',
                 'proportional_spread': '(Best ask - best bid) / midpoint, a proportion rather than basis points.',
-                'near_depth_share': 'Two-sided best displayed size divided by fixed-K two-sided displayed size.',
+                'near_depth_share': 'Two-sided best displayed size divided by fixed-K two-sided displayed size; legacy best-level concentration, not the proposal top-two comparison.',
+                'slope_l5': 'Proposal equations 11--13: relative changes of logged cumulative shares divided by actual relative price changes; midpoint-anchored first term; five distinct levels per side. Available only in the explicitly confirmed proposal preset.',
+                'near_two_of_five_share': 'Two-sided displayed shares in the nearest two distinct levels divided by the nearest five; proposal preset only.',
                 'rv': 'Sum of squared log midpoint returns over one full 30-minute block.',
                 'bpv': 'pi/2 * M/(M-1) * sum of adjacent absolute log return products; M=30 for 60-second returns or 15 for 120-second returns.',
                 'positive_excess': 'max(RV - BPV, 0), a candidate-event diagnostic, not an identified jump or an exact decomposition.',
                 'forecast_pair': 'Qualified adjacent blocks in the same recording and XNYS date; origin features and BPV predict the next block target.'},
-            conventions=['State means weight one-second grid observations equally; callbacks never receive automatic extra weight.',
+            conventions=[('State means use exact observed-state durations clipped at recording, block, reset and side-age boundaries; one-second feature rows are a preview grid.' if proposal else 'State means weight one-second grid observations equally; callbacks never receive automatic extra weight.'),
+                'Quantity-unit confirmation is an explicit user attestation, not independent proof from the depth callback; preserve the source contract and unit evidence.',
                 'One-second features use [block start, block end); return endpoints include both boundaries. All required points must qualify.',
                 'State carry is allowed only within the recording, uninterrupted reconstruction, and the explicit age bound on both sides.',
                 'Known gaps, resets, invalid states and missing/stale/fewer-than-K grid observations disqualify affected blocks.',
@@ -568,10 +637,16 @@ def write_report(output, report):
     raw = json.dumps(report, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
     if len(raw.encode()) > 12_000_000:
         raise LabError('Research dataset audit exceeds its saved report bound')
+    experiment = report.get('experiment')
+    title = 'Proposal research experiment' if experiment else 'Research measurement dataset'
+    introduction = ('Matched chronological RV/BPV model comparison; inspect coverage, paired losses and measurement limits.'
+                    if experiment and experiment.get('status') == 'complete_exploratory' else
+                    'Experiment readiness checks did not permit fitted predictions; inspect the saved reasons.' if experiment else
+                    'Frozen measurements and adjacent-block pairs; no model has been fitted.')
     page = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; base-uri \'none\'">'
-            '<title>Research measurement dataset</title><style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:20px}pre{white-space:pre-wrap}</style>'
-            '<h1>Research measurement dataset</h1><p>Frozen measurements and adjacent-block pairs; no model has been fitted.</p><pre>'
+            '<title>' + title + '</title><style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:20px}pre{white-space:pre-wrap}</style>'
+            '<h1>' + title + '</h1><p>' + introduction + '</p><pre>'
             + html.escape(json.dumps(report, ensure_ascii=False, indent=2)) + '</pre></html>')
     if len(page.encode()) > 12_000_000:
         raise LabError('Research dataset readable report exceeds its saved output bound')

@@ -1,11 +1,35 @@
 # Dashboard priorities for the October 6 research proposal
 
-This is a development recommendation, not a claim that the proposed features
-already exist. It follows the author's October 6 literature-focused proposal
+This roadmap separates implemented measurement/experiment code from remaining
+collection, interface and empirical-validation work. Implementation status is
+recorded below; planned items are not claims of live availability or forecast gains. It follows the author's October 6 literature-focused proposal
 and presentation. The primary question is whether the specified five-level
 book slope adds predictive information about next-block RV and BPV beyond
 depth, spread, past RV/BPV and time of day. The required empirical core is
 M0-M2; pressure M3 and formal jump models are conditional extensions.
+
+## Implemented foundation
+
+- Five primary workspace routes, persistent state, correct navigation highlighting,
+  mobile drawer and grouped secondary laboratories.
+- Native collection-readiness endpoint and global status/confirmed stop controls.
+  The receipt-clock monitor checks actual wall/steady timestamps independently
+  of browser polling. Windows/WSL clock repair remains unresolved.
+- A bounded browser-sample depth heatmap with selectable time windows and sample
+  inspection. It is clearly labelled as display sampling, not event-level research.
+- Search of loaded recordings and a saved-dataset quality explorer with clickable
+  block exclusions, histograms and empirical cumulative distributions. Its preview
+  is limited to the report's first 50 blocks per recording; complete tables export.
+- Versioned exact proposal L5, top-two/five share and duration-weighted block
+  features, with explicit share-unit attestation and strict clock qualification.
+- Matched RV/BPV M0-M2 OLS/ridge experiments, chronological boundaries, readiness
+  and design gates, integrity-checked predictions/day-loss exports, and saved
+  manifests. Repeated runs are exploratory, not an enforced preregistration.
+
+Remaining work includes operating-system clock repair, a qualified empirical
+sample, independent quantity-unit verification, full-history calendar navigation,
+backend event-derived live chart summaries, complete raw-session export, global
+experiment locking, the quantile decision experiment and conditional extensions.
 
 ## 1. Research readiness before collection
 
@@ -28,14 +52,14 @@ each full capture still needs its own audit. Do not rewrite old timestamps.
 
 ## 2. Align measurements with the revised proposal
 
-| Required definition | Current implementation | Required change |
+| Required definition | Implemented measurement status | Remaining condition |
 | --- | --- | --- |
-| Primary five-level slope L5 using logged cumulative shares and actual relative price distances | Dataset has no proposal slope; descriptive analysis has an OLS price-distance slope | Implement the exact proposal statistic as a separately versioned feature; retain the descriptive measure under its own name |
-| Five distinct prices on each side | Dataset permits K=1..5 | Add an explicit proposal preset fixed at five; label other K settings exploratory |
-| Quantity convention fixed to shares, positive quantities and first cumulative size above one share | Existing exports conservatively retain feed-reported units | Verify and record feed units before applying the unit-sensitive logged-volume formula |
-| Exact state-duration-weighted block features | Equal weighting on a one-second sampling grid | Implement duration weighting with stale-state clipping and explicit exposure, or explicitly amend the research specification to use the approximation |
-| Secondary near-quote share uses nearest two levels divided by nearest five | Current near-depth share uses the best level divided by fixed K | Add the exact top-two/five statistic without changing the meaning of older saved results |
-| Pressure denominator is average best depth per side | Current diagnostics retain summed bid/ask best depth | Implement the half-sum convention only in a separately validated pressure feature, with a development-only floor |
+| Primary five-level slope L5 using logged cumulative shares and actual relative price distances | Versioned `proposal_oct2026_v1` formula, separate from descriptive OLS slope | Native measurements still require qualified recordings |
+| Five distinct prices on each side | Proposal preset fixes K=5; legacy K=1..5 preserved | No incomplete-state padding or silent K reduction |
+| Quantity convention fixed to shares and first cumulative size above one share | Explicit share-unit attestation required; invalid log denominators excluded | User must verify the source convention; attestation is not independent feed verification |
+| Exact state-duration-weighted block features | Integrated between callbacks, clipped to block and side-age boundaries | Full qualified duration and strict receipt clocks required |
+| Secondary nearest-two / nearest-five share | New separately named field; legacy best-level share unchanged | Present distinct definitions in plots and exports |
+| Pressure denominator is average best depth per side | Existing components remain diagnostic, not model-eligible | Implement and validate the half-sum convention and development-only floor before M3 |
 
 Show bid slope, ask slope, combined L5, depth, spread and top-two/five share on
 linked plots. Store formula version, units, scope, coverage and exclusions with
@@ -43,18 +67,21 @@ every export. Aggregate same-price rows before checking five distinct levels.
 Reject invalid denominators and incomplete books rather than substituting a
 smaller K or a different statistic.
 
-The existing `Build research dataset` operation remains useful for clock and
-coverage auditing and preliminary measurements. It is not yet the revised
-proposal's complete empirical dataset.
+The proposal preset now implements the revised state-feature definitions and
+exports their versions, duration coverage and units. The legacy preset remains
+available for older exploratory definitions. Code-level tests validate formula
+arithmetic, price-gap sensitivity and sub-second duration/staleness behavior;
+these fixtures are not native market evidence. See [dataset and experiment
+instructions](research-dataset.md).
 
 ## 3. Replace the long page with real workspace navigation
 
-The current sidebar consists of anchors into one document. Overview has a static
-active style, normal hash changes do not switch visible workspaces, and the page
-title does not follow the selected task. Order Book's internal tabs already
-switch panels correctly.
+The sidebar now selects one visible workspace and updates its heading and active
+link. Historical section links remain valid; Overview aliases Live collection.
+Recordings and Research reuse the existing selection/form component without
+resetting its state. Order Book internal tabs synchronize with workspace routes.
 
-Recommended primary navigation:
+Implemented primary navigation:
 
 1. **Live collection**: contract selection, ladder, live charts, recording controls.
 2. **Recordings & replay**: searchable sessions, event playback, raw metadata exports.
@@ -117,15 +144,17 @@ instead of making a page download look like a full historical dataset.
 
 ## 6. Frozen, matched M0-M2 experiments
 
-After enough qualified trading dates exist, implement the exact required models
-for both targets on the same forecast origins:
+The `proposal_experiment` worker operation now implements the required models
+for both targets on the same forecast origins; it remains gated on enough
+qualified trading dates:
 
 - M0: lagged log RV and log BPV, plus known target-block time-of-day indicators.
 - M1: M0 plus log depth and log spread.
 - M2: M1 plus training-standardized proposal L5.
 
-Show the selected train/validation/test dates and actual day/pair counts before
-running. Fit transparent OLS baselines and a bounded ridge comparison with an
+The experiment records explicit train/validation date boundaries and actual
+day/pair counts. Software minimums are 10/3/5 dates and 50/10/10 pairs in
+train/validation/test; these are not statistical-power guarantees. Fit transparent OLS baselines and a bounded ridge comparison with an
 unpenalized intercept. Fit offsets, scaling, smearing and forecast floors using
 only the permitted development data. Choose penalties on validation data and
 freeze the experiment before scoring the test period.
@@ -153,13 +182,20 @@ excess alone does not establish a jump.
 
 ## Delivery order
 
-First fix clock readiness and workspace navigation. Next implement and validate
-the exact proposal measurements and coverage explorer. Collect qualifying sessions
-and freeze a dataset, then add matched forecasting and the decision experiment.
+Clock readiness and workspace navigation remain collection priorities. The
+exact proposal measurements and matched M0-M2 experiment code are implemented
+and covered by synthetic mathematical and protocol tests. Collect qualifying
+native sessions before interpreting their outputs as empirical results. Expand
+the coverage explorer and then add the separately specified quantile decision
+experiment. The clock checker diagnoses local consistency; it does not repair
+the WSL/Windows clock configuration or certify future captures.
 Rich live charts can develop alongside collection, but a smooth chart is never
 evidence of target quality or predictive performance.
 
 Existing code publication and future feature work are separate: the October 6
 publication checkpoint preserves the current implementation, tests and runbooks.
-The features described above remain proposed unless a later implementation
-record explicitly marks them complete.
+Only the measurement/experiment implementation described above is marked
+implemented here. Collection-qualified native forecasts, pressure/jump extensions,
+the quantile decision experiment and any UI enhancement not separately verified
+remain outstanding. Repeated exploratory experiment runs are not globally locked
+final-test preregistration.

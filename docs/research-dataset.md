@@ -5,12 +5,14 @@ earlier LOB predictive-content proposal. It saves fixed-depth book measurements,
 session-aligned variation blocks, and adjacent past/future pairs. It does not fit
 M0/M1, certify flow pressure, classify jumps, or estimate predictive performance.
 
-The October 6 literature-focused proposal changes the required core. Its exact
-five-level logged-cumulative-volume slope, duration-weighted state averages,
-top-two/five near-quote share, and matched RV/BPV M0-M2 comparison are not yet
-implemented by this builder. Existing descriptive OLS slope is a different
-statistic. See [the research dashboard roadmap](dashboard-research-roadmap.md)
-before using current exports as that revised proposal's empirical dataset.
+The October 6 proposal preset adds the exact five-level logged-cumulative-volume
+slope, duration-weighted state averages and top-two/five near-quote share. The
+separate **Proposal M0–M2 forecasting experiment** operation builds those
+measurements and fits matched RV/BPV comparisons only when its qualification
+and chronological coverage checks pass. The legacy preset and descriptive OLS
+slope retain their earlier definitions. Implementation does not establish native
+data quality or predictive performance; see the [research dashboard roadmap](dashboard-research-roadmap.md)
+for remaining empirical requirements.
 
 ## Use the dashboard
 
@@ -37,15 +39,18 @@ holidays, early closes and daylight-saving changes. BATS/BZX data remain direct
 venue observations; the calendar defines the study's regular trading window.
 The installed calendar version is saved in the result.
 
-Book states are sampled on a one-second grid. Each side must have K distinct
+The legacy preset samples book states on a one-second grid. The proposal preset
+retains that grid for inspectable feature rows and minute endpoints, while its
+block means use actual observed state durations between callbacks. Each side must have K distinct
 prices, valid order, and a recent received update within the selected age bound.
 Equal-price rows are aggregated. Missing levels are not padded. Side update age
 does not certify the freshness of every deeper row or a lossless exchange feed.
 
 Features include total and per-side displayed depth, proportional spread, and
 the fraction of fixed-K depth at the best bid and ask. Quantities retain the
-feed's reported units. Means give equal weight to qualified one-second states,
-unlike the earlier event-weighted descriptive analysis.
+feed's reported units. Legacy means give equal weight to qualified one-second states,
+unlike the earlier event-weighted descriptive analysis. The proposal preset
+uses state-duration weights, as described below.
 
 Thirty-minute blocks begin at the regular-session open. Feature intervals are
 right-open: `[start, end)`. Returns require both boundary endpoints and every
@@ -143,3 +148,110 @@ hash verification. Neither arbitrary paths nor arbitrary programs are accepted.
 
 Automated clean-data fixtures test the implementation only. Real measurement
 readiness depends on the saved capture's clocks, coverage, structure and source.
+
+
+## October 2026 proposal measurements
+
+Select `preset=proposal_oct2026`, K=5, and explicitly confirm that the selected
+source quantities are shares (`quantity_unit=shares`, `shares_confirmed=true`).
+This is a user attestation of the source convention, not independent proof from
+the depth callback. Check the feed configuration and preserve unit evidence.
+Unconfirmed feed units remain available only in the legacy preset. Existing
+saved results and legacy field definitions are not rewritten.
+
+The proposal preset is versioned `proposal_oct2026_v1`. For each side, let
+`Q[k]` be cumulative shares through occupied price `p[k]`, `v[k]=log(Q[k])`, and
+`m` the midpoint. The side statistic is:
+
+```
+B = (v[1] / abs(p[1]/m - 1)
+     + sum((v[k]/v[k-1] - 1) / abs(p[k]/p[k-1] - 1), k=2..5)) / 5
+L5 = (B_bid + B_ask) / 2
+```
+
+This implements the proposal's equations 11--13. It is distinct from the
+existing descriptive OLS slope in basis points per 1,000 reported units.
+Prices must be positive and strictly ordered after same-price aggregation,
+spread positive, all five quantities positive and best-level cumulative shares
+greater than one. Invalid logarithmic denominators or missing levels exclude
+the state; neither denominators nor K are silently adjusted.
+
+The new `near_two_of_five_share` sums displayed shares in the first two distinct
+levels of both sides and divides by their first-five-level total. The existing
+`near_depth_share` continues to mean best-level concentration. The two fields
+must not be interchanged or described as the proposal slope.
+
+Proposal block means integrate each valid state over its actual observed
+microsecond duration, clipped to the block, recording and side-age bounds.
+A stale or invalid interval between one-second preview points still disqualifies
+the block. Qualified blocks need the full 1,800 seconds of eligible state
+duration as well as all required grid points and return endpoints. This is
+receipt-time weighting of the observed feed, not exchange-event timing.
+
+New feature fields are `slope_l5`, `bid_slope_l5`, `ask_slope_l5` and
+`near_two_of_five_share`. Blocks and pairs add their `_mean` forms plus explicit
+`measurement_version`, `quantity_unit` and `weighting`. Blocks also expose
+`qualified_duration_us`. The primary return spacing is 60 seconds; 120-second
+returns are a labeled measurement sensitivity with the same 30-minute horizon.
+
+## Matched proposal experiment
+
+The `proposal_experiment` workspace operation builds a fresh strict-clock
+proposal dataset from selected completed recordings and verifies the entire
+saved `pairs.csv` by byte hash before fitting. It does not use the 50-row preview
+as the analysis sample. Specify inclusive `train_end_date` and
+`validation_end_date` in `YYYY-MM-DD`; later dates form the test partition.
+Partitions never split a trading date. The report records actual dates and pairs.
+
+Software readiness requires at least 10 training dates and 50 pairs, three
+validation dates and 10 pairs, and five test dates and 10 pairs. These are
+engineering minimums, not evidence of adequate statistical power. A deficient
+sample completes with `blocked_readiness` and empty prediction exports. A
+rank-deficient required design completes with `blocked_design`. Neither path
+substitutes synthetic data, weakens a clock check or publishes fitted forecasts.
+
+Each target, RV and BPV, receives the same observations and predictor cutoff:
+
+- M0: lagged log RV and log BPV plus known target first/last-hour indicators.
+- M1: M0 plus log total depth and log proportional spread.
+- M2: M1 plus the explicitly defined, standardized proposal L5.
+
+OLS is reported for every information set. A separate validation-selected ridge
+comparison uses the fixed grid `[0, 0.01, 0.1, 1, 10]` under the objective
+`mean squared log error + lambda * sum(slope coefficients squared)`. The
+intercept is unpenalized. Continuous predictors use fitting-set population
+means and standard deviations. A constant scale is represented as one, while
+rank checks still reject unidentified required designs.
+
+Candidate fits, positive offsets, floors, standardization and mean
+`exp(residual)` smearing factors use training data. Lambda is selected separately
+for each target and information set by variance-scale validation QLIKE. The
+selected recipe is then refitted on training plus validation; test outcomes
+only score those frozen fits. Variation offsets and target forecast floors use
+0.001 times the positive fitting-set median, with a numerical minimum of
+`1e-18`; the spread offset uses a `1e-12` numerical minimum. A global smearing
+factor is only an approximation under conditional heteroskedasticity. The
+report includes the exact transformations and the number of floored forecasts.
+
+Results show MSE gains relative to the same target's M0, QLIKE differences,
+and the direct M2-versus-M1 increment. QLIKE is `observed/forecast + log(forecast)`;
+zero observations are allowed and forecasts stay strictly positive. Raw QLIKE
+percentage gains and comparisons of raw MSE across different targets are not
+reported. Paired losses are averaged within each test date; the report shows
+the empirical day-level distribution, favorable-day count and range without
+claiming a confidence interval or independent market conditions.
+
+Additional exports are `predictions.csv` and `daily_losses.csv`, including
+recording/date/origin identity, target, model, variant, forecasts and losses.
+The saved experiment manifest contains dataset and code hashes, the common
+origin hash, exact date partitions, selection candidates, final fitted
+coefficients, scaling and retransformation. The manifest has its own SHA-256.
+Results are labeled `complete_exploratory`: saved jobs preserve their original
+settings, but repeated user-initiated runs do not enforce a globally locked,
+once-only final test. Do not use repeated test results to select a model while
+calling that result untouched held-out evidence.
+
+Pressure M3, formal jump forecasting and the quantile decision extension remain
+separate later operations. This experiment does not certify any of them or
+submit trades. Real forecast evidence requires qualified native recordings;
+a successful automated fixture establishes implementation behavior only.

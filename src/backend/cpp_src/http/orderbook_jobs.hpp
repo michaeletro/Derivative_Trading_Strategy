@@ -48,11 +48,12 @@ inline int bounded(const Read& r, const char* key, int lo, int hi) {
     if (!std::isfinite(n) || std::floor(n) != n || n < lo || n > hi) throw std::invalid_argument("Research integer outside bounds");
     return static_cast<int>(n);
 }
+inline bool dataset_mode(const std::string& mode) { return mode == "dataset" || mode == "proposal_experiment"; }
 inline void validate(const Read& r) {
     exact_fields(r, {"schema_version", "mode", "session_ids", "source", "configuration", "split"});
     bounded(r, "schema_version", 1, 1);
     const auto mode = field(r, "mode"), source = field(r, "source");
-    if ((mode != "inspect" && mode != "compare" && mode != "describe" && mode != "flow" && mode != "dataset") || (source != "ibkr_tws" && source != "mock")) throw std::invalid_argument("Invalid research mode or source acknowledgement");
+    if ((mode != "inspect" && mode != "compare" && mode != "describe" && mode != "flow" && !dataset_mode(mode)) || (source != "ibkr_tws" && source != "mock")) throw std::invalid_argument("Invalid research mode or source acknowledgement");
     const auto& ids = r["session_ids"];
     if (ids.t() != crow::json::type::List || ids.size() < 1 || ids.size() > 24) throw std::invalid_argument("Select 1..24 stopped sessions");
     std::set<std::string> seen;
@@ -62,9 +63,25 @@ inline void validate(const Read& r) {
         if (s.empty() || s.size() > 18 || s[0] == '0' || s.find_first_not_of("0123456789") != std::string::npos || !seen.insert(s).second) throw std::invalid_argument("Invalid or duplicate session ID");
     }
     const auto& c = r["configuration"];
-    if (mode == "dataset") {
-        exact_fields(c, {"levels", "return_seconds", "max_side_age_seconds"});
+    if (dataset_mode(mode)) {
+        std::set<std::string> keys{"levels", "return_seconds", "max_side_age_seconds"};
+        if(c.has("preset")){keys.insert("preset");keys.insert("quantity_unit");keys.insert("shares_confirmed");}
+        if(mode == "proposal_experiment"){keys.insert("train_end_date");keys.insert("validation_end_date");}
+        exact_fields(c, keys);
         bounded(c, "levels", 1, 5);
+        if(c.has("preset")) {
+            const auto preset=field(c,"preset"),unit=field(c,"quantity_unit");
+            if((preset!="legacy"&&preset!="proposal_oct2026")||(unit!="feed_reported"&&unit!="shares")||(c["shares_confirmed"].t()!=crow::json::type::True&&c["shares_confirmed"].t()!=crow::json::type::False))
+                throw std::invalid_argument("Invalid measurement preset or quantity assertion");
+            if(preset=="proposal_oct2026"&&(bounded(c,"levels",1,5)!=5||unit!="shares"||!c["shares_confirmed"].b()))
+                throw std::invalid_argument("Proposal measurements require five levels and verified share units");
+        }
+        if(mode == "proposal_experiment") {
+            if(!c.has("preset")||field(c,"preset")!="proposal_oct2026")throw std::invalid_argument("Proposal experiment requires its versioned measurement preset");
+            const auto train=field(c,"train_end_date"),validation=field(c,"validation_end_date");
+            for(const auto& day:{train,validation})if(day.size()!=10||day[4]!='-'||day[7]!='-'||day.find_first_not_of("0123456789-")!=std::string::npos)throw std::invalid_argument("Invalid experiment partition date");
+            if(train>=validation)throw std::invalid_argument("Training must precede validation and test");
+        }
         const int horizon = bounded(c, "return_seconds", 60, 120);
         if (horizon != 60 && horizon != 120) throw std::invalid_argument("Dataset return interval must be 60 or 120 seconds");
         if (c["max_side_age_seconds"].t() != crow::json::type::Number || !std::isfinite(c["max_side_age_seconds"].d()) ||
@@ -216,7 +233,7 @@ struct InputLimits {
     std::size_t total_bytes;
 };
 inline InputLimits input_limits(const std::string& mode) {
-    if (mode == "dataset") return InputLimits{10000000, 20000000, 4000000000ULL, 8000000000ULL};
+    if (dataset_mode(mode)) return InputLimits{10000000, 20000000, 4000000000ULL, 8000000000ULL};
     return (mode == "describe" || mode == "flow") ? InputLimits{500000, 500000, 200000000, 200000000}
                               : InputLimits{200000, 300000, 80000000, 120000000};
 }
@@ -272,7 +289,8 @@ inline VerifiedArtifact verified_artifact(const fs::path& output, const Read& en
     // Only these worker-generated names are reachable; callers never supply a path.
     const std::map<std::string, std::pair<std::string, std::string>> allowed{
         {"features", {"features.csv.gz", "application/gzip"}}, {"minutes", {"minutes.csv.gz", "application/gzip"}},
-        {"blocks", {"blocks.csv", "text/csv"}}, {"pairs", {"pairs.csv", "text/csv"}}};
+        {"blocks", {"blocks.csv", "text/csv"}}, {"pairs", {"pairs.csv", "text/csv"}},
+        {"predictions", {"predictions.csv", "text/csv"}}, {"daily_losses", {"daily_losses.csv", "text/csv"}}};
     const auto found = allowed.find(name);
     if (found == allowed.end()) throw std::invalid_argument("Unknown dataset artifact");
     exact_fields(entry, {"name", "file", "sha256", "bytes", "rows", "content_type"});
@@ -352,7 +370,7 @@ class Manager {
     void freeze(const std::string& id, const std::string& request) {
         const auto r = crow::json::load(request); const auto dir = directory(id);
         const auto limits = input_limits(field(r, "mode"));
-        const bool dataset = field(r, "mode") == "dataset";
+        const bool dataset = dataset_mode(field(r, "mode"));
         std::vector<Json> sources; std::size_t total_bytes = 0;
         std::int64_t total_events = 0;
         for (const auto& value : r["session_ids"]) {
@@ -525,7 +543,7 @@ public:
             const auto n = std::stoll(std::get<std::string>(row.at("event_count"))); total += n;
             if (n > limits.session_events || total > limits.total_events) throw std::length_error("Selected captures exceed the bounded research event limit");
         }
-        if (field(request, "mode") == "dataset") {
+        if (dataset_mode(field(request, "mode"))) {
             const auto estimate = std::min<std::uint64_t>(limits.total_bytes, static_cast<std::uint64_t>(total) * 1024 + request["session_ids"].size() * 4096);
             require_space(root_, estimate + 2000000000ULL);
         }
@@ -542,7 +560,7 @@ public:
         if(variation_){meta["snapshot_ids"]=Json(request["snapshot_ids"]);meta["input_kind"]=field(request,"input_kind");}
         meta["created_ms"] = now_ms(); meta["finished_ms"] = nullptr; meta["state"] = "running"; meta["phase"] = "snapshotting"; meta["error"] = "";
         state_write(dir, meta); active_ = id; pending_ = raw; abort_preparation_.store(false); requested_end_.clear();
-        deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(field(request, "mode") == "dataset" ? 1800 : timeout_seconds_); wake_.notify_all(); return meta;
+        deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(dataset_mode(field(request, "mode")) ? 1800 : timeout_seconds_); wake_.notify_all(); return meta;
     }
     Json get(const std::string& id) { std::lock_guard<std::mutex> lock(mutex_); return Json(read_json(directory(id) / "state.json", 16384)); }
     Json list() {
@@ -568,12 +586,12 @@ public:
         return ArchivedResult{raw};
     }
     VerifiedArtifact artifact(const std::string& id, const std::string& name) {
-        if (name != "features" && name != "minutes" && name != "blocks" && name != "pairs")
+        if (name != "features" && name != "minutes" && name != "blocks" && name != "pairs" && name != "predictions" && name != "daily_losses")
             throw std::invalid_argument("Unknown dataset artifact");
         const auto saved = result(id); // Validates completed state and exact saved JSON hash.
         const auto report = crow::json::load(saved.bytes);
-        if (!report.has("request") || field(report["request"], "mode") != "dataset" ||
-            !report.has("artifacts") || report["artifacts"].t() != crow::json::type::List || report["artifacts"].size() > 4)
+        if (!report.has("request") || !dataset_mode(field(report["request"], "mode")) ||
+            !report.has("artifacts") || report["artifacts"].t() != crow::json::type::List || report["artifacts"].size() > 6)
             throw std::logic_error("This result has no dataset exports");
         const Read* selected = nullptr;
         for (const auto& item : report["artifacts"]) if (field(item, "name") == name) {

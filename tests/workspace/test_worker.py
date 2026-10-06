@@ -29,6 +29,12 @@ def dataset_request(**configuration):
     return r
 
 
+def proposal_request(**configuration):
+    r=dataset_request(preset='proposal_oct2026',quantity_unit='shares',shares_confirmed=True,
+                      train_end_date='2026-10-01',validation_end_date='2026-10-02',**configuration)
+    r['mode']='proposal_experiment'
+    return r
+
 def frozen_stream_inputs(job, req, payload=None):
     from depth_replay import synthetic_fixture
     p = copy.deepcopy(payload if payload is not None else synthetic_fixture())
@@ -123,6 +129,29 @@ class RequestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             worker.validate_request(r)
 
+
+    def test_proposal_requires_explicit_shares_preset_and_ordered_dates(self):
+        cfg,learning,split=worker.validate_request(proposal_request())
+        self.assertEqual(cfg.preset,'proposal_oct2026')
+        self.assertIs(cfg.shares_confirmed,True)
+        self.assertIsNone(learning);self.assertIsNone(split)
+        for key,value in [('shares_confirmed',False),('shares_confirmed',1),('quantity_unit','lots'),
+                          ('levels',4),('train_end_date','2026-02-30'),('validation_end_date','2026-09-30'),
+                          ('clock_policy','recorded_monotonic')]:
+            r=proposal_request();r['configuration'][key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):worker.validate_request(r)
+        for key in ('preset','quantity_unit','shares_confirmed','train_end_date','validation_end_date'):
+            r=proposal_request();del r['configuration'][key]
+            with self.subTest(missing=key),self.assertRaises(ValueError):worker.validate_request(r)
+        r=proposal_request();r['configuration'].update(preset='legacy',quantity_unit='feed_reported',shares_confirmed=False)
+        with self.assertRaises(ValueError):worker.validate_request(r)
+
+    def test_proposal_dataset_without_experiment_does_not_accept_model_dates(self):
+        r=proposal_request();r['mode']='dataset'
+        with self.assertRaises(ValueError):worker.validate_request(r)
+        del r['configuration']['train_end_date'];del r['configuration']['validation_end_date']
+        cfg,_,_=worker.validate_request(r)
+        self.assertEqual(cfg.preset,'proposal_oct2026')
 
 class WorkerTests(unittest.TestCase):
     def setUp(self):
@@ -309,5 +338,45 @@ class WorkerTests(unittest.TestCase):
             worker.execute(self.job)
         self.assertFalse((self.job / 'result.json').exists())
 
+
+    def test_proposal_worker_persists_six_artifacts_and_duration_pair_without_fit(self):
+        sys.path.insert(0,str(ROOT/'tests/orderbook'))
+        from test_research_dataset import fixture
+        header,events=fixture()
+        r=proposal_request()
+        frozen_stream_inputs(self.job,r,{**header,'events':events})
+        worker.write_json(self.job/'request.json',r)
+        before=hashlib.sha256(self.db.read_bytes()).hexdigest()
+        worker.execute(self.job)
+        result=worker.read_json(self.job/'result.json',worker.MAX_RESULT)
+        self.assertEqual(result,worker.read_json(self.job/'output/analysis.json',worker.MAX_RESULT))
+        self.assertEqual(result['source'],'synthetic')
+        self.assertEqual(result['config']['measurement_version'],'proposal_oct2026_v1')
+        self.assertEqual(result['dataset']['summary']['forecast_pairs'],1)
+        self.assertEqual(result['experiment']['status'],'blocked_readiness')
+        self.assertEqual(result['experiment']['models'],[])
+        self.assertIn('M0',str(result['experiment']['boundaries']))
+        self.assertEqual({a['name'] for a in result['artifacts']},{'features','minutes','blocks','pairs','predictions','daily_losses'})
+        for artifact in result['artifacts']:
+            path=self.job/'output'/artifact['file']
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),artifact['sha256'])
+            self.assertEqual(path.stat().st_size,artifact['bytes'])
+            if artifact['name'] in ('predictions','daily_losses'):self.assertEqual(artifact['rows'],0)
+        self.assertEqual(before,hashlib.sha256(self.db.read_bytes()).hexdigest())
+        self.assertIn('Experiment readiness checks', (self.job/'output/report.html').read_text())
+        self.assertEqual(result['request'],r)
+
+    def test_proposal_clock_failure_persists_audit_with_no_synthetic_repair(self):
+        from depth_replay import synthetic_fixture
+        p=synthetic_fixture()
+        for event in p['events'][12:]:event['received_unix_us']=str(int(event['received_unix_us'])+2_000_000)
+        r=proposal_request();frozen_stream_inputs(self.job,r,p)
+        worker.write_json(self.job/'request.json',r);worker.execute(self.job)
+        result=worker.read_json(self.job/'result.json',worker.MAX_RESULT)
+        self.assertEqual(result['sessions'][0]['dataset']['status'],'blocked_clock')
+        self.assertEqual(result['experiment']['status'],'blocked_readiness')
+        self.assertEqual(result['dataset']['summary']['forecast_pairs'],0)
+        self.assertTrue(all(a['rows']==0 for a in result['artifacts']))
+        self.assertEqual(result['config']['clock_policy'],'strict_receipt')
 
 if __name__=='__main__':unittest.main()

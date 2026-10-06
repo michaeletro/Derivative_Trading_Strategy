@@ -30,6 +30,9 @@ def main(executable):
             return open_dashboard.launch_url(port,code),code
         url,code=url_from_saved_profile()
         page.goto(url);expect(page.locator('#http-status')).to_have_text('Available')
+        expect(page.locator('#token')).to_be_hidden();expect(page.locator('#forget')).to_be_visible()
+        expect(page.locator('#notice')).to_be_hidden()
+        assert not page.locator('#broker-connection-details').evaluate('(el)=>el.open')
         expect(page.locator('#token')).to_have_value('');assert 'local-signin' not in page.url and code not in page.url
         assert page.evaluate('localStorage.length+sessionStorage.length')==0
         cookies=context.cookies();assert len(cookies)==1 and cookies[0]['httpOnly'] and cookies[0]['sameSite']=='Strict'
@@ -47,6 +50,7 @@ def main(executable):
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
         page.screenshot(path=str(shots/'local-signin-mobile.png'));page.set_viewport_size({'width':1440,'height':1000})
         page.locator('#forget').click();expect(page.locator('#notice')).to_contain_text('Signed out.')
+        expect(page.locator('#token')).to_be_visible();expect(page.locator('#unlock')).to_be_visible()
         expect(page.locator('#http-status')).to_have_text('Locked');assert not context.cookies()
         page.reload();expect(page.locator('#notice')).to_contain_text('open_dashboard.py');expect(page.locator('#http-status')).to_have_text('Locked')
         other.reload();expect(other.locator('#http-status')).to_have_text('Locked')

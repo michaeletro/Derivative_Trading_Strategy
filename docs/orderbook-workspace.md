@@ -38,7 +38,10 @@ The launcher configures the server with **this interpreter** via
 `DTS_RESEARCH_PYTHON` (including the virtual-environment path, not its resolved
 system-Python symlink). It rebuilds/tests before starting. No new profile field,
 token, third-party service, extra port, or model daemon needs to be configured.
-Use the opened dashboard's **Order book & research** navigation item. Its main
+Use **Live collection** in the opened dashboard. The sidebar also provides
+**Recordings & replay**, **Data quality**, **Research experiments** and
+**Results & exports**; changing workspaces preserves controls and never starts
+or stops collection. Its main
 broker controls still connect explicitly; use the intended paper TWS session with
 Read-Only API enabled. Ports alone do not prove paper/live mode.
 
@@ -426,3 +429,23 @@ start -> observe actual BATS updates -> stop -> select real capture -> inspect -
 reopen after restart. Next gather distinct later dates before evaluating predictive
 performance. Automated passing tests establish software integration, not live feed
 entitlements, model accuracy, profitability or production execution readiness.
+
+
+## October 6 proposal workflow
+
+The global readiness strip updates while unlocked and provides a confirmed Stop
+control on every workspace. See [collection readiness](recording-readiness.md).
+The live depth heatmap retains at most 360 browser display samples over five
+minutes. Choose 30 seconds, one minute or five minutes, and select a sample with
+the chart or slider. It is not the recorder's complete event stream.
+
+In Recordings & models, select completed recordings and choose Build research
+dataset or Proposal M0-M2 forecasting experiment. The October 6 preset requires
+five distinct levels and explicit confirmation of share units. Forecasting also
+requires chronological training/validation end dates; later dates form the test
+partition. See [measurement and experiment rules](research-dataset.md).
+
+Open a completed dataset, then select Data quality for the saved block preview,
+clickable exclusions and distributions. Results & exports reopens the same saved
+report and verified tables. Blocked clocks or insufficient dates produce an audit
+without accepted forecasts. The UI never supplies synthetic replacement data.

@@ -16,20 +16,38 @@
   <link rel="stylesheet" href="/dashboard/orderbook.css">
 </head>
 <body>
-<a class="skip" href="#overview">Skip to workspace</a>
-<aside class="sidebar">
+<a class="skip" href="#workspace-title">Skip to workspace</a>
+<button id="workspace-menu" class="workspace-menu secondary" type="button" aria-expanded="false" aria-controls="workspace-sidebar">Workspaces</button>
+<aside class="sidebar" id="workspace-sidebar">
+  <button id="workspace-menu-close" class="workspace-menu-close secondary" type="button">Close workspaces</button>
   <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true">D∂</span><span>Derivative Lab<small>RESEARCH WORKSPACE</small></span></a>
-  <nav aria-label="Workspace"><p class="eyebrow">Workspace</p><a href="#overview" class="active"><span>01</span> Overview</a><a href="#instruments"><span>02</span> Instruments</a><a href="#orderbook"><span>OB</span> Order book &amp; research</a><a href="#positions"><span>03</span> Positions</a><a href="#pricing"><span>04</span> Pricing lab</a><a href="#sensitivities"><span>05</span> Greeks &amp; scenarios</a><a href="#storage"><span>06</span> Recorded history</a><a href="#history"><span>07</span> Historical data</a><a href="#ticks"><span>T</span> Historical ticks</a><a href="#replay"><span>08</span> Replay &amp; research</a>
-      <a href="#variation"><span>RV</span> Variation research</a><a href="#sde"><span>09</span> SDE discretization</a><a href="#hedging"><span>10</span> Delta hedging</a><a href="#lab-catalog"><span>11</span> Saved experiments</a><a href="#roadmap"><span>12</span> Study roadmap</a></nav>
+  <nav aria-label="Workspace"><p class="eyebrow">Research workflow</p>
+    <a href="#orderbook" data-workspace-link><span>01</span> Live collection</a>
+    <a href="#recordings" data-workspace-link><span>02</span> Recordings &amp; replay</a>
+    <a href="#quality" data-workspace-link><span>03</span> Data quality</a>
+    <a href="#research" data-workspace-link><span>04</span> Research experiments</a>
+    <a href="#results" data-workspace-link><span>05</span> Results &amp; exports</a>
+    <details class="nav-group"><summary>Historical &amp; local data</summary>
+      <a href="#history" data-workspace-link>Prices &amp; volumes</a><a href="#ticks" data-workspace-link>Historical ticks</a><a href="#replay" data-workspace-link>Historical bar replay</a><a href="#storage" data-workspace-link>Local data &amp; backups</a>
+    </details>
+    <details class="nav-group"><summary>Other quantitative labs</summary>
+      <a href="#variation" data-workspace-link>Variation research pilot</a><a href="#pricing" data-workspace-link>Pricing lab</a><a href="#sensitivities" data-workspace-link>Greeks &amp; scenarios</a><a href="#sde" data-workspace-link>SDE discretization</a><a href="#hedging" data-workspace-link>Delta hedging</a><a href="#lab-catalog" data-workspace-link>Saved experiments</a>
+    </details>
+    <details class="nav-group"><summary>Broker &amp; help</summary>
+      <a href="#instruments" data-workspace-link>Instruments &amp; quotes</a><a href="#positions" data-workspace-link>Position snapshot</a><a href="#roadmap" data-workspace-link>Help &amp; study roadmap</a>
+    </details>
+  </nav>
   <div class="sidebar-foot"><span class="badge positive">READ ONLY</span><p>Observe first.<br>Model independently.<br>Execute separately.</p><small>No orders or account writes. Market observations are saved locally.</small></div>
 </aside>
 <main id="overview">
-  <header class="page-heading"><div><p class="eyebrow">Interactive Brokers / Research console</p><h1>Market & positions<span>.</span></h1><p>A direct view of your broker connection. No inferred balances, no synthetic live prices.</p></div><span id="session-badge" class="badge">LOCKED</span></header>
+  <header class="page-heading"><div><p class="eyebrow">Interactive Brokers / Research console</p><h1 id="workspace-title" tabindex="-1">Live collection</h1><p id="workspace-description">Inspect broker-delivered depth and explicitly record your research sample.</p></div><span id="session-badge" class="badge">LOCKED</span></header>
   <section class="panel access" aria-labelledby="access-title">
     <div><h2 id="access-title">Local access</h2><p>Use your server’s <code>DTS_API_TOKEN</code>, not your IBKR password. The token stays in this tab’s memory.</p></div>
     <form id="access-form" autocomplete="off"><label class="sr-only" for="token">Local dashboard token</label><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Local dashboard token" maxlength="1024"><button id="unlock" type="submit">Unlock dashboard</button><button id="forget" type="button" class="secondary" disabled>Forget token</button></form>
   </section>
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <section id="collection-readiness" class="collection-readiness panel" aria-label="Collection readiness"><div id="collection-readiness-summary" role="status">Unlock to check collection readiness.</div><div class="actions"><button id="collection-refresh" class="secondary" type="button">Refresh status</button><button id="collection-stop" class="secondary" type="button" disabled>Stop recording</button></div></section>
+  <details id="broker-connection-details" class="broker-connection-details panel"><summary><span>Broker connection &amp; diagnostics</span><span id="connection-summary" class="badge">Not inspected</span></summary>
   <section class="metrics" aria-label="System summary">
     <article class="panel metric"><p class="eyebrow">HTTP service</p><h2 id="http-status">Locked</h2><p id="http-detail">Unlock to inspect the service</p></article>
     <article class="panel metric"><p class="eyebrow">Broker session</p><h2 id="broker-status">Not inspected</h2><p id="broker-detail">No connection opened by this page</p></article>
@@ -37,7 +55,8 @@
     <article class="panel metric"><p class="eyebrow">Position snapshot</p><h2 id="snapshot-status">Unavailable</h2><p id="snapshot-detail">Not an empty portfolio</p></article>
   </section>
   <section class="panel connection" aria-label="Broker connection controls"><p id="connection-note">Unlock, then connect explicitly to your configured broker.</p><div class="actions"><button id="refresh" class="secondary" disabled>Refresh view</button><button id="connect" disabled>Connect broker</button><button id="disconnect" class="secondary" disabled>Disconnect</button></div></section>
-  <div class="workspace-grid">
+  </details>
+  <div class="workspace-grid" id="market-workspace" data-workspace-section hidden>
     <section class="panel monitor" aria-labelledby="monitor-title">
       <header class="section-heading"><div><p class="eyebrow">01 / Market observations</p><h2 id="monitor-title">Quote monitor</h2></div><span id="poll-badge" class="badge">NOT POLLING</span></header>
       <div class="table-scroll" tabindex="0" role="region" aria-label="Subscribed instrument quotes"><table><thead><tr><th>Instrument / conId</th><th>Bid</th><th>Ask</th><th>Midpoint</th><th>Feed / quality</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="quotes-body"><tr class="empty"><td colspan="6">No subscriptions loaded.<small>Resolve an instrument, inspect the candidates, then subscribe.</small></td></tr></tbody></table></div>
@@ -57,7 +76,7 @@
       <p class="hint">A symbol is a query, not a unique contract.</p><p id="resolution-note" role="status"></p><div id="candidates" aria-label="Resolved contract candidates"></div>
     </section>
   </div>
-  <section class="panel ob-workspace" id="orderbook" aria-labelledby="ob-title">
+  <section class="panel ob-workspace" id="orderbook" data-workspace-section aria-labelledby="ob-title">
     <header class="section-heading"><div><p class="eyebrow">Market microstructure / Capture → research</p><h2 id="ob-title">Order book &amp; research</h2></div><span id="ob-source" class="badge">NOT LOADED</span></header>
     <p class="section-description">Inspect displayed liquidity. Record explicitly. Evaluate models on completed sessions. No order submission or automatic strategy execution.</p>
     <div class="ob-toolbar"><button id="ob-refresh" class="secondary" disabled>Load / refresh workspace</button><label class="ob-check"><input id="ob-watch" type="checkbox" disabled> Watch book (1s display polls)</label><span id="ob-state" class="hint">Unlock the dashboard to inspect this workspace.</span></div>
@@ -149,12 +168,12 @@
       <details><summary>Coverage, exclusions and partial-session variance</summary><pre id="ob-result-coverage"></pre></details><details><summary>Evaluation, paired-date errors and Cont diagnostic</summary><pre id="ob-result-evaluation"></pre></details><details><summary>Frozen request, source hashes and implementation identity</summary><pre id="ob-result-provenance"></pre></details></article>
     </div>
   </section>
-  <section class="panel positions" id="positions" aria-labelledby="positions-title">
+  <section class="panel positions" id="positions" data-workspace-section hidden aria-labelledby="positions-title">
     <header class="section-heading"><div><p class="eyebrow">03 / Broker holdings</p><h2 id="positions-title">Position snapshot</h2></div><button id="snapshot" class="secondary" disabled>Request snapshot</button></header>
     <p class="section-description" id="position-description">Unavailable until a request completes. One native snapshot per connection; not continuous reconciliation.</p>
     <div class="table-scroll" tabindex="0" role="region" aria-label="Position snapshot"><table><thead><tr><th>Account</th><th>Instrument</th><th>Type</th><th>Quantity</th><th>Multiplier</th><th>Currency</th></tr></thead><tbody id="positions-body"><tr class="empty"><td colspan="6">Positions unavailable — no completed snapshot.</td></tr></tbody></table></div>
   </section>
-  <section class="panel pricing-lab" id="pricing" aria-labelledby="pricing-title">
+  <section class="panel pricing-lab" id="pricing" data-workspace-section hidden aria-labelledby="pricing-title">
     <header class="section-heading"><div><p class="eyebrow">04 / Numerical experiments</p><h2 id="pricing-title">Pricing &amp; Simulation Lab</h2></div><span class="badge positive">OFFLINE MODEL · EUROPEAN</span></header>
     <p class="section-description">Compare Black–Scholes–Merton with exact-GBM Monte Carlo. Manual scenarios under the risk-neutral measure, not market forecasts or listed-option fair values.</p>
     <div class="pricing-grid">
@@ -187,7 +206,7 @@
       </div>
     </div><p id="pricing-note" class="pricing-note" role="status" aria-live="polite">Unlock local access to run an offline model experiment.</p>
   </section>
-  <section class="panel greeks-lab" id="sensitivities" aria-labelledby="greeks-title">
+  <section class="panel greeks-lab" id="sensitivities" data-workspace-section hidden aria-labelledby="greeks-title">
     <header class="section-heading"><div><p class="eyebrow">05 / Sensitivities &amp; model shocks</p><h2 id="greeks-title">Greeks &amp; Scenario Lab</h2></div><span class="badge positive">HYPOTHETICAL · NO ACCOUNT EXPOSURE</span></header>
     <p class="section-description">Differentiate the model. Reprice the shock. Compare the approximation. European exercise, constant coefficients, continuous yield. All calculations run in C++; no live prices or portfolio holdings are used.</p>
     <div class="greeks-body">
@@ -251,7 +270,7 @@
       <p id="scenario-note" class="lab-note" role="status" aria-live="polite">Repricing does not require a Monte Carlo run or a broker connection.</p>
     </div>
   </section>
-  <section class="panel recorded-storage" id="storage" aria-labelledby="storage-title">
+  <section class="panel recorded-storage" id="storage" data-workspace-section hidden aria-labelledby="storage-title">
     <div class="section-heading"><div><p class="eyebrow">06 / Durable observations</p><h2 id="storage-title">Recorded history</h2></div><span class="badge">LOCAL SQLITE</span></div>
     <h3 id="storage-state">Locked</h3><p id="storage-counts">Unlock to inspect saved data.</p>
     <p>Database: <code id="storage-path">—</code></p><p>Last backup: <code id="storage-last-backup">—</code></p>
@@ -264,7 +283,7 @@
     <p id="storage-notice" role="status" aria-live="polite"></p>
     <div class="table-wrap"><table aria-label="Recorded time series"><thead id="storage-head"></thead><tbody id="storage-body"></tbody></table></div>
   </section>
-  <section class="panel historical-panel" id="history" aria-labelledby="history-title">
+  <section class="panel historical-panel" id="history" data-workspace-section hidden aria-labelledby="history-title">
     <div class="section-heading"><div><p class="eyebrow">07 / Historical data</p><h2 id="history-title">Download prices. See your progress.</h2></div><span class="badge">SAVED MARKET DATA</span></div>
     <p>Choose daily prices across multiple years, or a day of minute bars. Downloads run in small batches and save locally. Reopen saved data anytime.</p>
     <div class="history-toolbar"><button id="history-load" type="button" disabled>Load saved datasets</button><label>Dataset<select id="history-dataset" disabled><option value="">Choose a saved dataset or resolve a contract</option></select></label></div>
@@ -298,7 +317,7 @@
     <details><summary>Numerical bars — latest 200 in this view</summary><div class="table-wrap"><table><thead><tr><th>Session date / UTC</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume (source)</th><th>Versions</th><th>Request ID</th></tr></thead><tbody id="history-rows"></tbody></table></div></details>
     <details open><summary>Request ledger — latest 200 overlapping requests</summary><div class="table-wrap"><table><thead><tr><th>ID</th><th>Start</th><th>End (excluded)</th><th>State</th><th>Received rows</th><th>Code</th></tr></thead><tbody id="history-requests"></tbody></table></div></details>
   </section>
-  <section class="panel historical-panel" id="ticks" aria-labelledby="ticks-title">
+  <section class="panel historical-panel" id="ticks" data-workspace-section hidden aria-labelledby="ticks-title">
     <div class="section-heading"><div><p class="eyebrow">Historical ticks / Download &amp; replay</p><h2 id="ticks-title">Choose a period. Replay the observations.</h2></div><span class="badge">TRADES &amp; BEST QUOTES</span></div>
     <p>Download historical stock trades or best bid/ask updates through your existing IBKR access. Best quotes are one price per side, not a BZX depth ladder.</p>
     <p id="ticks-contract">Resolve a stock under Instruments, then choose Historical ticks.</p>
@@ -320,7 +339,7 @@
     <p class="muted">Replay follows the provider's order within each timestamp second. Speed is observations per step, not market time. Only released ticks enter the chart. Halt and quote-condition flags remain in the export. No fills or depth are inferred. Browser export supports up to 100,000 ticks; larger downloads remain in the local archive.</p>
     <details><summary>Latest 100 released ticks</summary><div class="table-wrap"><table><thead><tr><th>Tick</th><th>Time (UTC)</th><th>Observation</th><th>Conditions</th></tr></thead><tbody id="ticks-rows"></tbody></table></div></details>
   </section>
-  <section class="panel replay-lab" id="replay" aria-labelledby="replay-title">
+  <section class="panel replay-lab" id="replay" data-workspace-section hidden aria-labelledby="replay-title">
     <div class="section-heading"><div><p class="eyebrow">08 / Replay &amp; research</p><h2 id="replay-title">Explore your saved market history.</h2></div><span class="badge">RETROSPECTIVE · NO TRADES</span></div>
     <p>Freeze saved bar versions, replay only the released prefix, and compare immutable diagnostic runs. This is not point-in-time market reconstruction, implied volatility, or a strategy backtest.</p>
     <h3>1. Freeze or reopen a dataset</h3>
@@ -342,7 +361,7 @@
     <div class="replay-grid"><label>Saved run A<select id="experiment-a" disabled></select></label><label>Saved run B<select id="experiment-b" disabled></select></label></div>
     <div class="replay-actions"><button id="experiment-open" disabled>Open saved report A</button><button id="experiment-compare" disabled>Compare selected runs</button><button id="experiment-rerun" class="secondary" disabled>Rerun A configuration</button><button id="experiment-export" class="secondary" disabled>Export run A</button></div><p id="experiment-summary" role="status"></p><div class="table-wrap"><table><thead><tr><th>Property</th><th>Run A</th><th>Run B</th></tr></thead><tbody id="experiment-comparison"></tbody></table></div>
   </section>
-  <section class="panel replay-lab" id="variation" aria-labelledby="var-title">
+  <section class="panel replay-lab" id="variation" data-workspace-section hidden aria-labelledby="var-title">
     <div class="section-heading"><div><p class="eyebrow">RESEARCH PILOT / CONTINUOUS VARIATION &amp; JUMP DIAGNOSTICS</p><h2 id="var-title">Measure first. Compare on later sessions.</h2></div><span class="badge">EXPLORATORY · NO ORDERS</span></div>
     <p>Build complete past and future windows from saved observations. RV measures sampled price variation; BPV is a continuous-variation proxy. Candidate excess variation is not a confirmed jump.</p>
     <div class="replay-grid"><label>Data source<select id="var-kind"><option value="bars">Frozen minute MIDPOINT snapshots</option><option value="depth">Stopped order-book recordings</option></select></label><label>Sampling grid<select id="var-step"><option value="5">5 seconds · depth only</option><option value="10">10 seconds · depth only</option><option value="15">15 seconds · depth only</option><option value="30">30 seconds · depth only</option><option value="60" selected>1 minute</option><option value="300">5 minutes</option></select></label><label>Past and future window<select id="var-horizon"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30" selected>30 minutes</option><option value="60">60 minutes</option></select></label></div>
@@ -356,7 +375,7 @@
     <div class="replay-actions"><button id="var-export" class="secondary" disabled>Export complete study JSON</button><button id="var-csv" class="secondary" disabled>Export measurement table CSV</button></div>
     <details><summary>Measurements · latest 200 windows</summary><div class="table-wrap"><table><thead><tr><th>Session</th><th>Forecast origin UTC</th><th>Past BPV</th><th>Future RV</th><th>Future BPV</th><th>Signed RV − BPV</th><th>Candidate excess</th><th>Spread bps</th><th>Visible depth</th></tr></thead><tbody id="var-rows"></tbody></table></div></details>
   </section>
-  <section class="panel sde-lab" id="sde" aria-labelledby="sde-title">
+  <section class="panel sde-lab" id="sde" data-workspace-section hidden aria-labelledby="sde-title">
     <header class="section-heading"><div><p class="eyebrow">09 / Stochastic differential equations</p><h2 id="sde-title">SDE Discretization Lab</h2></div><span class="badge positive">COUPLED BROWNIAN PATHS</span></header>
     <p class="section-description">Same model. Same Brownian realization. Different numerical schemes. Compare exact GBM, Euler–Maruyama and Milstein under risk-neutral dynamics. Simulations are never recorded as market observations.</p>
     <div class="sde-layout">      <form id="sde-form"><fieldset id="sde-fields" disabled><legend class="sr-only">SDE experiment model and sampling inputs</legend><div class="form-grid">
@@ -383,7 +402,7 @@
     <div class="table-scroll" tabindex="0" role="region" aria-label="SDE convergence numerical results"><table><thead><tr><th>Steps</th><th>Scheme</th><th>MC price</th><th>Mean |terminal error|</th><th>SE of strong error</th><th>Paired payoff bias</th><th>95% pointwise interval</th><th>Nonpositive paths</th><th>Kernel ms</th></tr></thead><tbody id="sde-table"></tbody></table></div>
     <div class="actions"><button type="button" id="sde-export" disabled>Export current experiment</button></div>
   </section>
-  <section class="panel hedge-lab" id="hedging" aria-labelledby="hedge-title">
+  <section class="panel hedge-lab" id="hedging" data-workspace-section hidden aria-labelledby="hedge-title">
     <header class="section-heading"><div><p class="eyebrow">10 / Self-financing replication</p><h2 id="hedge-title">Delta hedging &amp; replication</h2></div><span class="badge">SYNTHETIC · NO ORDERS</span></header>
     <p class="section-description">One short European payoff unit funded by its model premium. Compare no stock hedge, initial delta only, and periodic hedges on the same exact-GBM paths. Buying stock consumes cash; negative cash accrues borrowing cost. No capital is added to rescue a losing hedge.</p>
     <div class="hedge-layout"><form id="hedge-form" novalidate><fieldset id="hedge-fields" disabled><h3>Option and funding model</h3><div class="form-grid">
@@ -418,7 +437,7 @@
     <h3>Path ledger · inspect every stock and cash movement</h3><p id="hedge-ledger-note" class="hint">Choose a policy after running.</p><div class="table-scroll" tabindex="0" role="region" aria-label="Self-financing path ledger"><table><thead><tr><th>Time</th><th>Spot</th><th>Delta</th><th>Shares before</th><th>Shares traded</th><th>Prior cash</th><th>Financing</th><th>Trade notional</th><th>Cost</th><th>Cash after trade</th><th>Payoff paid</th><th>Final cash</th><th>Hedge assets</th><th>Liability</th><th>Surplus</th><th>Balance residual</th></tr></thead><tbody id="hedge-ledger"></tbody></table></div>
     <div class="actions"><button type="button" id="hedge-export" disabled>Export current replication</button><button type="button" id="hedge-catalog" class="secondary" disabled>Save through experiment catalog</button></div>
   </section>
-  <section class="panel sde-lab" id="lab-catalog" aria-labelledby="catalog-title">
+  <section class="panel sde-lab" id="lab-catalog" data-workspace-section hidden aria-labelledby="catalog-title">
     <header class="section-heading"><div><p class="eyebrow">11 / Reproducible numerical research</p><h2 id="catalog-title">Saved experiments</h2></div><span class="badge">TYPED · IMMUTABLE</span></header>
     <p class="section-description">One catalog for option pricing, Greek validation, SDE convergence, synthetic hedge replication and existing return/volatility runs. Saving computes the current inputs again on the server; it never accepts browser-supplied results. Existing replay records retain their IDs and fingerprints.</p>
     <div class="form-grid"><label>Experiment name<input id="lab-name" value="Convergence baseline" maxlength="80"></label><label>Inputs to compute and save<select id="lab-source"><option value="sde_convergence">Current SDE inputs</option><option value="hedging_replication">Current Delta hedging inputs</option><option value="option_pricing">Current Pricing lab inputs</option><option value="greek_validation">Current Greeks lab inputs</option></select></label></div>
@@ -428,7 +447,7 @@
     <div class="actions"><button id="lab-view" type="button" class="secondary" disabled>Inspect A</button><button id="lab-rerun" type="button" disabled>Rerun A as new child</button><button id="lab-compare" type="button" class="secondary" disabled>Compare A and B</button><button id="lab-export" type="button" class="secondary" disabled>Export saved A</button></div>
     <p id="lab-detail" class="hint">Select a saved record. Saved outputs are distinct from the unsaved preview above.</p>
   </section>
-  <section class="panel roadmap" id="roadmap" aria-labelledby="roadmap-title"><div><p class="eyebrow">12 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
+  <section class="panel roadmap" id="roadmap" data-workspace-section hidden aria-labelledby="roadmap-title"><div><p class="eyebrow">12 / Model development</p><h2 id="roadmap-title">From market state to model evidence</h2><p>The broker supplies observations. Your textbook supplies the pricing methods. Keep the two independently testable.</p></div><article><span class="step">01</span><h3>Observe</h3><p>Contracts, quote quality, positions.</p><span class="badge positive">THIS DASHBOARD</span></article><article><span class="step">02</span><h3>Validate</h3><p>Exact-GBM Monte Carlo against Black–Scholes, with sampling error.</p><span class="badge">PRICING LAB · IMPLEMENTED</span></article><article><span class="step">03</span><h3>Study sensitivities</h3><p>Model Greeks and scenarios. Portfolio aggregation remains planned.</p><span class="badge">GREEKS LAB · IMPLEMENTED</span></article></section>
   <p id="build-info" class="build-info">Build identity: unlock to inspect the running server.</p>
   <footer><span>DERIVATIVE LAB / LOCAL RESEARCH SYSTEM</span><span>No trading controls · no profitability claims · no account-value estimates</span></footer>
 </main>

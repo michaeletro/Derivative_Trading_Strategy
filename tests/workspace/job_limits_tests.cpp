@@ -46,6 +46,16 @@ int main() {
             check(parts.finish() == parts.finish(), "Hash finalization is stable and nonmutating");
         }
         validate_json(dataset_request());
+        auto proposal=dataset_request();proposal["configuration"]["preset"]="proposal_oct2026";
+        proposal["configuration"]["quantity_unit"]="shares";proposal["configuration"]["shares_confirmed"]=true;
+        validate_json(proposal);
+        proposal["configuration"]["shares_confirmed"]=false;rejects([&]{validate_json(proposal);});
+        proposal["configuration"]["shares_confirmed"]=true;proposal["configuration"]["levels"]=4;rejects([&]{validate_json(proposal);});
+        proposal["configuration"]["levels"]=5;proposal["mode"]="proposal_experiment";rejects([&]{validate_json(proposal);});
+        proposal["configuration"]["train_end_date"]="2026-09-10";proposal["configuration"]["validation_end_date"]="2026-09-15";
+        validate_json(proposal);
+        proposal["configuration"]["validation_end_date"]="2026-09-09";rejects([&]{validate_json(proposal);});
+        check(input_limits("proposal_experiment").session_events==10000000,"Proposal experiments freeze streaming inputs");
         auto dataset = dataset_request(); dataset["configuration"]["return_seconds"] = 120; validate_json(dataset);
         for (const auto* key : {"levels", "return_seconds", "max_side_age_seconds"}) {
             dataset = dataset_request(); dataset["configuration"][key] = 0;

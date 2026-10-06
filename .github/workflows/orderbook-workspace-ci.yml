@@ -66,6 +66,7 @@ jobs:
       - name: Browser-to-worker acceptance and synthetic live-control protocol
         run: |
           python tests/workspace/browser_tests.py build-workspace/server
+          python tests/workspace/explorer_browser_tests.py build-workspace/server
           python tests/ticks/browser_tests.py build-workspace/server build-workspace/tick_tests
           python tests/variation/browser_tests.py build-workspace/server build-workspace/research_store_tests
       - uses: actions/upload-artifact@v4

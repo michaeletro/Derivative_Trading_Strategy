@@ -19,3 +19,17 @@
 #ob-dataset{margin:20px 0;min-width:0}#ob-dataset .table-scroll{max-height:540px;overflow:auto}#ob-dataset table{font-variant-numeric:tabular-nums}#ob-dataset th,#ob-dataset td{white-space:nowrap;text-align:right}#ob-dataset th:first-child,#ob-dataset td:first-child{text-align:left}#ob-dataset td:last-child{white-space:normal;min-width:160px}#ob-dataset .ob-three{grid-template-columns:repeat(2,minmax(0,1fr))}.ob-dataset-exports{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}#ob-dataset dl{overflow-wrap:anywhere}#ob-dataset td details{min-width:260px;text-align:left}#ob-dataset td details dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(100px,auto);gap:8px}#ob-dataset td details dd{margin:0}#ob-dataset-block-more,#ob-dataset-pair-more{margin:12px 0}
 @media(max-width:800px){#ob-dataset .ob-three,.ob-dataset-exports{grid-template-columns:minmax(0,1fr)}}
 .ob-operation{max-width:480px}
+
+/* Interactive research exploration; independent of native capture. */
+.ob-explorer{margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--line,#294149)}
+.ob-explorer-controls{display:flex;gap:1.2rem;flex-wrap:wrap;align-items:center;margin:1rem 0}
+#ob-heatmap{display:block;width:100%;height:320px;border:1px solid #294149;border-radius:8px;cursor:crosshair}
+#ob-heat-scrub{width:100%}
+#ob-quality-panel pre{max-height:24rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.ob-coverage-grid{display:flex;flex-wrap:wrap;gap:.45rem;margin:1rem 0;max-height:22rem;overflow:auto}
+.ob-coverage-block.qualified{border-color:#55dab2;background:#16382e}
+.ob-coverage-block.excluded{border-color:#bd795b;background:#38261f}
+#ob-coverage-hist,#ob-coverage-cdf{width:100%;min-height:180px;background:#071b20}
+#ob-coverage-hist text,#ob-coverage-cdf text{fill:#b8cbd1;font-size:12px}
+#ob-proposal-settings{padding:1rem;border:1px solid #294149;border-radius:8px;margin-top:1rem}
+#ob-proposal-result{margin:1.5rem 0}#ob-proposal-result pre{max-height:25rem;overflow:auto;white-space:pre-wrap}

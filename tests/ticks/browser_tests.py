@@ -50,6 +50,8 @@ def main(exe,seed):
             page.route('**/api/dashboard',lambda r:r.fulfill(json=state))
             page.route('**/api/contracts/resolve',lambda r:r.fulfill(json={'request_id':123,'status':'pending'}))
             page.route('**/api/contracts/requests/123',lambda r:r.fulfill(json={'status':'complete','contracts':[{'contract_id':123,'symbol':'SYNTHETIC','security_type':'STK','exchange':'SMART','currency':'USD','multiplier':1}]}))
+            page.evaluate('location.hash="instruments"');expect(page.locator('#market-workspace')).to_be_visible()
+            page.locator('#broker-connection-details > summary').click()
             page.locator('#refresh').click();expect(page.locator('#resolve')).to_be_enabled();page.locator('#resolve').click()
             page.get_by_role('button',name='Historical ticks',exact=True).click()
             page.locator('#ticks-start').fill('2026-10-02T09:30:07');page.locator('#ticks-end').fill('2026-10-02T09:32:29')

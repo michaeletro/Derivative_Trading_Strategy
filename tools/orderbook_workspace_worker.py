@@ -68,7 +68,7 @@ def validate_request(r):
     allowed = {'schema_version', 'mode', 'session_ids', 'source', 'configuration', 'split'}
     if not isinstance(r, dict) or set(r) != allowed or type(r['schema_version']) is not int or r['schema_version'] != 1:
         raise JobError('Invalid research request schema.')
-    if r['mode'] not in ('dataset', 'flow', 'describe', 'inspect', 'compare') or r['source'] not in ('ibkr_tws', 'mock'):
+    if r['mode'] not in ('dataset', 'proposal_experiment', 'flow', 'describe', 'inspect', 'compare') or r['source'] not in ('ibkr_tws', 'mock'):
         raise JobError('Choose time-flow research, description, inspection or comparison and acknowledge the actual source.')
     ids = r['session_ids']
     if (not isinstance(ids, list) or not 1 <= len(ids) <= MAX_SESSIONS
@@ -76,14 +76,27 @@ def validate_request(r):
             or len(set(ids)) != len(ids)):
         raise JobError('Select 1..24 distinct recorded session IDs.')
     c = r['configuration']
-    if r['mode'] == 'dataset':
+    if r['mode'] in ('dataset', 'proposal_experiment'):
         from orderbook.research_dataset import DatasetConfig as ResearchDatasetConfig
-        if (not isinstance(c, dict) or set(c) != {'levels', 'return_seconds', 'max_side_age_seconds'}
-                or r['split'] is not None):
+        keys = {'levels', 'return_seconds', 'max_side_age_seconds'}
+        if isinstance(c, dict) and 'preset' in c:
+            keys |= {'preset', 'quantity_unit', 'shares_confirmed'}
+        experiment = r['mode'] == 'proposal_experiment'
+        if experiment:
+            keys |= {'train_end_date', 'validation_end_date'}
+        if (not isinstance(c, dict) or set(c) != keys or r['split'] is not None):
             raise JobError('Research dataset requires fixed levels, return spacing, side age, and no model partitions.')
         try:
-            cfg = ResearchDatasetConfig(**c)
+            values = {k: v for k, v in c.items() if k not in ('train_end_date', 'validation_end_date')}
+            cfg = ResearchDatasetConfig(**values)
+            if experiment:
+                from orderbook.proposal_experiment import ExperimentConfig
+                ExperimentConfig(c['train_end_date'], c['validation_end_date'])
+                if cfg.preset != 'proposal_oct2026':
+                    raise ValueError('Proposal preset required')
         except (ValueError, TypeError):
+            if experiment or isinstance(c, dict) and c.get('preset') == 'proposal_oct2026':
+                raise JobError('Proposal analysis requires five levels, explicit confirmed share units, 60/120-second returns, a positive side-age bound up to 60 seconds, and ordered valid experiment dates when fitting models.') from None
             raise JobError('Choose one through five fixed levels, 60 or 120 second returns, and a side-age bound above zero and at most 60 seconds.') from None
         return cfg, None, None
     if r['mode'] == 'flow':
@@ -136,7 +149,7 @@ def load_snapshots(job: Path, request: dict):
     if (manifest.get('schema_version') != 1 or not isinstance(manifest.get('exports'), list)
             or len(manifest['exports']) != len(request['session_ids'])):
         raise JobError('Invalid frozen input manifest.')
-    if request['mode'] == 'dataset':
+    if request['mode'] in ('dataset', 'proposal_experiment'):
         from orderbook.research_dataset import FrozenStream, MAX_BYTES, MAX_EVENTS as DATASET_EVENTS, MAX_SESSION_EVENTS as DATASET_SESSION_EVENTS
         sources, total_bytes, total_events = [], 0, 0
         for sid, entry in zip(request['session_ids'], manifest['exports']):
@@ -189,13 +202,15 @@ def summarize(report: dict, request: dict):
     result.update(schema_version=1, kind='orderbook_workspace_result', workspace_version=VERSION,
                   request=request, request_sha256=digest(request),
                   worker_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), sessions=[])
-    if request['mode'] in ('dataset', 'describe', 'flow'):
-        section = {'flow': 'flow', 'dataset': 'dataset', 'describe': 'descriptive'}[request['mode']]
+    if request['mode'] in ('dataset', 'proposal_experiment', 'describe', 'flow'):
+        section = {'flow': 'flow', 'dataset': 'dataset', 'proposal_experiment': 'dataset', 'describe': 'descriptive'}[request['mode']]
         result[section] = report[section]
         result['sessions'] = report['sessions']
         result['liquidity'] = report['liquidity']
-        if request['mode'] == 'dataset':
+        if request['mode'] in ('dataset', 'proposal_experiment'):
             result['artifacts'] = report['artifacts']
+            if 'experiment' in report:
+                result['experiment'] = report['experiment']
         result['sha256'] = digest(result)
         return result
     cap = max(50, 1500 // max(1, len(report['sessions'])))
@@ -223,9 +238,16 @@ def execute(job: Path):
     payloads = load_snapshots(job, request)
     from orderbook import LabError
     try:
-        if request['mode'] == 'dataset':
+        if request['mode'] in ('dataset', 'proposal_experiment'):
             from orderbook.research_dataset import build_dataset, write_report
             report = build_dataset(payloads, cfg, job / 'output')
+            if request['mode'] == 'proposal_experiment':
+                from orderbook.proposal_experiment import run_experiment, ExperimentConfig
+                c = request['configuration']
+                experiment, artifacts = run_experiment(report, ExperimentConfig(c['train_end_date'], c['validation_end_date']), job / 'output')
+                report['experiment'] = experiment
+                report['artifacts'].extend(artifacts)
+                report['liquidity'] = {'status': experiment['status'], 'reason': experiment['reason']}
         elif request['mode'] == 'flow':
             from orderbook.time_flow import analyze_flow_many, write_report
             report = analyze_flow_many(payloads, cfg, validated=True)
@@ -243,7 +265,7 @@ def execute(job: Path):
     # The bounded persisted description and HTTP result share provenance and
     # exact statistics; no second replay or clock-derived resampling occurs.
     result = summarize(report, request)
-    write_report(job / 'output', result if request['mode'] in ('dataset', 'describe', 'flow') else report)
+    write_report(job / 'output', result if request['mode'] in ('dataset', 'proposal_experiment', 'describe', 'flow') else report)
     write_json(job / 'result.json', result)
 
 
@@ -264,7 +286,7 @@ def main(argv=None, execute_job=None):
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
             return 2
         os.umask(0o077)
-        dataset_mode = read_json(job / 'request.json', 8192).get('mode') == 'dataset'
+        dataset_mode = read_json(job / 'request.json', 8192).get('mode') in ('dataset', 'proposal_experiment')
         cpu_limit = 1500 if dataset_mode else 150
         file_limit = 256_000_000 if dataset_mode else 120_000_000
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))

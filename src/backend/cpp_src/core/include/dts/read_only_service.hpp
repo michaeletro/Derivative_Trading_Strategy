@@ -16,6 +16,8 @@ struct DepthView {
     RequestId request_id;
     DepthSpec spec;
     DepthBook book;
+    std::uint64_t update_event_count = 0, lifecycle_event_count = 0;
+    std::optional<DepthStamp> last_update = std::nullopt;
 };
 struct PositionsView {
     SnapshotStatus status = SnapshotStatus::Unavailable;
@@ -147,7 +149,12 @@ private:
         contracts_.clear(); subscriptions_.clear(); quotes_.clear(); resolutions_.clear();
         positions_ = {}; staged_positions_.clear(); position_id_ = 0; depth_.reset();tick_pages_.clear();
     }
-    void apply(const DepthEvent& e) { if (depth_ && depth_->request_id == e.request_id) depth_->book.apply(e); }
+    void apply(const DepthEvent& e) {
+        if (!depth_ || depth_->request_id != e.request_id) return;
+        if (e.kind == "update") { ++depth_->update_event_count; depth_->last_update = e.received; }
+        else ++depth_->lifecycle_event_count;
+        depth_->book.apply(e);
+    }
     void apply(const HistoricalBarEvent&) {} // Committed by the recording decorator.
     void apply(const HistoricalEnd&) {}
     void apply(const HistoricalTickPage& e) {

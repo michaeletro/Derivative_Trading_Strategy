@@ -33,7 +33,7 @@ def main(exe, seed):
         root=Path(tmp)
         expected=json.loads(subprocess.check_output([seed, str(root/'data')], text=True))
         with Server(exe, root) as s:
-            for path, body in [('/api/depth/current', None),('/api/depth/sessions',{}),('/api/depth/events',{'session_id':'1'}),('/api/depth/subscribe',{'contract_id':'9001','venue':'TESTEX','rows':3}),('/api/depth/unsubscribe',{'request_id':'42'})]:
+            for path, body in [('/api/readiness', None),('/api/depth/current', None),('/api/depth/sessions',{}),('/api/depth/events',{'session_id':'1'}),('/api/depth/subscribe',{'contract_id':'9001','venue':'TESTEX','rows':3}),('/api/depth/unsubscribe',{'request_id':'42'})]:
                 ck(s.call(path, body, auth=False)[0]==401)
                 ck(s.call(path, body, Origin='https://untrusted.invalid')[0]==403)
             ck(s.call('/api/depth/current')[1]['available'] is False)
@@ -42,6 +42,21 @@ def main(exe, seed):
             ck(idle['recording']['active'] is False and idle['recording']['committed_event_count'] is None)
             ck(idle['recording']['last_commit_scope']=='all recorder streams')
             ck('raw_payload_hex' in idle['metadata_fields']['raw_sidecar'])
+            ready_code,ready=s.call('/api/readiness')
+            ck(ready_code==200 and ready['kind']=='local_collection_readiness')
+            ck(ready['source']=='disabled' and not ready['synthetic'])
+            ck(ready['collection_checks_passed'] is False and ready['research_qualified'] is False)
+            ck('native_source_unavailable' in ready['blocking_reasons'] and 'broker_not_ready' in ready['blocking_reasons'])
+            ck(ready['clock']['state'] in ('checking','inconsistent'))
+            ck(int(ready['clock']['sample_count'])>=1 and ready['clock']['acceptance_threshold_seconds']==1)
+            ck(ready['clock']['scope']=='since_server_start' and ready['clock']['failure_sticky_until_restart'])
+            ck(ready['clock']['utc_accuracy_verified'] is False and ready['clock']['archived_timestamps_modified'] is False)
+            ck(ready['paper_session_verification']=='manual_required' and ready['tws_read_only_api_verification']=='manual_required')
+            ck(ready['order_execution_enabled'] is False and ready['broker']['state']=='disconnected')
+            ck(ready['recorder']['healthy'] and not ready['recorder']['active'])
+            ck(int(ready['disk']['available_bytes'])>=0 and int(ready['disk']['minimum_reserve_bytes'])==2147483648)
+            ck(ready['depth']['update_event_count']=='0' and ready['depth']['last_update_age_seconds'] is None)
+            ck(idle['readiness']['kind']==ready['kind'] and not idle['readiness']['depth']['requested'])
             # Valid row bounds reach the unavailable-broker check; invalid bounds
             # fail input validation before any broker request.
             for rows in (1,10,11,50):

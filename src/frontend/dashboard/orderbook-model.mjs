@@ -169,16 +169,26 @@ export function researchRequest(form, selected) {
   if(!selected.length||selected.length>24||new Set(selected.map(s=>s.session_id)).size!==selected.length||selected.some(s=>!id(s.session_id)||!terminal(s.state)))
     fail('Select 1..24 completed recordings; active captures cannot be analyzed.');
   const first=selected[0];
-  const identityKeys=['source','contract_id','venue','contract_route','currency',...(form.mode==='dataset'?[]:['requested_rows'])];
+  const dataset=['dataset','proposal_experiment'].includes(form.mode);
+  const identityKeys=['source','contract_id','venue','contract_route','currency',...(dataset?[]:['requested_rows'])];
   if(selected.some(s=>identityKeys.some(k=>s[k]!==first[k])))
-    fail(form.mode==='dataset'?'Keep instrument, direct venue, source, route and currency identical within a dataset.':'Keep instrument, venue, source, row limit, route and currency identical within one experiment.');
+    fail(dataset?'Keep instrument, direct venue, source, route and currency identical within a dataset.':'Keep instrument, venue, source, row limit, route and currency identical within one experiment.');
   if(first.source==='mock' && !form.synthetic) fail('Explicitly acknowledge synthetic recordings before using mock data.');
-  if(!['describe','flow','dataset','inspect','compare'].includes(form.mode)) fail('Choose book characteristics, order flow, a research dataset, timed diagnostics or model comparison.');
-  if(form.mode==='dataset') {
+  if(!['describe','flow','dataset','proposal_experiment','inspect','compare'].includes(form.mode)) fail('Choose book characteristics, order flow, a research dataset, timed diagnostics or model comparison.');
+  if(dataset) {
     const c={levels:Number(form.dataset_levels),return_seconds:Number(form.return_seconds),max_side_age_seconds:Number(form.dataset_side_age)};
     if(!Number.isInteger(c.levels)||!number(c.levels,1,5)||![60,120].includes(c.return_seconds)||!number(c.max_side_age_seconds,1e-12,60))
       fail('Choose 1–5 common price levels, 1- or 2-minute returns, and a positive side-age limit up to 60 seconds.');
-    return {schema_version:1,mode:'dataset',session_ids:selected.map(s=>s.session_id),source:first.source,configuration:c,split:null};
+    if(form.dataset_preset==='proposal_oct2026'||form.mode==='proposal_experiment') {
+      if(c.levels!==5||form.shares_confirmed!==true)fail('The proposal requires five levels and explicit confirmation that recorded sizes are shares. Verify feed units before continuing.');
+      Object.assign(c,{preset:'proposal_oct2026',quantity_unit:'shares',shares_confirmed:true});
+    } else if(form.dataset_preset!==undefined&&form.dataset_preset!=='legacy')fail('Choose a known measurement definition.');
+    if(form.mode==='proposal_experiment') {
+      const train=dates(form.train_end_date),validation=dates(form.validation_end_date);
+      if(train.length!==1||validation.length!==1||train[0]>=validation[0])fail('Choose one training-end date followed by one validation-end date.');
+      Object.assign(c,{train_end_date:train[0],validation_end_date:validation[0]});
+    }
+    return {schema_version:1,mode:form.mode,session_ids:selected.map(s=>s.session_id),source:first.source,configuration:c,split:null};
   }
   if(form.mode==='flow') {
     const required=k=>typeof form[k]==='number'||typeof form[k]==='string'&&form[k].trim()!=='';
@@ -211,7 +221,7 @@ export function researchRequest(form, selected) {
 export function parseJobs(p) {
   if(!p||p.schema_version!==1||!Array.isArray(p.jobs)||p.jobs.length>50||typeof p.has_more!=='boolean') fail('Invalid research catalog.');
   for(const j of p.jobs) if(!jobId(j.job_id)||!['running','complete','failed','cancelled','interrupted','timeout'].includes(j.state)
-    ||!['describe','flow','dataset','inspect','compare'].includes(j.mode)||!['ibkr_tws','mock'].includes(j.source)||!Array.isArray(j.session_ids)||j.session_ids.some(x=>!id(x))) fail('Invalid research job metadata.');
+    ||!['describe','flow','dataset','proposal_experiment','inspect','compare'].includes(j.mode)||!['ibkr_tws','mock'].includes(j.source)||!Array.isArray(j.session_ids)||j.session_ids.some(x=>!id(x))) fail('Invalid research job metadata.');
   return p;
 }
 export function parseResult(r) {
@@ -219,7 +229,7 @@ export function parseResult(r) {
      ||!Array.isArray(r.sessions)||r.sessions.length>24||!r.request||!Array.isArray(r.source_hashes)) fail('Incompatible research result.');
   const descriptive=r.request.mode==='describe';
   const flow=r.request.mode==='flow';
-  const dataset=r.request.mode==='dataset';
+  const dataset=['dataset','proposal_experiment'].includes(r.request.mode);
   if(dataset)parseDatasetMetadata(r);
   if(flow&&(!r.flow||!r.flow.definitions||typeof r.flow.definitions!=='object'))fail('Invalid order-flow report conventions.');
   if(descriptive&&(!r.descriptive||r.descriptive.weighting!=='event_weighted'||!r.descriptive.definitions
@@ -241,11 +251,11 @@ export function parseResult(r) {
 }
 function parseDatasetMetadata(r) {
   const count=x=>Number.isSafeInteger(x)&&x>=0;
-  if(!r.dataset||!r.dataset.summary||!r.dataset.definitions||!Array.isArray(r.artifacts)||r.artifacts.length>4)fail('Invalid research dataset manifest.');
+  if(!r.dataset||!r.dataset.summary||!r.dataset.definitions||!Array.isArray(r.artifacts)||r.artifacts.length>6)fail('Invalid research dataset manifest.');
   if(r.dataset.warnings!==undefined&&(!Array.isArray(r.dataset.warnings)||r.dataset.warnings.length>100||r.dataset.warnings.some(w=>typeof w!=='string'||w.length>4000))
     ||r.dataset.overlapping_recording_windows!==undefined&&!count(r.dataset.overlapping_recording_windows))fail('Invalid dataset provenance warnings.');
   for(const k of ['sessions','trading_days','qualified_blocks','forecast_pairs','qualified_feature_rows','qualified_return_endpoints'])if(!count(r.dataset.summary[k]))fail('Invalid dataset readiness totals.');
-  const files={features:'features.csv.gz',minutes:'minutes.csv.gz',blocks:'blocks.csv',pairs:'pairs.csv'},seen=new Set();
+  const files={features:'features.csv.gz',minutes:'minutes.csv.gz',blocks:'blocks.csv',pairs:'pairs.csv',predictions:'predictions.csv',daily_losses:'daily_losses.csv'},seen=new Set();
   for(const a of r.artifacts) {
     if(!a||!Object.hasOwn(files,a.name)||seen.has(a.name)||a.file!==files[a.name]||!count(a.bytes)||!count(a.rows)
       ||typeof a.sha256!=='string'||!(/^[a-f0-9]{64}$/).test(a.sha256)||a.content_type!==(a.name==='features'||a.name==='minutes'?'application/gzip':'text/csv'))fail('Invalid dataset export metadata.');

@@ -1,16 +1,19 @@
 import {parseDepth,depthView,maxDepthRows,appendLiveSample,liveSegments,sessionPage,researchRequest,parseJobs,parseResult,aggregate,id,jobId,terminal,replayEventPage,flowNumber} from './orderbook-model.mjs';
 import {numberText} from './model.mjs';
+import {mountBookExplorer} from './orderbook-explorer.mjs';
 
 export function mountOrderbook(api,onAccessError) {
   const $=name=>document.getElementById(name), put=(name,value)=>{$(name).textContent=value;};
+  const navigate=route=>window.dispatchEvent(new CustomEvent('dts:navigate',{detail:{route}}));
+  const explorer=mountBookExplorer({navigate});
   const make=(tag,text,cls='')=>{const el=document.createElement(tag);el.textContent=String(text??'—');el.className=cls;return el;};
   let unlocked=false,busy=false,revision=0,context=null,generation=null;
   let live=null,liveAt=0,loaded=false,needsReconcile=false,selected=null,pending=null;
   let sessions=[],cursor='0',hasMore=false,selectedIds=new Set(),jobs=[],capability=null,result=null;
-  let liveTimer=null,jobTimer=null,verified=false,previousEvidence=null,liveHistory=[];
+  let liveTimer=null,jobTimer=null,readinessTimer=null,verified=false,previousEvidence=null,liveHistory=[];
   let graphExpanded=false;
   let archive=null,submittedJob=null,flowBinPage=0,resultJob=null,datasetBlockPage=0,datasetPairPage=0;
-  const modeLabel=mode=>mode==='describe'?'Depth, slope & distributions':mode==='flow'?'Order flow over time':mode==='dataset'?'Build research dataset':mode==='compare'?'Model comparison':'Timed book diagnostics';
+  const modeLabel=mode=>mode==='proposal_experiment'?'Proposal M0–M2 experiment':mode==='describe'?'Depth, slope & distributions':mode==='flow'?'Order flow over time':mode==='dataset'?'Build research dataset':mode==='compare'?'Model comparison':'Timed book diagnostics';
   const graphHomes=new Map();
   for(const name of ['ob-live-charts','ob-live-ladders','ob-capture-actions']) {
     const anchor=document.createComment(name+' original position');$(name).before(anchor);graphHomes.set(name,anchor);
@@ -39,15 +42,19 @@ export function mountOrderbook(api,onAccessError) {
   const ready=()=>unlocked&&context?.broker?.state==='ready';
   const selectedSessions=()=>sessions.filter(s=>selectedIds.has(s.session_id));
   const notify=t=>put('ob-notice',t);
-  function tab(name) {
-    for(const value of ['live','recordings','results']) {
+  function tab(name,updateRoute=true) {
+    if(!['live','recordings','quality','results'].includes(name))return;
+    for(const value of ['live','recordings','quality','results']) {
       $(`ob-${value}-panel`).hidden=value!==name;
       $(`ob-${value}-tab`).setAttribute('aria-selected',String(value===name));
     }
     if(name==='recordings')archiveFrame();
     if(name==='results'&&result?.request.mode==='describe')descriptionPlots();
     if(name==='results'&&result?.request.mode==='flow')flowPlots();
+    if(name==='live')explorer.render();
+    if(updateRoute)navigate(name==='live'?'orderbook':name);
   }
+  window.addEventListener('dts:workspacechange',event=>{if(event.detail?.orderbookTab)tab(event.detail.orderbookTab,false);});
   for(const name of ['live','recordings','results']) $(`ob-${name}-tab`).addEventListener('click',()=>tab(name));
   function controls() {
     $('ob-refresh').disabled=!unlocked||busy;
@@ -57,6 +64,8 @@ export function mountOrderbook(api,onAccessError) {
     $('ob-start').disabled=!ready()||busy||!loaded||needsReconcile||!selected||!!live?.available;
     $('ob-rows').disabled=!ready()||busy||!!live?.available;
     $('ob-stop').disabled=!unlocked||busy||!live?.available||needsReconcile;
+    if($('collection-stop'))$('collection-stop').disabled=$('ob-stop').disabled;
+    if($('collection-refresh'))$('collection-refresh').disabled=!unlocked||busy;
     $('ob-more').disabled=!unlocked||busy||!hasMore;
     $('ob-jobs-refresh').disabled=!unlocked||busy;
     $('ob-research-fields').disabled=!unlocked||busy||!loaded||needsReconcile||!capability?.enabled||!!capability?.busy;
@@ -75,7 +84,8 @@ export function mountOrderbook(api,onAccessError) {
     return value;
   }
   function schedule() {
-    if(!unlocked||document.hidden) {clearTimeout(liveTimer);clearTimeout(jobTimer);liveTimer=jobTimer=null;return;}
+    if(!unlocked||document.hidden) {clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);liveTimer=jobTimer=readinessTimer=null;return;}
+    if(readinessTimer===null)readinessTimer=setTimeout(()=>{readinessTimer=null;work(readinessStatus);},5000);
     if($('ob-watch').checked||pending) {
       if(liveTimer===null) liveTimer=setTimeout(()=>{liveTimer=null;work(async rev=>{await current(rev);await resolution(rev);});},1000);
     } else {clearTimeout(liveTimer);liveTimer=null;}
@@ -216,12 +226,14 @@ export function mountOrderbook(api,onAccessError) {
         previousEvidence={...e,verified};
       } else {verified=false;previousEvidence=null;}
       liveHistory=appendLiveSample(liveHistory,p,Date.now(),performance.now()-started);
-      live=p;liveAt=started;renderLive();
+      live=p;liveAt=started;explorer.observe(p,view,Date.now());if(p.readiness)explorer.readiness(p.readiness);renderLive();
     } catch(e) {if(rev===revision){live=null;liveHistory=[];verified=false;previousEvidence=null;renderLive();}throw e;}
   }
   function renderSessions() {
     if(!sessions.length){blank('ob-sessions',8,'No recordings loaded. No missing data is assumed to be zero.');return;}
-    $('ob-sessions').replaceChildren(...sessions.map(s=>{
+    const filter=$('ob-session-filter').value.trim().toLowerCase();
+    const filtered=sessions.filter(s=>!filter||[s.session_id,s.symbol,s.venue,s.source,s.state,new Date(s.started_ms).toISOString()].join(' ').toLowerCase().includes(filter));
+    $('ob-sessions').replaceChildren(...filtered.map(s=>{
       const tr=make('tr',''),choice=make('td',''),input=document.createElement('input');input.type='checkbox';input.value=s.session_id;
       input.setAttribute('aria-label',`Select recording ${s.session_id}`);input.checked=selectedIds.has(s.session_id);input.disabled=!terminal(s.state);
       input.addEventListener('change',()=>{if(input.checked)selectedIds.add(s.session_id);else selectedIds.delete(s.session_id);controls();});choice.append(input);tr.append(choice);
@@ -231,7 +243,16 @@ export function mountOrderbook(api,onAccessError) {
       open.addEventListener('click',()=>work(rev=>openArchive(rev,s.session_id)));cell.append(open);tr.append(cell);
       return tr;
     }));
+    if(!filtered.length)blank('ob-sessions',8,'No loaded recordings match this filter.');
   }
+  $('ob-session-filter').addEventListener('input',renderSessions);
+  async function readinessStatus(rev){
+    try{explorer.readiness(await read('/api/readiness','GET',undefined,rev));}
+    catch(error){if(rev===revision)explorer.readiness(null);if([401,403].includes(error.status))throw error;}
+    await current(rev);
+  }
+  $('collection-refresh')?.addEventListener('click',()=>work(readinessStatus));
+  $('collection-stop')?.addEventListener('click',()=>{if(!$('ob-stop').disabled)$('ob-stop').click();});
   async function openArchive(rev,sid,more=false) {
     const prior=more?archive?.state:null;
     if(!more){archive=null;$('ob-archive').hidden=true;}
@@ -316,7 +337,7 @@ export function mountOrderbook(api,onAccessError) {
     }
   }
   async function load(rev) {
-    await current(rev);await catalog(rev);await loadJobs(rev);loaded=true;needsReconcile=false;notify('Workspace refreshed. Broker connection and capture remain explicit.');
+    await readinessStatus(rev);await catalog(rev);await loadJobs(rev);loaded=true;needsReconcile=false;notify('Workspace refreshed. Broker connection and capture remain explicit.');
   }
   $('ob-refresh').addEventListener('click',()=>work(load));
   $('ob-more').addEventListener('click',()=>work(rev=>catalog(rev,true)));
@@ -367,13 +388,17 @@ export function mountOrderbook(api,onAccessError) {
       await current(rev);await catalog(rev);notify(value.cancelled?'Capture stopped; inspect its completed session.':'Request cleared or already stopped. Inspect the archive state before proceeding.');},true);
   });
   function modeControls() {
-    const describe=$('ob-mode').value==='describe',flow=$('ob-mode').value==='flow',dataset=$('ob-mode').value==='dataset',compare=$('ob-mode').value==='compare';
+    const describe=$('ob-mode').value==='describe',flow=$('ob-mode').value==='flow',experiment=$('ob-mode').value==='proposal_experiment',dataset=$('ob-mode').value==='dataset'||experiment,compare=$('ob-mode').value==='compare';
     $('ob-timed-settings').hidden=describe||flow||dataset;
     for(const el of $('ob-timed-settings').querySelectorAll('input,select'))el.disabled=describe||flow||dataset;
     $('ob-flow-settings').hidden=!flow;
     for(const el of $('ob-flow-settings').querySelectorAll('input,select'))el.disabled=!flow;
     $('ob-dataset-settings').hidden=!dataset;
     for(const el of $('ob-dataset-settings').querySelectorAll('input,select'))el.disabled=!dataset;
+    $('ob-experiment-dates').hidden=!experiment;
+    for(const el of $('ob-experiment-dates').querySelectorAll('input')){el.disabled=!experiment;el.required=experiment;}
+    if(experiment)$('ob-dataset-preset').value='proposal_oct2026';
+    $('ob-dataset-preset').disabled=!dataset||experiment;
     $('ob-partitions').hidden=!compare;
     for(const el of $('ob-partitions').querySelectorAll('textarea'))el.disabled=!compare;
     put('ob-mode-note',dataset?'Prepare a research dataset with strict clock checks, coverage flags and next-block target alignment. Review readiness and exclusions before fitting any model.':describe?'Describe all captured price levels in event order. Clock problems are reported; elapsed-time and prediction analyses remain separate.':flow?'Model callback counts and interarrival times, and study depth, slope, spread and imbalance through the chosen time window. Clock checks apply before a time model is calculated.':'Timed diagnostics and prediction models require consistent receipt clocks. Failed clock checks remain enforced.');
@@ -388,7 +413,7 @@ export function mountOrderbook(api,onAccessError) {
   $('ob-research-form').addEventListener('submit',event=>{
     event.preventDefault();if(!capability?.enabled||capability.busy||needsReconcile)return;
     let request;
-    try{const f=Object.fromEntries(new FormData(event.currentTarget));f.synthetic=event.currentTarget.elements.synthetic.checked;request=researchRequest(f,selectedSessions());}
+    try{const f=Object.fromEntries(new FormData(event.currentTarget));f.synthetic=event.currentTarget.elements.synthetic.checked;f.shares_confirmed=$('ob-shares-confirmed').checked;if(f.mode==='proposal_experiment')f.dataset_preset='proposal_oct2026';request=researchRequest(f,selectedSessions());}
     catch(e){notify(e.message);return;}
     if(!window.confirm(`Run ${modeLabel(request.mode)} on ${request.session_ids.length} completed recording(s)? Source: ${request.source==='mock'?'SYNTHETIC MOCK':'IBKR recorded data'}.${request.mode==='flow'&&request.configuration.clock_policy==='recorded_monotonic'?' Exploratory recorded-monotonic timing is an explicit assumption; results are provisional.':''} The request and results are saved. No broker request or order will be sent.`))return;
     work(async rev=>{
@@ -416,7 +441,7 @@ export function mountOrderbook(api,onAccessError) {
   function resultSession() {
     if(!result)return;const s=result.sessions[Number($('ob-result-session').value)];if(!s)return;
     $('ob-result-scrub').max=String(Math.max(0,s.frames.length-1));$('ob-result-scrub').value=String(Math.max(0,s.frames.findIndex(f=>f.usable)));
-    const describe=result.request.mode==='describe',flow=result.request.mode==='flow',dataset=result.request.mode==='dataset';
+    const describe=result.request.mode==='describe',flow=result.request.mode==='flow',dataset=['dataset','proposal_experiment'].includes(result.request.mode);
     put('ob-result-coverage',JSON.stringify(dataset?{session:s.identity,status:s.dataset.status,coverage:s.dataset.coverage,clock:s.dataset.clock,exclusion_counts:s.dataset.exclusion_counts}:flow?{session:s.identity,status:s.flow.status,window:s.flow.window,clock:s.flow.clock,warnings:s.flow.warnings}:describe?{session:s.identity,eligible_post_update_states:s.descriptive.eligible_events,event_quality:s.descriptive.quality_counts,clock:s.descriptive.clock}:{session:s.identity,grid_points:s.grid_count,eligible_rows:s.sample_count,grid_quality:s.quality_counts,event_quality:s.event_quality_counts,exclusions:s.missing_targets,partial_session_variation:s.partial_session_variation},null,2));
     if(describe)renderDescription(s);
     if(flow)renderFlow(s);
@@ -568,7 +593,7 @@ export function mountOrderbook(api,onAccessError) {
   window.addEventListener('resize',()=>{if(unlocked&&result?.request.mode==='describe')descriptionPlots();if(unlocked&&result?.request.mode==='flow')flowPlots();});
   const datasetLabels={sessions:'Recordings',blocked_sessions:'Recordings blocked by clocks',trading_days:'Qualified trading days',grid_points:'One-second grid points',qualified_feature_rows:'Qualified book measurements',qualified_return_endpoints:'Qualified return endpoints',qualified_blocks:'Qualified 30-minute blocks',forecast_pairs:'Eligible next-block pairs'};
   const datasetTime=stamp=>new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(stamp/1000));
-  const currentDataset=()=>result?.request.mode==='dataset'?result.sessions[Number($('ob-result-session').value)]?.dataset:null;
+  const currentDataset=()=>['dataset','proposal_experiment'].includes(result?.request.mode)?result.sessions[Number($('ob-result-session').value)]?.dataset:null;
   function datasetCard(title,values) {
     const card=make('div','','ob-count-card'),dl=make('dl','');card.append(make('h4',title));
     for(const [key,value] of Object.entries(values))dl.append(make('dt',datasetLabels[key]??key.replaceAll('_',' ')),make('dd',flowNumber(value,0)));
@@ -579,9 +604,9 @@ export function mountOrderbook(api,onAccessError) {
     const blocks=d.blocks.slice(datasetBlockPage*50,datasetBlockPage*50+50);
     $('ob-dataset-blocks').replaceChildren(...blocks.map(b=>{const tr=make('tr','');
       for(const v of [b.session_date,b.block_index+1,datasetTime(b.start_unix_us),datasetTime(b.end_unix_us),b.qualified?'Yes':'No',b.feature_rows,b.return_count,
-        ...['rv','bpv','positive_excess','depth_mean','proportional_spread_mean','near_depth_share_mean'].map(k=>flowNumber(b[k],6)),b.reasons.join(', ')||'—'])tr.append(make('td',v));return tr;
+        ...['rv','bpv','positive_excess','depth_mean','proportional_spread_mean','near_depth_share_mean','slope_l5_mean','near_two_of_five_share_mean'].map(k=>flowNumber(b[k],6)),b.reasons.join(', ')||'—'])tr.append(make('td',v));return tr;
     }));
-    if(!blocks.length)blank('ob-dataset-blocks',14,'No measurement blocks are available for this recording. Review its clock and coverage audit.');
+    if(!blocks.length)blank('ob-dataset-blocks',16,'No measurement blocks are available for this recording. Review its clock and coverage audit.');
     put('ob-dataset-block-note',`Showing ${blocks.length?datasetBlockPage*50+1:0}–${datasetBlockPage*50+blocks.length} of ${flowNumber(d.blocks_count,0)} measured blocks (preview limited to 50). The complete blocks export includes every block and its qualification flags.`);
     $('ob-dataset-block-more').hidden=d.blocks.length<=50;put('ob-dataset-block-more',(datasetBlockPage+1)*50<d.blocks.length?'Show next 50 blocks':'Back to first 50 blocks');
     const pairs=d.pairs.slice(datasetPairPage*50,datasetPairPage*50+50);
@@ -612,7 +637,7 @@ export function mountOrderbook(api,onAccessError) {
     $('ob-dataset-totals').replaceChildren(datasetCard('Dataset totals',counts));
     $('ob-dataset-exports').replaceChildren(...result.artifacts.map(a=>{
       const card=make('div','','ob-count-card'),b=make('button',`Download ${a.file}`,'secondary');b.type='button';b.dataset.oversized=String(a.bytes>64*1024*1024);
-      card.append(make('h4',({features:'One-second book measurements',minutes:'Return endpoints',blocks:'30-minute measurement blocks',pairs:'Eligible next-block pairs'})[a.name]),make('p',`${flowNumber(a.rows,0)} rows · ${flowNumber(a.bytes/1024/1024,3)} MiB`,'hint'),b);
+      card.append(make('h4',({features:'One-second book measurements',minutes:'Return endpoints',blocks:'30-minute measurement blocks',pairs:'Eligible next-block pairs',predictions:'Held-out predictions',daily_losses:'Paired losses by trading day'})[a.name]),make('p',`${flowNumber(a.rows,0)} rows · ${flowNumber(a.bytes/1024/1024,3)} MiB`,'hint'),b);
       if(a.bytes>64*1024*1024)card.append(make('p','This export exceeds the 64 MiB browser limit; its saved file remains on the local server.','hint'));
       b.addEventListener('click',()=>work(async rev=>{
         const job=resultJob;if(!job)return;put('ob-dataset-download-note',`Downloading and checking ${a.file}…`);
@@ -629,8 +654,8 @@ export function mountOrderbook(api,onAccessError) {
     $('ob-result').hidden=!result;if(!result)return;
     const label=result.source==='synthetic'?'SYNTHETIC DEMONSTRATION — no empirical claim':'IBKR recorded data — offline analysis, not a live model';
     put('ob-result-label',label);$('ob-result-label').className=result.source==='synthetic'?'ob-synthetic':'';
-    const describe=result.request.mode==='describe',flow=result.request.mode==='flow',dataset=result.request.mode==='dataset';$('ob-description').hidden=!describe;$('ob-flow').hidden=!flow;$('ob-dataset').hidden=!dataset;$('ob-result-replay').hidden=flow||dataset;
-    const c=result.request.configuration;put('ob-result-config',dataset?`Research dataset · ${c.levels} common levels per side · one-second measurements · ${c.return_seconds/60}-minute returns · 30-minute regular-session blocks · maximum side age ${c.max_side_age_seconds}s · strict receipt-clock checks.`:flow?`Order flow over time · ${c.bin_seconds}s bins · start ${c.start_seconds}s · end ${c.end_seconds??'recording end'} · ${c.clock_policy==='recorded_monotonic'?'Explore recorded monotonic time — provisional':'Require consistent receipt clocks'}.`:describe?'Depth, slope & distributions · all captured levels · event-weighted book states · no time grid, freshness certification or prediction model.':`${result.request.mode} · quantity ${c.quantity} · target ${c.target} · horizon ${c.horizon_seconds}s · step ${c.step_seconds}s · ${c.levels} diagnostic levels. Model errors use basis points, not dollar fills.`);
+    const describe=result.request.mode==='describe',flow=result.request.mode==='flow',dataset=['dataset','proposal_experiment'].includes(result.request.mode);$('ob-description').hidden=!describe;$('ob-flow').hidden=!flow;$('ob-dataset').hidden=!dataset;$('ob-result-replay').hidden=flow||dataset;
+    const c=result.request.configuration;put('ob-result-config',dataset?`${c.preset==='proposal_oct2026'?'October 6 proposal · duration-weighted block features in confirmed shares':'Earlier exploratory dataset · one-second measurements'} · ${c.levels} common levels per side · ${c.return_seconds/60}-minute returns · 30-minute regular-session blocks · maximum side age ${c.max_side_age_seconds}s · strict receipt-clock checks.`:flow?`Order flow over time · ${c.bin_seconds}s bins · start ${c.start_seconds}s · end ${c.end_seconds??'recording end'} · ${c.clock_policy==='recorded_monotonic'?'Explore recorded monotonic time — provisional':'Require consistent receipt clocks'}.`:describe?'Depth, slope & distributions · all captured levels · event-weighted book states · no time grid, freshness certification or prediction model.':`${result.request.mode} · quantity ${c.quantity} · target ${c.target} · horizon ${c.horizon_seconds}s · step ${c.step_seconds}s · ${c.levels} diagnostic levels. Model errors use basis points, not dollar fills.`);
     put('ob-replay-note',describe?'Replay and line charts show a bounded selection of states in event order. Distribution statistics use all eligible states. Gaps are not filled; horizontal position is not elapsed time.':'Replay and charts are decimated for display, never for fitting. Missing/invalid intervals are not fills. The offline report does not receive new live ticks.');
     $('ob-result-session').replaceChildren(...result.sessions.map((s,i)=>{const o=make('option',`Session ${s.identity.session_id} · ${s.identity.symbol} / ${s.identity.venue} · ${s.event_count} events`);o.value=String(i);return o;}));
     const root=$('ob-comparison');root.replaceChildren();const m=result.liquidity;
@@ -641,7 +666,8 @@ export function mountOrderbook(api,onAccessError) {
       for(const model of m.models){const tr=make('tr','',model.name===m.selected_on_validation?'ob-selected-model':'');
         for(const v of [model.name,numberText(model.validation.session_equal_rmse,6),numberText(model.test.session_equal_rmse,6),numberText(model.test.session_equal_mae,6)])tr.append(make('td',v));table.append(tr);}
       wrap.append(table);root.append(wrap);
-    } else if(dataset)root.append(make('h3','Dataset preparation complete — no forecasting model fitted'));
+    } else if(result.experiment)root.append(make('h3',result.experiment.status==='complete_exploratory'?'Proposal M0–M2 experiment saved':'Proposal experiment blocked by research readiness'));
+    else if(dataset)root.append(make('h3','Dataset preparation complete — no forecasting model fitted'));
     else if(flow)root.append(make('h3','Order-flow distribution — descriptive baseline, not predictive validation'));
     else if(describe)root.append(make('h3','Descriptive report — no predictive performance claim'));
     else root.append(make('h3','Diagnostics only — no model fitted'),make('p','Select separate chronological dates and run Compare prediction models to estimate and evaluate the baselines.','hint'));
@@ -649,7 +675,7 @@ export function mountOrderbook(api,onAccessError) {
     $('ob-result-evaluation').closest('details').hidden=describe||flow||dataset;
     $('ob-result-coverage').previousElementSibling.textContent=dataset?'Dataset coverage, exclusions and receipt-clock audit':flow?'Time window, coverage and receipt-clock audit':describe?'Event coverage, quality and receipt-clock audit':'Coverage, exclusions and partial-session variance';
     put('ob-result-provenance',JSON.stringify({request:result.request,source_hashes:result.source_hashes,code_hashes:result.code_hashes,worker_sha256:result.worker_sha256,result_sha256:result.sha256,boundaries:result.boundaries},null,2));
-    if(dataset)renderDatasetSummary();resultSession();controls();
+    if(dataset)renderDatasetSummary();explorer.result(result);resultSession();controls();
   }
   $('ob-result-session').addEventListener('change',resultSession);$('ob-result-scrub').addEventListener('input',frame);
   $('ob-download').addEventListener('click',()=>{if(!unlocked||!result)return;
@@ -658,7 +684,8 @@ export function mountOrderbook(api,onAccessError) {
   });
   function clear() {
     expandGraphs(false);
-    revision++;clearTimeout(liveTimer);clearTimeout(jobTimer);liveTimer=jobTimer=null;busy=false;live=null;liveHistory=[];loaded=false;needsReconcile=false;previousEvidence=null;verified=false;
+    revision++;clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);liveTimer=jobTimer=readinessTimer=null;busy=false;live=null;liveHistory=[];loaded=false;needsReconcile=false;previousEvidence=null;verified=false;
+    explorer.clear();
     selected=null;pending=null;sessions=[];cursor='0';hasMore=false;selectedIds.clear();jobs=[];capability=null;result=null;resultJob=null;submittedJob=null;$('ob-watch').checked=false;
     archive=null;$('ob-archive').hidden=true;$('ob-archive-scrub').value='0';
     for(const name of ['ob-archive-title','ob-archive-summary','ob-archive-clock','ob-archive-frame','ob-archive-event','ob-archive-depth','ob-archive-bids','ob-archive-asks'])$(name).replaceChildren();
@@ -680,7 +707,7 @@ export function mountOrderbook(api,onAccessError) {
   setInterval(()=>{if(unlocked&&!document.hidden)renderLive();},1000);
   clear();
   return {
-    setAccess(value){if(unlocked===value)return;unlocked=value;if(!value){context=null;generation=null;clear();notify('Dashboard locked. Capture and any research job were not stopped.');}controls();},
+    setAccess(value){if(unlocked===value)return;unlocked=value;if(!value){context=null;generation=null;clear();notify('Dashboard locked. Capture and any research job were not stopped.');}else notify('');controls();schedule();},
     update(value){
       if(!unlocked)return;
       if(value&&generation!==null&&value.session_id!==generation){clear();notify('Broker/server generation changed. Refresh the workspace before recording or selecting archived data.');}

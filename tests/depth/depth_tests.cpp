@@ -89,6 +89,10 @@ int main(int argc,char** argv) {
                 auto e=event(0,"update",side,pos,0,side==0?101.+pos:99.-pos);e.request_id=id;raw->s.depth_update(e);
             }
             service.poll();check(service.depth()->spec.rows==50&&service.depth()->book.bids().size()==50&&service.depth()->book.asks().size()==50);
+            check(service.depth()->update_event_count==100&&service.depth()->lifecycle_event_count==1);
+            check(service.depth()->last_update.has_value());
+            const auto received=service.depth()->last_update->monotonic_ns;
+            service.poll();check(service.depth()->update_event_count==100&&service.depth()->last_update->monotonic_ns==received);
             check(service.depth()->book.quality()=="two_sided_unverified");service.unsubscribe_depth(id);service.disconnect();
         });
         test("initial state",[]{dts::DepthBook b(3);check(!b.active()&&b.quality()=="not_started");b.apply(event(1,"start"));check(b.active()&&b.quality()=="one_sided_or_building");});

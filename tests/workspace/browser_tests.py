@@ -366,6 +366,7 @@ def main(exe):
                                       asks=[dict(price=100.01+i*.01,size=str(150+60*i),market_maker='') for i in range(min(state['rows'],state['delivered_rows']))]))
                 route.fulfill(status=200,content_type='application/json',body=json.dumps(data))
             for route in ('**/api/dashboard','**/api/contracts/**','**/api/depth/current','**/api/depth/subscribe','**/api/depth/unsubscribe'):page.route(route,live_route)
+            page.locator('#broker-connection-details > summary').click()
             page.locator('#refresh').click();expect(page.locator('#broker-status')).to_have_text('Ready')
             page.locator('#ob-refresh').click();expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')
             page.locator('#ob-live-tab').click();page.locator('#ob-symbol').fill('SYNTHETIC')

@@ -94,7 +94,7 @@ export function createApi(fetcher = fetch) {
     clear() { cancel(); token=''; browserSession=false; },
     cancel,
     async downloadResearchArtifact(jobId, artifact) {
-      const files={features:'features.csv.gz',minutes:'minutes.csv.gz',blocks:'blocks.csv',pairs:'pairs.csv'},limit=64*1024*1024;
+      const files={features:'features.csv.gz',minutes:'minutes.csv.gz',blocks:'blocks.csv',pairs:'pairs.csv',predictions:'predictions.csv',daily_losses:'daily_losses.csv'},limit=64*1024*1024;
       if(typeof jobId!=='string'||!(/^[a-f0-9]{32}$/).test(jobId)||!artifact||!Object.hasOwn(files,artifact.name)||artifact.file!==files[artifact.name]
         ||!Number.isSafeInteger(artifact.bytes)||artifact.bytes<0||artifact.bytes>limit||!(/^[a-f0-9]{64}$/).test(artifact.sha256)
         ||artifact.content_type!==(artifact.name==='features'||artifact.name==='minutes'?'application/gzip':'text/csv'))throw new ApiError('Dataset export metadata is invalid or exceeds the 64 MiB browser download limit.');

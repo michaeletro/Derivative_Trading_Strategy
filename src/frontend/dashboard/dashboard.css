@@ -15,3 +15,65 @@ th{position:relative}
 
 /* Persistent history stays visibly separate from current marks. */
 .recorded-storage{margin-top:24px;padding:24px;min-width:0}.recorded-storage code{overflow-wrap:anywhere}.recorded-storage label{display:block;margin-top:20px}.recorded-storage select{width:100%;max-width:100%;margin:8px 0}.storage-actions{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}.recorded-storage table{font-variant-numeric:tabular-nums}.recorded-storage .table-wrap{overflow-x:auto}.recorded-storage th{white-space:nowrap}
+
+/* One persistent research shell with independently selected workspaces. */
+#workspace-sidebar{width:255px;padding:25px 18px;overflow:hidden}
+#workspace-sidebar .brand{flex-shrink:0}
+#workspace-sidebar nav{display:block;margin-top:28px;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;flex:1;padding:0 3px 14px}
+#workspace-sidebar nav a{display:flex;gap:12px;white-space:normal;margin:3px 0;padding:11px 12px;font-size:13px;line-height:1.4}
+#workspace-sidebar nav a[aria-current=page]{background:#19352b;color:var(--accent);box-shadow:inset 3px 0 var(--accent)}
+#workspace-sidebar nav a span{display:inline;font-size:10px}
+#workspace-sidebar .nav-group{margin-top:14px;border-top:1px solid var(--border);padding-top:10px}
+#workspace-sidebar .nav-group summary{cursor:pointer;color:var(--muted);font-size:12px;padding:10px 8px;line-height:1.4}
+#workspace-sidebar .nav-group a{padding-left:19px;font-size:12px}
+#workspace-sidebar .sidebar-foot{flex-shrink:0;margin:0;padding:16px 9px 0}
+#workspace-sidebar .sidebar-foot p{display:none}
+#workspace-sidebar .sidebar-foot small{display:block;margin-top:10px;line-height:1.5}
+body>main{margin-left:255px}
+.workspace-menu,.workspace-menu-close{display:none}
+.collection-readiness{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:15px 19px;margin-bottom:20px;border-color:#35534b;position:sticky;top:10px;z-index:3;box-shadow:0 5px 18px #0003}
+#collection-readiness-summary{font-size:13px;line-height:1.6;min-width:0;overflow-wrap:anywhere}
+#workspace-title{scroll-margin-top:20px}
+#workspace-title:focus{outline:none}
+[data-workspace-section]{scroll-margin-top:140px}
+body:not([data-workspace=instruments]) .metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:1100px){.collection-readiness{align-items:flex-start;flex-direction:column;gap:12px}.collection-readiness .actions{flex-wrap:wrap}}
+@media(max-width:900px){
+ .workspace-menu-close{display:block;align-self:flex-end;margin-bottom:16px}
+ .workspace-menu{display:block;position:sticky;top:10px;margin:12px 20px;z-index:8;width:max-content}
+ #workspace-sidebar{display:none;position:fixed;inset:0 auto 0 0;height:100dvh;width:min(300px,88vw);background:#0e151a;z-index:9;padding:22px 18px;flex-direction:column;align-items:stretch;justify-content:initial;border-right:1px solid var(--border);box-shadow:10px 0 50px #0008}
+ #workspace-sidebar.is-open{display:flex}
+ #workspace-sidebar .brand{max-width:none;font-size:16px}
+ #workspace-sidebar .brand small{display:block}
+ #workspace-sidebar nav{width:auto;margin-top:25px;gap:0;justify-content:initial}
+ #workspace-sidebar nav .eyebrow{display:block}
+ #workspace-sidebar .sidebar-foot{display:block}
+ body>main{margin-left:0;padding:16px 20px 25px}
+ .collection-readiness{top:64px}
+ html{scroll-padding-top:150px}
+}
+@media(max-width:550px){
+ .collection-readiness{position:relative;top:auto;padding:14px}
+ body:not([data-workspace=instruments]) .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #workspace-title{font-size:27px}
+ .page-heading{align-items:flex-start}
+ #collection-readiness .actions button{font-size:12px}
+}
+
+/* Keep the active research surface above the fold after local sign-in. */
+body[data-local-access=unlocked] .access{padding:8px 14px;margin-bottom:12px;min-height:46px;gap:14px;background:transparent;border-color:transparent}
+body[data-local-access=unlocked] .access h2{font-size:12px;margin:0;color:var(--muted)}
+body[data-local-access=unlocked] .access p,body[data-local-access=unlocked] #token,body[data-local-access=unlocked] #unlock{display:none}
+body[data-local-access=unlocked] .access form{width:auto;flex:0 0 auto}
+body[data-local-access=unlocked] #forget{padding:7px 12px;min-height:34px;font-size:12px;white-space:nowrap}
+.broker-connection-details{margin-bottom:20px;padding:0 16px}
+.broker-connection-details>summary{cursor:pointer;display:list-item;padding:12px 0;font-size:13px;color:var(--muted);line-height:1.5}
+.broker-connection-details>summary .badge{margin-left:14px;vertical-align:middle;font-size:10px}
+.broker-connection-details .metrics{margin:4px 0 14px;gap:12px}
+.broker-connection-details .metric{padding:16px}
+.broker-connection-details .metric h2{font-size:19px}
+.broker-connection-details .connection{margin-bottom:16px;padding:12px}
+@media(max-width:550px){
+ body[data-local-access=unlocked] .access{flex-wrap:nowrap;padding:4px 0;min-height:40px}
+ .broker-connection-details>summary .badge{margin-left:0;display:block;margin-top:7px}
+}

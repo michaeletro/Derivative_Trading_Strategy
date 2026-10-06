@@ -13,6 +13,7 @@ namespace asio = boost::asio;
 #include "research_json.hpp"
 #include "experiments_json.hpp"
 #include "depth_json.hpp"
+#include "readiness_json.hpp"
 #include "orderbook_jobs.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
@@ -231,6 +232,7 @@ public:
         worker_ = std::thread([this] {
             std::unique_lock<std::mutex> lock(broker_mutex_);
             while (!stopping_) {
+                recording_clock_.observe(dts::RecordingClockSample::now());
                 try {
                     broker_.poll();
                     if(!ticks_.busy() && dts::Clock::now()>=ticks_.next_dispatch())history_.tick(broker_);
@@ -276,6 +278,7 @@ private:
     std::condition_variable wake_;
     std::thread worker_;
     bool stopping_ = false, worker_failed_ = false;
+    dts::RecordingClockMonitor recording_clock_;
     std::unique_ptr<dts::IBroker> make_broker() {
         if (mode_ == "none") return {};
         if (mode_ == "mock") return std::make_unique<dts::storage::RecordingBroker>(std::make_unique<dts::MockBroker>(), store_, "mock");
@@ -548,7 +551,13 @@ private:
         CROW_ROUTE(app_, "/api/depth/current")([this](const crow::request& req) {
             return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);
                 auto j=dts::depth_http::current(broker_, &store_, mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws");j["source"]=mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws";
-                j["synthetic"]=mode_=="mock";return j;});
+                j["synthetic"]=mode_=="mock";
+                j["readiness"]=dts::readiness_http::current(broker_,store_,recording_clock_,mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws",worker_failed_);
+                return j;});
+        });
+        CROW_ROUTE(app_, "/api/readiness")([this](const crow::request& req) {
+            return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);
+                return dts::readiness_http::current(broker_,store_,recording_clock_,mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws",worker_failed_);});
         });
         CROW_ROUTE(app_, "/api/depth/sessions").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{return dts::depth_http::sessions(store_,object(req));});
