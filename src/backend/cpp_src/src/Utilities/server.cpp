@@ -9,6 +9,7 @@ namespace asio = boost::asio;
 #include "greeks_json.hpp"
 #include "storage_json.hpp"
 #include "history_json.hpp"
+#include "tick_jobs.hpp"
 #include "research_json.hpp"
 #include "experiments_json.hpp"
 #include "depth_json.hpp"
@@ -202,9 +203,11 @@ public:
     Application() : mode_(env("DTS_BROKER", "none")), token_(env("DTS_API_TOKEN")),
         port_(integer(env("HTTP_PORT", "8080"), 1024, 65535)),
         store_(dts::storage::Config::from_environment(), mode_),
-        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()), history_(store_),
+        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()), history_(store_),ticks_(store_.status().database),
         orderbook_jobs_(store_, env("DTS_RESEARCH_PYTHON"), DTS_ORDERBOOK_WORKER_PATH,
-            integer(env("DTS_RESEARCH_TIMEOUT_SECONDS", "180"), 1, 300)) {
+            integer(env("DTS_RESEARCH_TIMEOUT_SECONDS", "180"), 1, 300)),
+        variation_jobs_(store_, env("DTS_RESEARCH_PYTHON"), DTS_VARIATION_WORKER_PATH,
+            integer(env("DTS_RESEARCH_TIMEOUT_SECONDS", "180"), 1, 300), true) {
         if (env("ENABLE_IB_WS", "false") != "false" && env("ENABLE_IB_WS") != "0")
             throw std::invalid_argument("Client Portal relay is retired; configure DTS_BROKER instead");
         if (env("DB_FAIL_FAST", "false") == "true" && !assets_.available())
@@ -228,7 +231,11 @@ public:
         worker_ = std::thread([this] {
             std::unique_lock<std::mutex> lock(broker_mutex_);
             while (!stopping_) {
-                try { broker_.poll(); history_.tick(broker_); }
+                try {
+                    broker_.poll();
+                    if(!ticks_.busy() && dts::Clock::now()>=ticks_.next_dispatch())history_.tick(broker_);
+                    if(!history_.busy() && dts::Clock::now()>=history_.next_dispatch())ticks_.tick(broker_);
+                }
                 catch (...) { broker_.disconnect(); worker_failed_ = true; }
                 wake_.wait_for(lock, std::chrono::milliseconds(10), [this] { return stopping_; });
             }
@@ -236,6 +243,7 @@ public:
             // before disconnecting and closing the store. Never wait until exit
             // to save observations that were received earlier in the session.
             try { broker_.poll(); } catch (...) { worker_failed_ = true; }
+            try { ticks_.shutdown(broker_); } catch (...) { worker_failed_=true; }
             broker_.disconnect();
         });
         try {
@@ -259,7 +267,9 @@ private:
     AssetRepository assets_;
     dts::ReadOnlyService broker_;
     dts::storage::HistoricalManager history_;
+    dts::tick_jobs::Manager ticks_;
     dts::orderbook_jobs::Manager orderbook_jobs_;
+    dts::orderbook_jobs::Manager variation_jobs_;
     // Non-secret instance identifier prevents charts joining observations across restarts.
     const std::string instance_ = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     std::mutex broker_mutex_, database_mutex_, pricing_mutex_;
@@ -277,7 +287,8 @@ private:
         config.port = integer(env("IB_PORT", "4002"), 1, 65535);
         config.client_id = integer(env("IB_CLIENT_ID", "17"), 1, 2147483647);
         config.market_data_type = integer(env("IB_MARKET_DATA_TYPE", "3"), 1, 4);
-        config.timeout = std::chrono::milliseconds(integer(env("IB_TIMEOUT_MS", "10000"), 100, 60000));
+        // Leave time for the user to approve TWS's local incoming-connection prompt.
+        config.timeout = std::chrono::milliseconds(integer(env("IB_TIMEOUT_MS", "60000"), 100, 60000));
         return std::make_unique<dts::storage::RecordingBroker>(std::make_unique<dts::TwsBroker>(config), store_, "ibkr_tws");
 #else
         throw std::invalid_argument("Rebuild with DTS_WITH_IBKR=ON to select TWS");
@@ -285,12 +296,20 @@ private:
     }
     void stop() noexcept {
         orderbook_jobs_.shutdown();
+        variation_jobs_.shutdown();
         { std::lock_guard<std::mutex> lock(broker_mutex_); stopping_ = true; }
         wake_.notify_all();
         if (worker_.joinable()) worker_.join();
     }
     crow::response response(Json body, int status = 200) const {
         crow::response result(std::move(body)); result.code = status;
+        result.set_header("Cache-Control", "no-store");
+        result.set_header("Referrer-Policy", "no-referrer");
+        result.set_header("X-Content-Type-Options", "nosniff"); return result;
+    }
+    crow::response response(dts::orderbook_jobs::ArchivedResult body) const {
+        crow::response result(200, std::move(body.bytes));
+        result.set_header("Content-Type", "application/json");
         result.set_header("Cache-Control", "no-store");
         result.set_header("Referrer-Policy", "no-referrer");
         result.set_header("X-Content-Type-Options", "nosniff"); return result;
@@ -390,6 +409,24 @@ private:
     }
     void routes() {
         auth_routes();
+        CROW_ROUTE(app_, "/api/variation/status")([this](const crow::request& req) {
+            return guarded(req, [&] { return variation_jobs_.status(); });
+        });
+        CROW_ROUTE(app_, "/api/variation/jobs").methods(crow::HTTPMethod::GET, crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                if (req.method == crow::HTTPMethod::POST) return variation_jobs_.submit(object(req), store_);
+                return variation_jobs_.list();
+            });
+        });
+        CROW_ROUTE(app_, "/api/variation/jobs/<string>")([this](const crow::request& req, const std::string& id) {
+            return guarded(req, [&] { return variation_jobs_.get(id); });
+        });
+        CROW_ROUTE(app_, "/api/variation/jobs/<string>/result")([this](const crow::request& req, const std::string& id) {
+            return guarded(req, [&] { return variation_jobs_.result(id); });
+        });
+        CROW_ROUTE(app_, "/api/variation/jobs/<string>/cancel").methods(crow::HTTPMethod::POST)([this](const crow::request& req, const std::string& id) {
+            return guarded(req, [&] { dts::history_http::fields(object(req), {}); return variation_jobs_.cancel(id); });
+        });
         CROW_ROUTE(app_, "/api/depth/research/status")([this](const crow::request& req) {
             return guarded(req, [&] { return orderbook_jobs_.status(); });
         });
@@ -404,6 +441,19 @@ private:
         });
         CROW_ROUTE(app_, "/api/depth/research/jobs/<string>/result")([this](const crow::request& req, const std::string& id) {
             return guarded(req, [&] { return orderbook_jobs_.result(id); });
+        });
+        CROW_ROUTE(app_, "/api/depth/research/jobs/<string>/artifacts/<string>")([this](const crow::request& req, crow::response& res, const std::string& id, const std::string& name) {
+            std::optional<dts::orderbook_jobs::VerifiedArtifact> file;
+            auto checked = guarded(req, [&] { file.emplace(orderbook_jobs_.artifact(id, name)); return Json(); });
+            if (!file) { res = std::move(checked); res.end(); return; }
+            // Crow's static writer is synchronous and uses a 16 KiB buffer.
+            // Keep the verified anonymous inode alive until end() has streamed it.
+            res.set_static_file_info_unsafe("/proc/self/fd/" + std::to_string(file->file.fd));
+            res.set_header("Content-Type", file->content_type);
+            res.set_header("Content-Disposition", "attachment; filename=\"" + file->filename + "\"");
+            res.set_header("X-Content-SHA256", file->sha256);
+            res.set_header("Cache-Control", "no-store"); res.set_header("Referrer-Policy", "no-referrer");
+            res.set_header("X-Content-Type-Options", "nosniff"); res.end();
         });
         CROW_ROUTE(app_, "/api/depth/research/jobs/<string>/cancel").methods(crow::HTTPMethod::POST)([this](const crow::request& req, const std::string& id) {
             return guarded(req, [&] { dts::history_http::fields(object(req), {}); return orderbook_jobs_.cancel(id); });
@@ -455,7 +505,7 @@ private:
         });
         CROW_ROUTE(app_, "/api/research/replay").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto j=object(req);dts::research_http::fields(j,{"snapshot_id","config","through_ordinal"});
-                const auto c=dts::research_http::request_config(j);const auto count=dts::research_http::bounded_integer(j,"through_ordinal",0,2000);
+                const auto c=dts::research_http::request_config(j);const auto count=dts::research_http::bounded_integer(j,"through_ordinal",0,dts::research::maximum_bars);
                 std::unique_lock<std::mutex> lock(pricing_mutex_,std::try_to_lock);
                 if(!lock.owns_lock())throw std::length_error("Research operation busy; retry explicitly later");
                 return dts::research_http::run(store_.snapshot(dts::research_http::id(j,"snapshot_id")),c,static_cast<std::size_t>(count));});
@@ -485,7 +535,7 @@ private:
         CROW_ROUTE(app_, "/api/depth/subscribe").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"contract_id","venue","rows"});
                 const auto id=dts::history_http::id(j,"contract_id");
-                const auto rows=dts::research_http::bounded_integer(j,"rows",1,10);
+                const auto rows=dts::research_http::bounded_integer(j,"rows",1,dts::max_depth_rows);
                 const auto venue=text(j,"venue");std::lock_guard<std::mutex> lock(broker_mutex_);
                 Json out=dts::depth_http::conventions();out["request_id"]=std::to_string(broker_.subscribe_depth(id,venue,rows));
                 out["source"]=mode_=="mock"?"mock":"ibkr_tws";out["synthetic"]=mode_=="mock";return out;});
@@ -497,7 +547,7 @@ private:
         });
         CROW_ROUTE(app_, "/api/depth/current")([this](const crow::request& req) {
             return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);
-                auto j=dts::depth_http::current(broker_);j["source"]=mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws";
+                auto j=dts::depth_http::current(broker_, &store_, mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws");j["source"]=mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws";
                 j["synthetic"]=mode_=="mock";return j;});
         });
         CROW_ROUTE(app_, "/api/depth/sessions").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
@@ -508,6 +558,33 @@ private:
         });
         CROW_ROUTE(app_, "/api/history/datasets")([this](const crow::request& req) {
             return guarded(req,[&]{Json j;j["datasets"]=dts::history_http::rows(store_.historical_catalog());j["limit"]=200;j["recorded_not_live"]=true;return j;});
+        });
+        CROW_ROUTE(app_, "/api/ticks/downloads")([this](const crow::request& req) {
+            return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);return ticks_.catalog();});
+        });
+        CROW_ROUTE(app_, "/api/ticks/downloads").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"contract_id","start_s","end_s","tick_type","use_rth"});
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                if(mode_!="tws")throw std::logic_error("Tick acquisition requires native TWS; no synthetic fallback");
+                if(history_.busy())throw std::logic_error("Wait for the candle download to finish or cancel it first");
+                dts::TickSpec spec;spec.contract=broker_.contract(dts::history_http::integer(j,"contract_id"));spec.type=text(j,"tick_type");
+                if(!j.has("use_rth")||(j["use_rth"].t()!=crow::json::type::True && j["use_rth"].t()!=crow::json::type::False))throw std::invalid_argument("Choose a trading-hours policy");
+                spec.use_rth=j["use_rth"].b();return ticks_.start(spec,dts::history_http::window(j),broker_.state());});
+        });
+        CROW_ROUTE(app_, "/api/ticks/downloads/<string>")([this](const crow::request& req,std::string id) {
+            return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);return ticks_.status(id);});
+        });
+        CROW_ROUTE(app_, "/api/ticks/downloads/<string>/view").methods(crow::HTTPMethod::POST)([this](const crow::request& req,std::string id) {
+            return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"after","limit"});
+                std::lock_guard<std::mutex> lock(broker_mutex_);return ticks_.view(id,dts::research_http::bounded_integer(j,"after",0,1020000),dts::research_http::bounded_integer(j,"limit",1,1000));});
+        });
+        CROW_ROUTE(app_, "/api/ticks/downloads/<string>/cancel").methods(crow::HTTPMethod::POST)([this](const crow::request& req,std::string id) {
+            return guarded(req,[&]{dts::history_http::fields(object(req),{});std::lock_guard<std::mutex> lock(broker_mutex_);return ticks_.cancel(id,broker_);});
+        });
+        CROW_ROUTE(app_, "/api/ticks/downloads/<string>/resume").methods(crow::HTTPMethod::POST)([this](const crow::request& req,std::string id) {
+            return guarded(req,[&]{dts::history_http::fields(object(req),{});std::lock_guard<std::mutex> lock(broker_mutex_);
+                if(mode_!="tws"||history_.busy())throw std::logic_error("Native TWS and an idle candle downloader are required");
+                return ticks_.resume(id,broker_.state());});
         });
         CROW_ROUTE(app_, "/api/history/view").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"dataset_id","start_s","end_s"});
@@ -529,6 +606,7 @@ private:
                     spec.use_rth=j["use_rth"].b();
                 }
                 const auto w=dts::history_http::window(j);const auto policy=text(j,"policy","saved");
+                if(policy!="saved"&&ticks_.busy())throw std::logic_error("Stop or finish the tick download before requesting candles");
                 const auto plan=history_.request(spec,w,policy,broker_.state());
                 Json out=dts::history_http::view(store_,plan.dataset_id,w);std::vector<Json> queued;
                 for(auto id:plan.queued_ids)queued.emplace_back(std::to_string(id));

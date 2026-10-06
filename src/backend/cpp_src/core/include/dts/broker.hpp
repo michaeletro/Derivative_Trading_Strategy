@@ -1,6 +1,7 @@
 #pragma once
 #include "domain.hpp"
 #include "historical.hpp"
+#include "historical_ticks.hpp"
 #include "depth.hpp"
 #include <variant>
 #include <vector>
@@ -14,7 +15,7 @@ struct BrokerError { RequestId request_id; int code; std::string message; };
 struct ContractEvent { RequestId request_id; Contract contract; };
 struct ContractsComplete { RequestId request_id; bool success; };
 using BrokerEvent = std::variant<ConnectionEvent, Quote, PositionEvent,
-    PositionsComplete, BrokerError, ContractEvent, ContractsComplete, HistoricalBarEvent, HistoricalEnd, DepthEvent>;
+    PositionsComplete, BrokerError, ContractEvent, ContractsComplete, HistoricalBarEvent, HistoricalEnd, DepthEvent, HistoricalTickPage>;
 
 struct ContractQuery {
     std::string symbol;
@@ -50,6 +51,10 @@ public:
         throw std::logic_error("Historical acquisition is not supported by this adapter");
     }
     virtual void cancel_history(RequestId) {}
+    virtual RequestId request_ticks(const TickSpec&, std::int64_t) {
+        throw std::logic_error("Historical ticks require the native TWS adapter");
+    }
+    virtual void cancel_ticks(RequestId) {}
     virtual RequestId subscribe_depth(const DepthSpec&) {
         throw std::logic_error("Market depth is not supported by this adapter");
     }

@@ -90,6 +90,10 @@ public:
         store_.require_healthy();return inner_->request_history(spec,window);
     }
     void cancel_history(RequestId id) override {inner_->cancel_history(id);}
+    RequestId request_ticks(const TickSpec& spec,std::int64_t start) override {
+        store_.require_healthy();return inner_->request_ticks(spec,start);
+    }
+    void cancel_ticks(RequestId id) override {inner_->cancel_ticks(id);}
     void request_positions(RequestId id) override {
         store_.require_healthy(); inner_->request_positions(id);
         // Deliberately do not persist account identifiers or position contents.

@@ -3,8 +3,18 @@
 This increment puts explicit live-depth controls, recording selection and offline
 model comparisons inside the existing Crow dashboard at `/#orderbook`. It reuses
 the native recorder and the analytical modules from the model-lab increment. It
-adds no order submission, new market-data purchase, automatic capture, continuous
-inference, or database migration. The underlying archive is still schema 6.
+adds no order submission, new market-data purchase, automatic capture, or continuous
+inference. The current archive is schema 8, supporting 1..50 requested depth rows
+per side.
+
+Existing schema-6 and known schema-7 archives are upgraded only after a verified
+pre-upgrade SQLite backup. The recorder verifies the exact depth definitions and
+any known backfill extension, preserves session/event IDs and records, and checks
+foreign keys and integrity. Unfinished backfill plans are marked interrupted and
+never resumed. Unknown or malformed extensions are refused. Earlier backups keep
+their original schema version; the restore-to-new-directory helper accepts known
+schema 6/7/8 archives without overwriting an existing destination. Keep the
+pre-upgrade backup if an older binary is needed; older binaries cannot open schema 8.
 
 ## Update and launch
 
@@ -50,8 +60,11 @@ CI build does not verify the user's WSL dependencies or real data entitlements.
    then click **Load / refresh workspace**.
 2. Choose a USD equity/ETF and the direct venue: `BATS` for the BZX pilot, or `IEX`.
    Resolve candidates, inspect them, and explicitly select the intended contract.
-3. Choose 1..10 requested rows and confirm **Start recording**. Acknowledgement is
+3. Choose 1..50 requested rows and confirm **Start recording**. Acknowledgement is
    not successful depth delivery. Read the source and quality labels.
+   Fifty is this application's request bound, not an exchange-wide maximum or a
+   guarantee of fifty delivered levels. Read the received/requested counts. The
+   default remains ten; changing rows requires a new explicitly started capture.
 4. **Watch book** polls the existing book snapshot at one second for display only.
    It does not reconstruct event flow. Duplicate price rows are aggregated for the
    displayed ladder; requested rows are not guaranteed distinct levels. The size
@@ -71,7 +84,104 @@ Start/stop actions require explicit confirmation. A lost acknowledgement or serv
 failure makes the outcome uncertain; refresh before trying another mutation. The
 UI never retries a mutation automatically or connects to the broker on unlock.
 
+## Live graphs and committed recorder progress
+
+The live workspace shows cumulative displayed bid/ask size by price and a best
+bid/ask timeline. The depth chart has a larger default display. **Expand graphs**
+opens a near-full-window view with the received bid/ask ladders and start/stop
+controls; **Collapse graphs** or Escape restores the workspace. Expanding changes
+only the display, not the subscription or requested number of rows. The first timeline view spans 10 seconds and grows to the last
+five minutes, with at most 360 browser samples. It resets across request/source
+changes and separates stale, invalid, reset, regressed or missing display periods.
+These graphs use approximately one-second display polls; they do not reconstruct
+every intervening event. Browser display history clears on sign-out or broker
+generation changes. Capture continues independently in the native recorder.
+
+The recording panel reports **committed events** and the committed local sequence
+from the recorder's SQLite session, together with recorder health. Event counts
+include start/reset/stop/error/gap markers, so two events need not mean two market
+updates. The displayed last-commit time applies to **all recorder streams**, not
+only depth. A saving failure is visible and acquisition stops rather than silently
+publishing an unrecorded batch.
+
+## Depth metadata and raw callback provenance
+
+For new captures the existing normalized immutable SQLite archive is accompanied
+by private append-only metadata at
+`depth-raw/run-<run-id>/session-<session-id>.jsonl` beside the database (directories
+0700, files 0600). Existing captures are preserved, and missing earlier raw metadata
+is labelled unavailable rather than fabricated. The raw sidecar is independent of
+the normalized archive's schema-8 row-limit upgrade.
+
+The normalized archive retains the session/run/native request identifiers, source,
+resolved contract ID, symbol, currency, contract route, direct venue, requested
+rows, start/end, terminal state, event count and local sequence. Each event retains
+its kind/origin, local wall-clock and monotonic receipt timestamps, operation, side,
+position, price and decimal-size representation, maker identifier, Smart Depth flag
+and broker code.
+
+The raw sidecar also retains callback format and callback primitive fields,
+including delete price/size that have no normalized analytical meaning. Decimal
+size and maker byte strings have exact hexadecimal copies. For protobuf callbacks
+it retains the **reserialized SDK-decoded protobuf**, including field presence and
+unknown fields, as hexadecimal binary. This is not a byte-identical wire packet
+capture. Legacy callbacks have no protobuf payload; their supplied arguments are
+retained. Neither format supplies an exchange timestamp/sequence, individual order
+IDs, hidden liquidity or a complete BZX book. Only received depth callbacks and
+associated lifecycle markers are covered; this is not a capture of all TWS account,
+contract-detail or diagnostic messages. No credentials/accounts/orders are added.
+
+Raw metadata is flushed before the corresponding SQLite batch commits. A crash
+or failed transaction may leave a raw tail. **Use
+`raw_metadata.committed_through_sequence` from the authenticated API as the
+acceptance boundary**, not the file's last row. DB-only recorder recovery markers
+are excluded from this boundary and cannot promote an uncommitted raw row. A
+partially written tail is never a successful capture. Recovery markers may appear
+only in SQLite. Metadata write/flush failures produce a sticky recorder failure.
+
+After explicitly stopping, export the committed raw metadata with the existing
+environment and profile:
+
+```bash
+python tools/depth_capture.py --profile paper-tws export-raw \
+  --session-id <capture-id> --output ~/.local/share/derivative-lab/exports/capture-<capture-id>-raw.json
+```
+
+The exporter reads the private sidecar using the API's authoritative commit
+boundary, checks provenance and stability, excludes any uncommitted tail, and
+publishes a hashed export without overwriting an existing file. It refuses active
+captures, missing old sidecars, exports above 200,000 events or 80 MB, and incomplete
+committed metadata. The normalized `export` command remains compatible.
+
+**SQLite backups do not include `depth-raw/`.** With acquisition stopped, preserve
+this sibling directory together with the database backup and research directories.
+There is no automatic deletion. Raw protobuf metadata adds disk usage and a flush
+per recorder batch; check disk/recorder health during prolonged captures. No
+lossless or latency guarantee follows from successful commits.
+
 ## Recordings and analysis
+
+Use **View recording** beside a completed session to inspect saved events without
+submitting an analysis job. This viewer reads immutable event pages of up to 1,000
+rows through the authenticated archive API. It carries the reconstructed book
+between pages, retains reset/gap/terminal semantics, and provides a depth graph,
+bid/ask tables, an event slider, original event fields, and **Next 1,000 events**.
+**Back to beginning** starts from the first saved event. Memory is bounded to one
+page; even captures above the research job's event limit can be browsed.
+
+This is event-sequence inspection, not clock-qualified replay. A detected wall /
+monotonic discrepancy stays flagged across pages. The original timestamps are
+never rewritten, timing-sensitive model checks remain unchanged, and row freshness
+is not certified. Invalid books are not graphed. Earlier malformed recordings
+remain available with explicit structural quality labels, not repaired history.
+
+**Download this event page** exports exactly the displayed page as JSON, together
+with session metadata, the fixed archive watermark, pagination fields and the
+starting replay checkpoint. It is explicitly labelled as a partial session unless
+it contains the entire recording. It is not the notebook export format and does
+not contain the separate raw protobuf sidecar. The full recording remains on disk;
+this browser action does not request or purchase historical data from a provider.
+Signing out clears the event page, ladders, graph and metadata from the browser.
 
 The **Recordings & models** tab reads the existing session catalog in pages of 50.
 Only completed sessions can be selected, including interrupted/failed sessions
@@ -80,9 +190,93 @@ repair any gaps or guarantee that analysis accepts it. Loaded catalog rows show
 source, venue, UTC start, requested rows, event count and terminal state. Browser
 catalog loading stops at 1,000 rows rather than silently growing without bound.
 
-For one pilot choose **Inspect book & coverage**. Declare quantity, target, grid
-step, horizon, lookback and diagnostic levels, then run. Quantity is positive in
-the form; target chooses buy or sell. Missing displayed capacity remains missing.
+For descriptive research choose **Describe depth, slope & distributions**. This
+uses the saved callback sequence to reconstruct each book and measure its shape.
+It produces depth and spread distributions, side imbalance, price-level depth
+profiles, book slopes, and counts of received row operations. All received levels
+are included. Price rows that coincide are aggregated; missing ranks are not
+padded with zero liquidity. The existing raw captures remain unchanged.
+
+The descriptive distributions are **event-weighted**: each eligible saved update
+contributes one book observation. Busy periods therefore have greater weight.
+These are not time-weighted distributions or independent statistical observations.
+Mean depth at rank k uses only observations where that rank exists, with its
+denominator reported. All quantity units are the feed's reported units.
+
+Book slope is defined per side by an ordinary least-squares fit with an intercept:
+price distance from the midpoint in basis points against cumulative displayed size
+in thousands of reported units. At least two distinct price levels are required.
+This is a descriptive shape coefficient, not a causal market-impact estimate.
+Quantiles, dispersion, skewness, kurtosis and histogram conventions are recorded
+with the result; undefined statistics remain missing.
+
+Descriptive analysis audits both receipt clocks and records any discrepancy or
+regression. A bad clock does not erase structurally usable observations, but the
+result never certifies their timing or per-row freshness. No timestamp repair,
+duration weighting, events-per-second estimate, elapsed-time volatility estimate,
+or predictive model is substituted. Row insert/update/delete counts describe
+IBKR callbacks; they do not identify individual orders, trades, or cancellations.
+
+For timing-dependent liquidity diagnostics choose **Inspect timed coverage & diagnostics**.
+Declare quantity, target, grid step, horizon, lookback and diagnostic levels, then
+run. This operation and **Compare prediction models** retain their clock and
+coverage checks. Quantity is positive in the form; target chooses buy or sell.
+Missing displayed capacity remains missing.
+
+### Order flow over time
+
+Choose **Order flow over time** to study the receipt process within selected
+completed recordings. Set the interval width (0.1 to 300 seconds), a start offset,
+and optionally an end offset. Offsets are measured from that recording's first
+monotonic receipt timestamp; recordings remain separate and are never joined on
+an invented shared timeline. The prefix is replayed to establish the book before
+the selected window, without counting those earlier observations in the window.
+
+The default clock policy, **Require consistent receipt clocks**, returns an
+explicit blocked-clock report if the recorded wall and monotonic clocks disagree
+or regress. **Explore recorded monotonic time** is a separate, explicit
+exploratory choice. It can use a recording with wall-clock disagreement, while
+preserving and displaying the discrepancy and the exact timing assumption.
+Monotonic regressions still block the analysis. This does not repair timestamps,
+certify physical seconds or exchange time, or relax the strict checks for existing
+inspection/prediction models. Monotonic timestamp ties remain ties.
+
+The report includes three linked views:
+
+- Received update counts and rates per interval, an empirical count distribution,
+  and a fitted homogeneous Poisson baseline. Mean count is the Poisson parameter;
+  sample variance divided by mean measures dispersion. These are descriptive
+  fits on the chosen data, not held-out forecasts or significance tests.
+- Summed best-quote displayed-flow imbalance for usable adjacent callbacks, with
+  the number of eligible transitions. Missing transitions remain missing rather
+  than becoming zero flow.
+- Conditional event-weighted depth, slope, spread and imbalance within each time
+  interval, with observation counts. These remain callback-weighted summaries,
+  not duration-weighted book occupancy.
+
+All received depth updates count toward arrivals, including updates that leave
+the reconstructed book temporarily unusable. Genuine zero-count full bins are
+included; partial final bins are excluded from the equal-exposure count fit.
+Reset/gap/error coverage is marked and excluded from the arrival fit. Interarrival
+gaps do not bridge session or reconstruction boundaries. Initialization, transport
+batching, changing intensity and incomplete delivery can affect apparent clustering.
+Row insert/update/delete callbacks are not identified orders, executions or
+cancellations; a fitted Poisson comparison is a baseline, not evidence that the
+exchange follows a Poisson process. No Hawkes excitation estimate is inferred.
+
+Time-flow jobs share the 500,000-event / 200 MB frozen-input bounds and allow at
+most 10,000 total bins. Widen the interval or narrow the selected window if needed.
+Results, exact configuration, clock audit and input/code hashes are saved and can
+be reopened or downloaded like the other research reports.
+Saved worker results are returned as their integrity-checked original JSON bytes,
+including small probabilities in scientific notation. No numeric parsing and
+re-serialization occurs on this response path. Nonzero values smaller than the
+display's decimal precision use scientific notation rather than a displayed zero.
+
+Method references: [NIST's Poisson distribution](https://www.itl.nist.gov/div898/handbook/eda/section3/eda366j.htm),
+[Linux monotonic-clock semantics](https://www.man7.org/linux/man-pages/man3/clock_gettime.3.html),
+and [IBKR's depth callback fields](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-live/market-depth-l-2/receive-market-depth).
+
 A synthetic-data checkbox must be checked before submitting mock recordings; real
 and mock sources, venues, instruments and depth conventions cannot be pooled.
 
@@ -106,11 +300,31 @@ forward alpha. For the source equations and modeling boundaries, see
 
 ## Results and persistent jobs
 
+For the proposal's measurement stage, choose **Build research dataset**. It adds
+fixed-K, one-second states, calendar-aligned 30-minute RV/corrected-BPV blocks,
+and adjacent-block predictor/target tables. Clock failures produce an explicit
+audit with no qualified rows. See [the dataset runbook](research-dataset.md) for
+the four downloads, qualification rules, clock preflight and streaming limits.
+This operation does not fit forecasting models or certify OFI pressure.
+
 The **Results** tab shows the current job and the newest 50 saved jobs. Open a
 completed result for capture replay, bid/ask ladders, midpoint/imbalance charts,
 quality exclusions, model comparison and provenance. Display frames are decimated;
 the estimation grid is not. Inspect raw counts and missing targets before reading
 model scores. JSON summaries can be downloaded with an explicit button.
+
+Descriptive reports add a clock audit, distributions and histograms, average depth
+by price rank, and received-operation counts. Display frames are selected from
+event sequence; descriptive statistics use all eligible events, not just those
+frames. A recording with no usable book states produces explicit zero coverage
+and missing statistics. Existing failed runs stay in the catalog; submit a new
+descriptive run to obtain a descriptive report.
+
+Descriptive jobs accept up to 500,000 events across their selected stopped
+recordings and 200 MB of frozen input. Timing-dependent inspection/comparison
+retain their limits of 200,000 events per recording, 300,000 total, 80 MB per
+input and 120 MB combined. Larger recordings remain saved and can still be
+browsed using **View recording**; these analysis limits do not stop acquisition.
 
 The worker also saves the existing full `analysis.json` and self-contained
 `report.html` in the run's `output` directory. Results are reopened after a server
@@ -133,6 +347,7 @@ Origin, Fetch-Metadata, request-size and no-store protections:
 - `GET` / `POST /api/depth/research/jobs`
 - `GET /api/depth/research/jobs/{generated_id}`
 - `GET /api/depth/research/jobs/{generated_id}/result`
+- `GET /api/depth/research/jobs/{generated_id}/artifacts/{features|minutes|blocks|pairs}`
 - `POST /api/depth/research/jobs/{generated_id}/cancel`
 
 Requests contain only bounded numerical settings, known capture IDs, source and
@@ -171,8 +386,18 @@ SQLite backup does **not** include this sibling research directory. Back it up
 separately with the server stopped if those reports must be retained. Raw snapshots,
 features and private model outputs are not committed to Git or uploaded by the UI.
 
-Limits: one research job at a time; 24 selected captures; 200,000 events per capture
-and 300,000 total; 80 MB per frozen capture and 120 MB total; 12 MB dashboard result;
+Collection continues independently of the analysis/export limits below; an active
+recording can exceed them and remain saved in SQLite and the raw sidecar. Current
+tools do not automatically segment long captures or analyze an unlimited trading
+day. Plan completed capture segments and check disk/recorder health; more requested
+rows can increase arrival rate and file growth.
+
+Limits below apply to the earlier analysis operations; the dataset builder has
+the separate streaming limits in its linked runbook. One research job runs at a
+time, with at most 24 selected captures. Descriptive and time-flow reports allow
+500,000 events and 200 MB per capture and combined. Timed inspection/comparison
+retain 200,000 events per capture and 300,000 total, with 80 MB per frozen capture
+and 120 MB total. Shared limits: 12 MB dashboard result;
 100 saved job directories; newest 50 visible jobs. Existing model-lab limits also
 apply (40,000 grid points per capture, 60,000 total grid/model rows and 100 MB full
 report). Default wall-clock budget, including preparation, is 180 seconds. Local
@@ -193,7 +418,7 @@ Automated checks use disposable synthetic captures: Python request/worker tests,
 pure JavaScript state/validation tests, real C++ HTTP-to-worker tests, snapshot
 parity against the pre-existing cursor export, no credential/descriptor inheritance,
 exclusive archive locking, cancellation/timeout/crash/restart, result corruption
-rejection and browser flows for inspection/comparison/results. Live controls use
+rejection and browser flows for description/time-flow/inspection/comparison/results. Live controls use
 clearly synthetic browser protocol fixtures, never a real brokerage login.
 
 Local acceptance still required: native launch -> explicit connect -> resolve ->

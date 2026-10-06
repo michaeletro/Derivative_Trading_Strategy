@@ -128,7 +128,7 @@ def parse_frame(payload: dict) -> Frame:
         f.venue, f.requested = payload['venue'], payload['requested_rows']
         if f.request == 0 or f.contract == 0 or not isinstance(f.venue, str) or not re.fullmatch(r'[A-Z0-9._-]{1,32}', f.venue) or f.venue == 'SMART':
             raise ViewError('Invalid direct-depth identity.')
-        if type(f.requested) is not int or not 1 <= f.requested <= 10:
+        if type(f.requested) is not int or not 1 <= f.requested <= 50:
             raise ViewError('Unsupported requested row bound.')
         f.active, f.structural_valid = payload['active'], payload['structural_valid']
         if type(f.active) is not bool or type(f.structural_valid) is not bool:

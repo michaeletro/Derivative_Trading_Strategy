@@ -4,6 +4,10 @@
 #include "Decimal.h"
 #include "DefaultEWrapper.h"
 #include "bar.h"
+#include "HistoricalTickLast.h"
+#include "HistoricalTickBidAsk.h"
+#include "protobufUnix/HistoricalTicksLast.pb.h"
+#include "protobufUnix/HistoricalTicksBidAsk.pb.h"
 #include "protobufUnix/ContractData.pb.h"
 #include "protobufUnix/ContractDataEnd.pb.h"
 #include "protobufUnix/NextValidId.pb.h"
@@ -77,7 +81,7 @@ public:
     std::atomic<bool> acknowledged{false};
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
-        queue_.clear(); overflow_ = false; acknowledged.store(false);
+        queue_.clear(); overflow_ = false; depth_protobuf_ = false; error_protobuf_mirror_pending_ = false; acknowledged.store(false);
     }
     void drain(TwsState& state) {
         std::vector<std::function<void(TwsState&)>> work;
@@ -111,20 +115,21 @@ public:
         catch (const std::exception& e) { bad_position(e.what()); }
     }
     void positionEnd() override { post([](TwsState& s) { s.position_end(); }); }
-    void error(int id, time_t, int code, const std::string& message, const std::string&) override { deliver_error(id, code, message); }
+    void error(int id, time_t, int code, const std::string& message, const std::string&) override {
+        // Only consume the immediate mirror. SDK-local errors still use this
+        // legacy callback on protobuf connections and must remain visible.
+        if (error_protobuf_mirror_pending_) { error_protobuf_mirror_pending_=false; return; }
+        deliver_error(id, code, message);
+    }
     void updateMktDepth(int id, int position, int operation, int side, double price, Decimal size) override {
-        updateMktDepthL2(id, position, "", operation, side, price, size, false);
+        native_depth(id, position, "", operation, side, price, size, false, "legacy_depth");
     }
     void updateMktDepthL2(int id, int position, const std::string& maker, int operation,
                          int side, double price, Decimal size, bool smart) override {
-        DepthEvent e; e.received = DepthStamp::now(); e.request_id = static_cast<RequestId>(id);
-        e.position = position; e.operation = operation; e.side = side; e.price = price;
-        e.market_maker = maker; e.smart_depth = smart;
-        try { e.size = operation == 2 ? "" : DecimalFunctions::decimalToString(size); deliver_depth(std::move(e)); }
-        catch (const std::exception&) { deliver_error(static_cast<int>(id), -1030, "Invalid native depth payload"); }
+        native_depth(id, position, maker, operation, side, price, size, smart, "legacy_depth_l2");
     }
-    void updateMarketDepthProtoBuf(const protobuf::MarketDepth& p) override { proto_depth(p.reqid(), p.marketdepthdata(), p.has_marketdepthdata()); }
-    void updateMarketDepthL2ProtoBuf(const protobuf::MarketDepthL2& p) override { proto_depth(p.reqid(), p.marketdepthdata(), p.has_marketdepthdata()); }
+    void updateMarketDepthProtoBuf(const protobuf::MarketDepth& p) override { proto_depth(p, "protobuf_depth"); }
+    void updateMarketDepthL2ProtoBuf(const protobuf::MarketDepthL2& p) override { proto_depth(p, "protobuf_depth_l2"); }
     void historicalData(int id,const ::Bar& bar) override {
         try {
             HistoricalBar b;b.time=bar.time;b.open=bar.open;b.high=bar.high;b.low=bar.low;b.close=bar.close;
@@ -153,6 +158,49 @@ public:
         }catch(const std::exception&){deliver_error(p.reqid(),-1021,"Invalid protobuf historical bar fields");}
     }
     void historicalDataEndProtoBuf(const protobuf::HistoricalDataEnd& p) override {historicalDataEnd(p.reqid(),p.startdatestr(),p.enddatestr());}
+    void historicalTicksLast(int id,const std::vector<::HistoricalTickLast>& ticks,bool done) override {
+        try {
+            if(ticks.size()>max_tick_page)throw std::length_error("Tick page too large");
+            std::vector<dts::HistoricalTick> rows;rows.reserve(ticks.size());
+            for(const auto& p:ticks){dts::HistoricalTick r;r.time=p.time;r.price=p.price;r.size=DecimalFunctions::decimalToString(p.size);
+                r.exchange=p.exchange;r.conditions=p.specialConditions;r.past_limit=p.tickAttribLast.pastLimit;r.unreported=p.tickAttribLast.unreported;rows.push_back(std::move(r));}
+            deliver_ticks(id,"TRADES",std::move(rows),done);
+        }catch(const std::exception&){deliver_error(id,-1041,"Invalid historical trade ticks");}
+    }
+    void historicalTicksBidAsk(int id,const std::vector<::HistoricalTickBidAsk>& ticks,bool done) override {
+        try {
+            if(ticks.size()>max_tick_page)throw std::length_error("Tick page too large");
+            std::vector<dts::HistoricalTick> rows;rows.reserve(ticks.size());
+            for(const auto& p:ticks){dts::HistoricalTick r;r.time=p.time;r.bid=p.priceBid;r.ask=p.priceAsk;
+                r.bid_size=DecimalFunctions::decimalToString(p.sizeBid);r.ask_size=DecimalFunctions::decimalToString(p.sizeAsk);
+                r.bid_past_low=p.tickAttribBidAsk.bidPastLow;r.ask_past_high=p.tickAttribBidAsk.askPastHigh;rows.push_back(std::move(r));}
+            deliver_ticks(id,"BID_ASK",std::move(rows),done);
+        }catch(const std::exception&){deliver_error(id,-1041,"Invalid historical bid/ask ticks");}
+    }
+    void historicalTicksLastProtoBuf(const protobuf::HistoricalTicksLast& p) override {
+        try {
+            if(p.historicaltickslast_size()>static_cast<int>(max_tick_page))throw std::length_error("Tick page too large");
+            std::vector<dts::HistoricalTick> rows;
+            for(const auto& t:p.historicaltickslast()){
+                if(!t.has_time()||!t.has_price()||!t.has_size())throw std::invalid_argument("Missing tick fields");
+                dts::HistoricalTick r;r.time=t.time();r.price=t.price();r.size=t.size();r.exchange=t.exchange();r.conditions=t.specialconditions();
+                r.past_limit=t.tickattriblast().pastlimit();r.unreported=t.tickattriblast().unreported();rows.push_back(std::move(r));
+            }
+            deliver_ticks(p.reqid(),"TRADES",std::move(rows),p.isdone());
+        }catch(const std::exception&){deliver_error(p.reqid(),-1041,"Invalid protobuf trade ticks");}
+    }
+    void historicalTicksBidAskProtoBuf(const protobuf::HistoricalTicksBidAsk& p) override {
+        try {
+            if(p.historicalticksbidask_size()>static_cast<int>(max_tick_page))throw std::length_error("Tick page too large");
+            std::vector<dts::HistoricalTick> rows;
+            for(const auto& t:p.historicalticksbidask()){
+                if(!t.has_time()||!t.has_pricebid()||!t.has_priceask()||!t.has_sizebid()||!t.has_sizeask())throw std::invalid_argument("Missing tick fields");
+                dts::HistoricalTick r;r.time=t.time();r.bid=t.pricebid();r.ask=t.priceask();r.bid_size=t.sizebid();r.ask_size=t.sizeask();
+                r.bid_past_low=t.tickattribbidask().bidpastlow();r.ask_past_high=t.tickattribbidask().askpasthigh();rows.push_back(std::move(r));
+            }
+            deliver_ticks(p.reqid(),"BID_ASK",std::move(rows),p.isdone());
+        }catch(const std::exception&){deliver_error(p.reqid(),-1041,"Invalid protobuf bid/ask ticks");}
+    }
     void nextValidIdProtoBuf(const protobuf::NextValidId& p) override { nextValidId(p.orderid()); }
     void tickPriceProtoBuf(const protobuf::TickPrice& p) override { tickPrice(p.reqid(), static_cast<TickType>(p.ticktype()), p.price(), TickAttrib{}); }
     void marketDataTypeProtoBuf(const protobuf::MarketDataType& p) override { marketDataType(p.reqid(), p.marketdatatype()); }
@@ -166,28 +214,52 @@ public:
         catch (const std::exception& e) { bad_position(e.what()); }
     }
     void positionEndProtoBuf(const protobuf::PositionEnd&) override { positionEnd(); }
-    void errorProtoBuf(const protobuf::ErrorMessage& p) override { deliver_error(p.id(), p.errorcode(), p.errormsg()); }
+    void errorProtoBuf(const protobuf::ErrorMessage& p) override { error_protobuf_mirror_pending_=true; deliver_error(p.id(), p.errorcode(), p.errormsg()); }
 private:
     std::mutex mutex_;
     std::vector<std::function<void(TwsState&)>> queue_;
     bool overflow_ = false;
+    // processMsgs serializes callbacks. clear() runs after the reader stops.
+    bool depth_protobuf_ = false;
+    bool error_protobuf_mirror_pending_ = false;
+    void deliver_ticks(int id,std::string type,std::vector<dts::HistoricalTick> rows,bool done) {
+        for(const auto& r:rows)r.validate(type);
+        post([id,type=std::move(type),rows=std::move(rows),done](TwsState& s)mutable{s.historical_ticks(static_cast<RequestId>(id),type,std::move(rows),done);});
+    }
     void post(std::function<void(TwsState&)> action) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (queue_.size() >= 4096) { overflow_ = true; return; }
         queue_.push_back(std::move(action));
     }
     void deliver_depth(DepthEvent e) {
-        if(e.size.size()>64 || e.market_maker.size()>64 || e.market_maker.find('\0')!=std::string::npos)
+        if(e.raw_payload.size()>65536 || e.size.size()>64 || e.market_maker.size()>64 || e.market_maker.find('\0')!=std::string::npos)
             throw std::invalid_argument("Depth payload exceeds bounds");
         post([e=std::move(e)](TwsState& s){ s.depth_update(e); });
     }
-    void proto_depth(int id, const protobuf::MarketDepthData& p, bool present) {
+    void native_depth(int id, int position, const std::string& maker, int operation,
+                      int side, double price, Decimal size, bool smart, const char* format) {
+        // SDK 10.45 dispatches protobuf first and then its converted legacy
+        // callback. Select one format per connection, never deduplicate values.
+        if (depth_protobuf_) return;
+        DepthEvent e; e.received=DepthStamp::now(); e.request_id=static_cast<RequestId>(id);
+        e.position=position; e.operation=operation; e.side=side; e.price=price;
+        e.market_maker=maker; e.smart_depth=smart; e.callback_format=format;
+        try { e.size=DecimalFunctions::decimalToString(size); deliver_depth(std::move(e)); }
+        catch(const std::exception&) { deliver_error(id,-1030,"Invalid native depth payload"); }
+    }
+    template<class Message> void proto_depth(const Message& message, const char* format) {
+        depth_protobuf_ = true;
+        const int id=message.reqid();
+        const auto& p=message.marketdepthdata();
         DepthEvent e; e.received=DepthStamp::now(); e.request_id=static_cast<RequestId>(id);
         e.position=p.has_position()?p.position():-1; e.operation=p.has_operation()?p.operation():-1;
         e.side=p.has_side()?p.side():-1; e.price=p.has_price()?p.price():std::numeric_limits<double>::quiet_NaN();
         e.size=p.size(); e.market_maker=p.marketmaker(); e.smart_depth=p.issmartdepth();
+        e.callback_format=format;
         try {
-            if(!present)throw std::invalid_argument("Missing depth payload");
+            if(!message.has_marketdepthdata())throw std::invalid_argument("Missing depth payload");
+            if(message.ByteSizeLong()>65536)throw std::length_error("Depth protobuf exceeds bounds");
+            e.raw_payload=message.SerializeAsString();
             deliver_depth(std::move(e));
         }catch(const std::exception&){deliver_error(id,-1030,"Invalid protobuf depth payload");}
     }

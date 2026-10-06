@@ -17,6 +17,9 @@ class Handler(SimpleHTTPRequestHandler):
         assets = {'/dashboard/orderbook.mjs': 'orderbook.mjs', '/dashboard/orderbook-model.mjs': 'orderbook-model.mjs', '/dashboard/orderbook.css': 'orderbook.css', '/': 'index.html', '/dashboard/': 'index.html', '/dashboard/index.html': 'index.html',
                   '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/local-signin.mjs':'local-signin.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css', '/dashboard/storage.mjs': 'storage.mjs', '/dashboard/storage-model.mjs': 'storage-model.mjs', '/dashboard/history.mjs': 'history.mjs', '/dashboard/history-model.mjs': 'history-model.mjs', '/dashboard/history.css': 'history.css', '/dashboard/replay.mjs': 'replay.mjs', '/dashboard/replay-model.mjs': 'replay-model.mjs', '/dashboard/replay.css': 'replay.css', '/dashboard/sde.mjs': 'sde.mjs', '/dashboard/sde-model.mjs': 'sde-model.mjs', '/dashboard/sde.css': 'sde.css', '/dashboard/hedging.mjs': 'hedging.mjs', '/dashboard/hedging-model.mjs': 'hedging-model.mjs', '/dashboard/hedging.css': 'hedging.css'}
         name = assets.get(urlparse(self.path).path)
+        if urlparse(self.path).path in ['/dashboard/ticks.mjs','/dashboard/ticks-model.mjs',
+                                      '/dashboard/variation.mjs','/dashboard/variation-model.mjs']:
+            name=urlparse(self.path).path.rsplit('/',1)[-1]
         if not name:
             self.send_error(404); return
         body = (ROOT / 'src/frontend/dashboard' / name).read_bytes()
@@ -36,7 +39,7 @@ def main():
     contract = dict(contract_id=102, symbol='DEMO', security_type='STK', exchange='SIM', currency='USD', multiplier=1)
     data = {'session_id': 'fixture-1', 'broker': {'mode': 'mock', 'read_only': True, 'state': 'disconnected', 'enabled': True, 'simulation': True, 'errors': []},
             'subscriptions': [], 'positions': {'status': 'unavailable', 'positions': None}}
-    calls, errors, external = [], [], []
+    calls, errors, external, asset_errors = [], [], [], []
     fail = {'status': 0}
     def handle(route):
         req = route.request; path = urlparse(req.url).path
@@ -79,10 +82,19 @@ def main():
             context = browser.new_context(viewport={'width':1600,'height':1050}, reduced_motion='reduce')
             page = context.new_page(); page.on('pageerror', lambda error: errors.append(str(error)))
             page.on('request', lambda req: external.append(req.url) if not req.url.startswith(origin) else None)
+            # Module fetch failures do not reliably emit pageerror. Catch missing
+            # imports before a non-initialized form can submit as a navigation.
+            page.on('response', lambda response: asset_errors.append(f'{urlparse(response.url).path}: HTTP {response.status}')
+                    if urlparse(response.url).path.endswith(('.mjs', '.css')) and not response.ok else None)
+            page.on('requestfailed', lambda req: asset_errors.append(f'{urlparse(req.url).path}: {req.failure}')
+                    if urlparse(req.url).path.endswith(('.mjs', '.css')) else None)
             page.route('**/api/**', handle); page.route('**/ib/status', handle)
             page.goto(origin); expect(page.locator('#session-badge')).to_have_text('LOCKED')
             page.wait_for_timeout(150)
+            assert not asset_errors, f'Frontend assets failed to load: {asset_errors}'
             assert not errors, f'Frontend modules did not initialize: {errors}'
+            expect(page.locator('#forget')).to_have_text('Sign out')
+            assert calls, 'Frontend must initialize and inspect its local sign-in status'
             assert all(path=='/api/auth/status' for _,path,_ in calls), 'Locked page may check its session, never broker/data state'
             page.screenshot(path=str(shots/'dashboard-desktop.png'), full_page=True)
             page.set_viewport_size({'width':390,'height':844}); page.screenshot(path=str(shots/'dashboard-mobile.png'), full_page=True)
@@ -132,6 +144,7 @@ def main():
             assert TOKEN not in page.content() and page.evaluate('localStorage.length + sessionStorage.length')==0
             page.reload();expect(page.locator('#session-badge')).to_have_text('LOCKED');page.wait_for_timeout(150);assert all(path=='/api/auth/status' for _,path,_ in calls[count:])
             assert not external, f'Unexpected external requests: {external}'
+            assert not asset_errors, f'Frontend assets failed to load: {asset_errors}'
             assert not errors, f'Browser errors: {errors}'
             browser.close()
         print('Browser acceptance passed: access, explicit actions, candidates, stale/null quotes, snapshots, XSS, outage, disconnect, token clearing, mobile layout. Fixtures only.')

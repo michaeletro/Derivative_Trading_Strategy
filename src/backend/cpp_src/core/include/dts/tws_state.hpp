@@ -57,7 +57,7 @@ public:
     }
     RequestId history(const HistorySpec& spec, HistoryWindow window, Clock::time_point now) {
         require_ready(); spec.validate(window);
-        if (history_id_) throw std::length_error("One active native historical request permitted");
+        if (history_id_ || tick_id_) throw std::length_error("One active native historical request permitted");
         throttle(now); history_id_=allocate(); history_spec_=spec; history_window_=window;
         history_deadline_=now+std::chrono::seconds(60); history_count_=0; return history_id_;
     }
@@ -84,6 +84,26 @@ public:
     std::vector<RequestId> history_cancellations() {
         std::vector<RequestId> out;out.swap(history_cancels_);return out;
     }
+    RequestId ticks(const TickSpec& spec,std::int64_t start,Clock::time_point now) {
+        require_ready();spec.validate({start,start+1});
+        if(history_id_||tick_id_)throw std::logic_error("Another historical request is active");
+        throttle(now);tick_id_=allocate();tick_spec_=spec;tick_start_=start;tick_rows_.clear();
+        tick_deadline_=now+std::chrono::seconds(60);return tick_id_;
+    }
+    void historical_ticks(RequestId id,const std::string& type,std::vector<HistoricalTick> rows,bool done) {
+        if(!tick_id_||tick_id_!=id)return;
+        try {
+            if(type!=tick_spec_.type||rows.size()+tick_rows_.size()>max_tick_page)throw std::invalid_argument("Invalid tick response size/type");
+            // Native IBKR BID_ASK may seed the response with the preceding
+            // second (observed on the real paper session). Preserve ordering;
+            // the archive clips this seed to the user's exact [start,end).
+            auto previous=tick_rows_.empty()?tick_start_-(type=="BID_ASK"?1:0):tick_rows_.back().time;
+            for(const auto& r:rows){r.validate(type);if(r.time<previous)throw std::invalid_argument("Historical tick timestamp "+std::to_string(r.time)+" precedes "+std::to_string(previous));previous=r.time;}
+            tick_rows_.insert(tick_rows_.end(),std::make_move_iterator(rows.begin()),std::make_move_iterator(rows.end()));
+            if(done)finish_ticks("complete",0);
+        }catch(const std::exception& e){finish_ticks("failed",-1041,e.what());}
+    }
+    void cancel_ticks(RequestId id) {if(id==tick_id_ && tick_id_)finish_ticks("cancelled",-1042);}
     RequestId resolve(const ContractQuery& query, Clock::time_point now) {
         require_ready(); query.validate();
         if (resolutions_.size() >= 16) throw std::length_error("Too many contract requests");
@@ -200,6 +220,7 @@ public:
             if(code==165)finish_history("unavailable",code);
             else if(code<2000)finish_history("failed",code);
         }
+        if(tick_id_ && id==tick_id_ && (code<2000 || code>=10000))finish_ticks("failed",code);
         emit(BrokerError{id, code, message});
         if (resolutions_.erase(id)) emit(ContractsComplete{id, false});
         auto it = subscriptions_.find(id);
@@ -213,6 +234,7 @@ public:
             fail(-1001, "TWS handshake timed out"); return;
         }
         if(history_id_ && now>=history_deadline_)finish_history("failed",-1023);
+        if(tick_id_ && now>=tick_deadline_)finish_ticks("failed",-1043);
         std::vector<RequestId> expired;
         for (const auto& item : resolutions_)
             if (now >= item.second.deadline) expired.push_back(item.first);
@@ -225,6 +247,16 @@ public:
         std::vector<BrokerEvent> out; out.swap(events_); return out;
     }
 private:
+    RequestId tick_id_=0;
+    TickSpec tick_spec_;
+    std::int64_t tick_start_=0;
+    Clock::time_point tick_deadline_{};
+    std::vector<HistoricalTick> tick_rows_;
+    void finish_ticks(const std::string& status,int code,const std::string& error="") {
+        HistoricalTickPage page;page.request_id=tick_id_;page.status=status;page.code=code;page.error=error;
+        if(status=="complete")page.ticks=std::move(tick_rows_);
+        tick_rows_.clear();tick_id_=0;emit(std::move(page));
+    }
     RequestId depth_id_ = 0;
     std::uint64_t depth_sequence_ = 0;
     std::vector<RequestId> depth_cancels_;
@@ -252,6 +284,7 @@ private:
     std::vector<BrokerEvent> events_;
     std::deque<Clock::time_point> requests_;
     void clear() noexcept {
+        tick_id_=0;tick_rows_.clear();
         resolutions_.clear(); subscriptions_.clear(); events_.clear(); requests_.clear();
         history_id_=0;history_cancels_.clear(); depth_id_=0; depth_sequence_=0; depth_cancels_.clear();
         position_request_ = 0; position_seen_ = false; position_valid_ = false;

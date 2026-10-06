@@ -23,9 +23,9 @@ research::Snapshot snapshot_locked(sqlite3* db,std::int64_t id) {
     s.window={q.integer(4),q.integer(5)};s.request_cutoff=q.integer(6);const auto expected=q.integer(7);s.fingerprint=q.text(8);s.source=q.text(9);
     s.spec.contract.id=q.integer(10);s.spec.contract.symbol=q.text(11);s.spec.contract.exchange=q.text(12);s.spec.contract.currency=q.text(13);s.spec.contract.multiplier=1;
     s.spec.bar_size=q.text(14);s.spec.price_type=q.text(15);s.spec.use_rth=q.integer(16)!=0;s.time_basis=q.text(17);s.adjustment_policy=q.text(18);
-    Statement bars(db,"SELECT version_id,request_id,coordinate_s,source_time,open,high,low,close,volume,wap,bar_count,observed_ms,response_finished_ms FROM research_snapshot_bars WHERE snapshot_id=?1 ORDER BY ordinal LIMIT 2001");
+    Statement bars(db,"SELECT version_id,request_id,coordinate_s,source_time,open,high,low,close,volume,wap,bar_count,observed_ms,response_finished_ms FROM research_snapshot_bars WHERE snapshot_id=?1 ORDER BY ordinal LIMIT 40001");
     bars.bind(1,id);while(bars.step())s.observations.push_back(observation(bars));
-    Statement gaps(db,"SELECT start_s,end_s FROM research_snapshot_gaps WHERE snapshot_id=?1 ORDER BY ordinal LIMIT 2001");
+    Statement gaps(db,"SELECT start_s,end_s FROM research_snapshot_gaps WHERE snapshot_id=?1 ORDER BY ordinal LIMIT 40001");
     gaps.bind(1,id);while(gaps.step())s.uncovered_intervals.push_back({gaps.integer(0),gaps.integer(1)});
     if(expected!=static_cast<std::int64_t>(s.observations.size())||research::snapshot_fingerprint(s)!=s.fingerprint)
         throw std::runtime_error("Snapshot integrity check failed; no automatic repair performed");
@@ -42,7 +42,7 @@ Experiment experiment_locked(sqlite3* db,std::int64_t id) {
 }
 research::Snapshot TimeSeriesStore::create_snapshot(std::int64_t dataset_id,HistoryWindow w,const std::string& name) {
     research_name(name);std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();
-    research::Snapshot s;s.dataset_id=dataset_id;s.name=name;s.window=w;s.spec=history_spec_locked(impl_->db,dataset_id);s.spec.validate(w);s.created_ms=now_ms();
+    research::Snapshot s;s.dataset_id=dataset_id;s.name=name;s.window=w;s.spec=history_spec_locked(impl_->db,dataset_id);s.spec.validate_range(w);s.created_ms=now_ms();
     Statement meta(impl_->db,"SELECT source,time_basis,adjustment_policy FROM history_datasets WHERE dataset_id=?1");meta.bind(1,dataset_id);meta.step();
     s.source=meta.text(0);s.time_basis=meta.text(1);s.adjustment_policy=meta.text(2);
     s.request_cutoff=scalar(impl_->db,"SELECT coalesce(max(request_id),0) FROM history_requests");
@@ -52,11 +52,11 @@ research::Snapshot TimeSeriesStore::create_snapshot(std::int64_t dataset_id,Hist
  FROM history_versions v JOIN history_membership m ON v.version_id=m.version_id JOIN history_requests r ON r.request_id=m.request_id
  WHERE v.dataset_id=?1 AND v.coordinate_s>=?2 AND v.coordinate_s<?3 AND r.state IN ('complete','empty')
  AND r.request_id=(SELECT max(c.request_id) FROM history_requests c WHERE c.dataset_id=?1 AND c.request_id<=?4 AND c.start_s<=v.coordinate_s AND c.end_s>v.coordinate_s AND c.state IN ('complete','empty'))
- ORDER BY v.coordinate_s LIMIT 2001)SQL");
+ ORDER BY v.coordinate_s LIMIT 40001)SQL");
     q.bind(1,dataset_id);q.bind(2,w.start);q.bind(3,w.end);q.bind(4,s.request_cutoff);
     while(q.step())s.observations.push_back(observation(q));
     if(s.observations.empty())throw std::invalid_argument("No completed saved bars in this window; no snapshot created");
-    if(s.observations.size()>research::maximum_bars)throw std::invalid_argument("Snapshot limit is 2000 bars; narrow the window");
+    if(s.observations.size()>research::maximum_bars)throw std::invalid_argument("Snapshot limit is 40000 bars; narrow the window");
     Statement coverage(impl_->db,"SELECT start_s,end_s FROM history_requests WHERE dataset_id=?1 AND request_id<=?4 AND start_s<?3 AND end_s>?2 AND state IN ('complete','empty') ORDER BY start_s LIMIT 20001");
     coverage.bind(1,dataset_id);coverage.bind(2,w.start);coverage.bind(3,w.end);coverage.bind(4,s.request_cutoff);
     std::vector<HistoryWindow> covered;while(coverage.step())covered.push_back({coverage.integer(0),coverage.integer(1)});
@@ -82,12 +82,12 @@ research::Snapshot TimeSeriesStore::snapshot(std::int64_t id) const {
 }
 Page TimeSeriesStore::snapshot_catalog(std::int64_t after,int limit) const {
     page_check(after,limit);std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();
-    Statement q(impl_->db,"SELECT cast(snapshot_id AS TEXT) AS snapshot_id,name,symbol,bar_size,price_type,created_ms,bar_count,fingerprint FROM research_snapshots WHERE snapshot_id>?1 AND sealed=1 ORDER BY snapshot_id LIMIT ?2");
+    Statement q(impl_->db,"SELECT cast(snapshot_id AS TEXT) AS snapshot_id,name,symbol,bar_size,price_type,source,use_rth,start_s,end_s,created_ms,bar_count,fingerprint FROM research_snapshots WHERE snapshot_id>?1 AND sealed=1 ORDER BY snapshot_id LIMIT ?2");
     q.bind(1,after);q.bind(2,std::int64_t(limit+1));Page p;
     while(q.step()){if(p.rows.size()==std::size_t(limit)){p.has_more=true;break;}p.next_after_id=std::stoll(q.text());p.rows.push_back(q.row());}return p;
 }
 std::int64_t TimeSeriesStore::save_experiment(const Experiment& e) {
-    research_name(e.name);small_text(e.engine_version,80);small_text(e.config_json,4096);small_text(e.result_json,4*1024*1024);
+    research_name(e.name);small_text(e.engine_version,80);small_text(e.config_json,4096);small_text(e.result_json,research::maximum_result_bytes);
     if(e.engine_version!=research::engine_version||e.result_json.empty()||e.config_json.empty()||e.parent_id<0)throw std::invalid_argument("Invalid research experiment record");
     std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();snapshot_locked(impl_->db,e.snapshot_id);
     if(e.parent_id){const auto parent=experiment_locked(impl_->db,e.parent_id);if(parent.snapshot_id!=e.snapshot_id)throw std::invalid_argument("A rerun must use its parent's frozen snapshot");}

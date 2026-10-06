@@ -78,6 +78,16 @@ RequestId TwsBroker::request_history(const HistorySpec& spec,HistoryWindow windo
 void TwsBroker::cancel_history(RequestId id) {
     impl_->session.cancel_history(id); // SDK cancellation is sent by poll().
 }
+RequestId TwsBroker::request_ticks(const TickSpec& spec,std::int64_t start) {
+    const auto id=impl_->session.ticks(spec,start,Clock::now());
+    impl_->client->reqHistoricalTicks(static_cast<int>(id),ibkr_detail::to_native(spec.contract),
+        utc_text(start),"",1000,spec.type,spec.use_rth?1:0,false,TagValueListSPtr{});
+    return id;
+}
+void TwsBroker::cancel_ticks(RequestId id) {
+    // IBKR exposes no cancelHistoricalTicks. Ignore this request's late callbacks.
+    impl_->session.cancel_ticks(id);
+}
 RequestId TwsBroker::subscribe_depth(const DepthSpec& spec) {
     spec.validate(); auto native = ibkr_detail::to_native(spec.contract); native.exchange = spec.venue;
     const auto id = impl_->session.depth(spec, Clock::now());

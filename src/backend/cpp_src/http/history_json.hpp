@@ -24,13 +24,16 @@ inline void fields(const crow::json::rvalue& j,std::set<std::string> allowed) {
 }
 inline HistoryWindow window(const crow::json::rvalue& j) {return {integer(j,"start_s"),integer(j,"end_s")};}
 inline Json view(storage::TimeSeriesStore& store,std::int64_t id,HistoryWindow w) {
-    const auto spec=store.historical_spec(id);spec.validate(w);
+    const auto spec=store.historical_spec(id);spec.validate_range(w);
     Json j;j["dataset_id"]=std::to_string(id);j["symbol"]=spec.contract.symbol;j["contract_id"]=spec.contract.id;
     j["bar_size"]=spec.bar_size;j["price_type"]=spec.price_type;j["use_rth"]=spec.use_rth;j["currency"]=spec.contract.currency;
     j["start_s"]=w.start;j["end_s"]=w.end;
     j["time_basis"]=spec.bar_size=="1 day"?"provider_session_date":"UTC_epoch_seconds";
     j["adjustment_policy"]="provider_native_not_normalized";
     j["bars"]=rows(store.historical_bars(id,w));j["requests"]=rows(store.historical_requests(id,w));
+    Json progress;for(const auto& kv:store.historical_progress(id,w))std::visit([&](const auto& v){progress[kv.first]=v;},kv.second);
+    j["progress"]=std::move(progress);j["queue"]=rows(store.historical_queue());
+    j["dispatch_spacing_seconds"]=15;j["view_bar_limit"]=static_cast<std::uint64_t>(history_view_limit);
     std::vector<Json> gaps;for(auto g:store.historical_gaps(id,w)){Json row;row["start_s"]=g.start;row["end_s"]=g.end;gaps.push_back(std::move(row));}
     j["response_coverage_complete"]=gaps.empty();j["uncovered_intervals"]=std::move(gaps);
     j["complete_market_history"]=false;j["recorded_not_live"]=true;j["recent_request_limit"]=200;

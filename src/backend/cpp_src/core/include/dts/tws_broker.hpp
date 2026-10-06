@@ -23,6 +23,8 @@ public:
     RequestId resolve(const ContractQuery&) override;
     RequestId request_history(const HistorySpec&, HistoryWindow) override;
     void cancel_history(RequestId) override;
+    RequestId request_ticks(const TickSpec&, std::int64_t) override;
+    void cancel_ticks(RequestId) override;
     RequestId subscribe_depth(const DepthSpec&) override;
     bool unsubscribe_depth(RequestId) override;
     RequestId subscribe(const Contract&) override;

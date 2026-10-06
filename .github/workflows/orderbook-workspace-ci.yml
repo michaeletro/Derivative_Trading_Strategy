@@ -54,13 +54,20 @@ jobs:
       - name: Pure presentation, worker and existing analytical regression tests
         run: |
           node --test tests/workspace/*.test.mjs tests/dashboard/*.test.mjs
+          node --test tests/ticks/model_tests.mjs tests/variation/model.test.mjs
           python -m unittest discover -s tests/workspace -p 'test_*.py' -v
           python -m unittest discover -s tests/liquidity -p 'test_*.py' -v
           python -m unittest discover -s tests/orderbook -p 'test_*.py' -v
+          python -m unittest discover -s tests/variation -p 'test_*.py' -v
       - name: Real HTTP / frozen snapshots / worker / lifecycle (synthetic only)
-        run: python tests/workspace/http_tests.py build-workspace/server
+        run: |
+          python tests/workspace/http_tests.py build-workspace/server
+          python tests/variation/http_tests.py build-workspace/server build-workspace/research_store_tests
       - name: Browser-to-worker acceptance and synthetic live-control protocol
-        run: python tests/workspace/browser_tests.py build-workspace/server
+        run: |
+          python tests/workspace/browser_tests.py build-workspace/server
+          python tests/ticks/browser_tests.py build-workspace/server build-workspace/tick_tests
+          python tests/variation/browser_tests.py build-workspace/server build-workspace/research_store_tests
       - uses: actions/upload-artifact@v4
         if: always()
         with:

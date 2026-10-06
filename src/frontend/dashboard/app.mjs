@@ -1,4 +1,6 @@
+import {mountVariation} from './variation.mjs';
 import {mountOrderbook} from './orderbook.mjs';
+import {mountTicks} from './ticks.mjs';
 import {takeLaunchCode, validSessionStatus, reopenMessage} from './local-signin.mjs';
 import {mountHedging} from './hedging.mjs';
 import {mountSde} from './sde.mjs';
@@ -14,7 +16,9 @@ const $=id=>document.getElementById(id);
 $('access-title').parentElement.querySelector('p').textContent='The launcher signs in locally using your saved profile. Manual token entry is a fallback, not your IBKR password.';
 $('forget').textContent='Sign out';
 const api=createApi();
+const variationLab=mountVariation(api,error=>lock(error.message));
 const orderbookLab=mountOrderbook(api,error=>lock(error.message));
+const ticksLab=mountTicks(api,error=>lock(error.message));
 const hedgingLab=mountHedging(api,error=>lock(error.message));
 const sdeLab=mountSde(api,error=>lock(error.message));
 const pricingLab=mountPricing(api,error=>lock(error.message));
@@ -159,6 +163,8 @@ function renderCandidates() {
     if(c.security_type==='STK'&&c.currency==='USD'){
       const historyButton=node('button','Historical bars','secondary');
       historyButton.addEventListener('click',()=>historyLab.selectContract(c));item.append(historyButton);
+      const ticksButton=node('button','Historical ticks','secondary');
+      ticksButton.addEventListener('click',()=>ticksLab.selectContract(c));item.append(ticksButton);
     }
     root.append(item);
   }
@@ -246,6 +252,8 @@ function renderChart() {
 }
 function render() {
   orderbookLab.setAccess(unlocked);orderbookLab.update(fresh?current:null);
+  ticksLab.setAccess(unlocked);
+  variationLab.setAccess(unlocked);
   hedgingLab.setAccess(unlocked);
   sdeLab.setAccess(unlocked);
   pricingLab.setAccess(unlocked);

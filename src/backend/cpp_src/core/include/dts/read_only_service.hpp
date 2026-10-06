@@ -87,6 +87,13 @@ public:
         require_broker(); spec.validate(window); return broker_->request_history(spec, window);
     }
     void cancel_history(RequestId id) { require_broker(); broker_->cancel_history(id); }
+    RequestId request_ticks(const TickSpec& spec,std::int64_t start) {
+        require_broker();spec.validate();return broker_->request_ticks(spec,start);
+    }
+    void cancel_ticks(RequestId id) {require_broker();broker_->cancel_ticks(id);tick_pages_.clear();}
+    std::vector<HistoricalTickPage> take_tick_pages() {
+        std::vector<HistoricalTickPage> out;out.swap(tick_pages_);return out;
+    }
     RequestId subscribe_depth(ContractId id, const std::string& venue, int rows) {
         require_broker();
         if (state() != ConnectionState::Ready) throw std::logic_error("Broker is not ready");
@@ -132,16 +139,21 @@ private:
     std::map<std::pair<std::string, ContractId>, Position> staged_positions_;
     RequestId position_id_ = 0, next_position_id_ = RequestId{1} << 32;
     std::deque<BrokerError> errors_;
+    std::vector<HistoricalTickPage> tick_pages_;
     void require_broker() const {
         if (!broker_) throw std::logic_error("Broker is disabled");
     }
     void invalidate() noexcept {
         contracts_.clear(); subscriptions_.clear(); quotes_.clear(); resolutions_.clear();
-        positions_ = {}; staged_positions_.clear(); position_id_ = 0; depth_.reset();
+        positions_ = {}; staged_positions_.clear(); position_id_ = 0; depth_.reset();tick_pages_.clear();
     }
     void apply(const DepthEvent& e) { if (depth_ && depth_->request_id == e.request_id) depth_->book.apply(e); }
     void apply(const HistoricalBarEvent&) {} // Committed by the recording decorator.
     void apply(const HistoricalEnd&) {}
+    void apply(const HistoricalTickPage& e) {
+        if(tick_pages_.size()>=2)throw std::overflow_error("Historical tick delivery backlog");
+        tick_pages_.push_back(e);
+    }
     void apply(const ConnectionEvent& e) {
         if (e.state != ConnectionState::Ready && e.state != ConnectionState::Connecting) invalidate();
     }

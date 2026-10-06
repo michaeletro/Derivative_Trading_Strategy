@@ -74,6 +74,17 @@ def prepare(args):
     env['DTS_BACKUP_DIR']=str(backup.expanduser().resolve())
     return build,cmd,env
 
+def check_port(port):
+    try:
+        with socket.socket() as sock:
+            # Match Crow's reusable listener: a clean shutdown may leave accepted
+            # connections in TIME_WAIT, which must not prevent an immediate restart.
+            # SO_REUSEPORT is deliberately not enabled; a live listener still fails.
+            sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            sock.bind(('127.0.0.1',port))
+    except OSError as e:
+        raise ValueError(f'Port {port} is unavailable. Stop the intended old server or select another --port; no process was killed') from e
+
 def main(argv=None):
     try:
         args=options(argv);build,configure,env=prepare(args)
@@ -95,9 +106,7 @@ def main(argv=None):
                 try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 except BlockingIOError as e:raise ValueError('Recording database already in use. Stop the owning server or choose a separate --data-dir') from e
             finally:os.close(fd)
-        try:
-            with socket.socket() as sock:sock.bind(('127.0.0.1',args.port))
-        except OSError as e:raise ValueError(f'Port {args.port} is unavailable. Stop the intended old server or select another --port; no process was killed') from e
+        check_port(args.port)
         for cmd in [configure,['cmake','--build',str(build),'--parallel',str(args.jobs)],['ctest','--test-dir',str(build),'--output-on-failure']]:
             subprocess.run(cmd,cwd=ROOT,check=True)
         binary=build/'server'

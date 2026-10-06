@@ -93,6 +93,44 @@ export function createApi(fetcher = fetch) {
     useBrowserSession() { cancel(); token=''; browserSession=true; },
     clear() { cancel(); token=''; browserSession=false; },
     cancel,
+    async downloadResearchArtifact(jobId, artifact) {
+      const files={features:'features.csv.gz',minutes:'minutes.csv.gz',blocks:'blocks.csv',pairs:'pairs.csv'},limit=64*1024*1024;
+      if(typeof jobId!=='string'||!(/^[a-f0-9]{32}$/).test(jobId)||!artifact||!Object.hasOwn(files,artifact.name)||artifact.file!==files[artifact.name]
+        ||!Number.isSafeInteger(artifact.bytes)||artifact.bytes<0||artifact.bytes>limit||!(/^[a-f0-9]{64}$/).test(artifact.sha256)
+        ||artifact.content_type!==(artifact.name==='features'||artifact.name==='minutes'?'application/gzip':'text/csv'))throw new ApiError('Dataset export metadata is invalid or exceeds the 64 MiB browser download limit.');
+      const started=generation,controller=new AbortController();active.add(controller);
+      const timer=setTimeout(()=>controller.abort(),60000);let reader;
+      try {
+        const headers={Accept:artifact.content_type};
+        if(browserSession)headers['X-DTS-Local-Request']='1';
+        if(token)headers.Authorization=`Bearer ${token}`;
+        const response=await fetcher(`/api/depth/research/jobs/${jobId}/artifacts/${artifact.name}`,{method:'GET',headers,signal:controller.signal,cache:'no-store',credentials:browserSession?'same-origin':'omit',redirect:'error',mode:'same-origin'});
+        if(started!==generation)throw new ApiError('Download superseded.');
+        if(response.status===401||response.status===403)throw new ApiError('Access rejected. Reopen using tools/open_dashboard.py --profile paper-tws, or enter your saved local token.',response.status);
+        if(!response.ok)throw new ApiError(`Dataset export unavailable (HTTP ${response.status}).`,response.status);
+        if(response.headers.get('Content-Type')?.split(';')[0].trim()!==artifact.content_type)throw new ApiError('Dataset export type differs from the saved manifest.');
+        const length=response.headers.get('Content-Length');
+        if(length!==null&&Number(length)!==artifact.bytes)throw new ApiError('Dataset export length differs from the saved manifest.');
+        if(!response.body)throw new ApiError('Dataset export body is unavailable.');
+        reader=response.body.getReader();const chunks=[];let bytes=0;
+        while(true) {
+          const chunk=await reader.read();if(started!==generation)throw new ApiError('Download superseded.');
+          if(chunk.done)break;bytes+=chunk.value.byteLength;
+          if(bytes>artifact.bytes||bytes>limit)throw new ApiError('Dataset export exceeds its saved byte limit.');
+          chunks.push(chunk.value);
+        }
+        if(bytes!==artifact.bytes)throw new ApiError('Dataset export is incomplete.');
+        const data=new Uint8Array(bytes);let offset=0;for(const chunk of chunks){data.set(chunk,offset);offset+=chunk.byteLength;}
+        const digest=await crypto.subtle.digest('SHA-256',data),hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+        if(hash!==artifact.sha256)throw new ApiError('Dataset export integrity check failed.');
+        if(started!==generation)throw new ApiError('Download superseded.');
+        return new Blob([data],{type:artifact.content_type});
+      } catch(error) {
+        if(reader)try{await reader.cancel();}catch{}
+        if(error instanceof ApiError)throw error;
+        throw new ApiError('Dataset download interrupted or unavailable. No partial file was accepted.');
+      } finally {clearTimeout(timer);active.delete(controller);}
+    },
     async request(path, method='GET', data) {
       if (!validApiPath(path,method)) throw new ApiError('Invalid local API path.');
       const started = generation, controller = new AbortController(); active.add(controller);
