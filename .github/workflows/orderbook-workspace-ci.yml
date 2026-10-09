@@ -1,0 +1,80 @@
+name: Order-book workspace
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: orderbook-workspace-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked development source only
+        run: |
+          git archive --format=tar.gz -o "$RUNNER_TEMP/workspace-source.tar.gz" HEAD CMakeLists.txt cmake apps src/backend/cpp_src src/frontend/dashboard src/frontend/package.json tools research/liquidity_aware_hedging tests docs requirements-dev.txt README.md .github/workflows .gitignore LICENSE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-source
+          path: ${{ runner.temp }}/workspace-source.tar.gz
+          retention-days: 3
+  integrated-workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      DTS_SCREENSHOT_DIR: workspace-screenshots
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dependencies (no brokerage SDK, session, or credentials)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build libasio-dev libboost-system-dev libsqlite3-dev
+          python -m pip install -r research/liquidity_aware_hedging/requirements-models.txt
+          python -m pip install -r requirements-dev.txt playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Build real HTTP server and run existing CTest coverage
+        run: |
+          cmake -S . -B build-workspace -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDTS_BUILD_SERVER=ON -DDTS_WITH_IBKR=OFF
+          cmake --build build-workspace --parallel 2
+          ctest --test-dir build-workspace --output-on-failure
+      - name: Pure presentation, worker and existing analytical regression tests
+        run: |
+          node --test tests/workspace/*.test.mjs tests/dashboard/*.test.mjs
+          node --test tests/ticks/model_tests.mjs tests/variation/model.test.mjs
+          python -m unittest discover -s tests/workspace -p 'test_*.py' -v
+          python -m unittest discover -s tests/liquidity -p 'test_*.py' -v
+          python -m unittest discover -s tests/orderbook -p 'test_*.py' -v
+          python -m unittest discover -s tests/variation -p 'test_*.py' -v
+      - name: Real HTTP / frozen snapshots / worker / lifecycle (synthetic only)
+        run: |
+          python tests/workspace/http_tests.py build-workspace/server
+          python tests/variation/http_tests.py build-workspace/server build-workspace/research_store_tests
+      - name: Browser-to-worker acceptance and synthetic live-control protocol
+        run: |
+          python tests/dashboard/trading_browser_tests.py
+          python tests/dashboard/execution_rules_browser_tests.py
+          python tests/workspace/browser_tests.py build-workspace/server
+          python tests/workspace/explorer_browser_tests.py build-workspace/server
+          python tests/ticks/browser_tests.py build-workspace/server build-workspace/tick_tests
+          python tests/variation/browser_tests.py build-workspace/server build-workspace/research_store_tests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: orderbook-workspace-synthetic-screenshots
+          path: workspace-screenshots/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -102,3 +102,6 @@ research/liquidity_aware_hedging/reports/*.out
 research/liquidity_aware_hedging/reports/*.toc
 *.liquidity-manifest.json
 *.liquidity-result.json
+
+# Private local proposal working files and their generated build products.
+/Research.*

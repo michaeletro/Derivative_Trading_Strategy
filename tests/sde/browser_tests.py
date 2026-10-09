@@ -31,6 +31,7 @@ def main(exe):
         page.locator('#sde').screenshot(path=str(output/'sde-desktop.png'))
         with page.expect_download() as dl:page.locator('#sde-export').click()
         payload=json.loads(Path(dl.value.path()).read_text());assert payload['numerical_sha256']==result['numerical_sha256']
+        page.evaluate('location.hash="lab-catalog"');expect(page.locator('#lab-catalog')).to_be_visible()
         page.locator('#lab-name').fill('SDE baseline')
         with page.expect_response(lambda r:r.url.endswith('/api/experiments/compute')) as res:page.locator('#lab-save').click()
         saved=res.value.json();ref=saved['reference'];assert saved['kind']=='sde_convergence'
@@ -44,12 +45,19 @@ def main(exe):
         exported=json.loads(Path(dl.value.path()).read_text());assert exported['reference']==ref
         # Existing pricing/Greek controls can be explicitly persisted through
         # the shared catalog, without accepting client-supplied result records.
-        page.locator('#pricing-form [name=paths]').fill('1000');page.locator('#lab-source').select_option('option_pricing')
+        page.evaluate('location.hash="pricing"');expect(page.locator('#pricing')).to_be_visible()
+        page.locator('#pricing-form [name=paths]').fill('1000')
+        page.evaluate('location.hash="lab-catalog"');expect(page.locator('#lab-catalog')).to_be_visible()
+        page.locator('#lab-source').select_option('option_pricing')
         page.locator('#lab-name').fill('Pricing inputs saved');page.locator('#lab-save').click();expect(page.locator('#lab-note')).to_contain_text('Saved option_pricing:')
-        page.locator('#greeks-form [name=draws]').fill('1000');page.locator('#lab-source').select_option('greek_validation')
+        page.evaluate('location.hash="sensitivities"');expect(page.locator('#sensitivities')).to_be_visible()
+        page.locator('#greeks-form [name=draws]').fill('1000')
+        page.evaluate('location.hash="lab-catalog"');expect(page.locator('#lab-catalog')).to_be_visible()
+        page.locator('#lab-source').select_option('greek_validation')
         page.locator('#lab-name').fill('Greek inputs saved');page.locator('#lab-save').click();expect(page.locator('#lab-note')).to_contain_text('Saved greek_validation:')
         expect(page.locator('#lab-a option')).to_have_count(4)
         page.locator('#lab-catalog').screenshot(path=str(output/'sde-catalog-desktop.png'))
+        page.evaluate('location.hash="sde"');expect(page.locator('#sde')).to_be_visible()
         page.set_viewport_size({'width':390,'height':844});page.locator('#sde').scroll_into_view_if_needed()
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
         page.locator('#sde-provenance').scroll_into_view_if_needed()

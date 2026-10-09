@@ -7,7 +7,6 @@
 #include <utility>
 
 namespace dts {
-enum class SnapshotStatus { Unavailable, Pending, Complete, Failed };
 struct ResolutionView {
     SnapshotStatus status = SnapshotStatus::Pending;
     std::vector<Contract> contracts;
@@ -16,6 +15,8 @@ struct DepthView {
     RequestId request_id;
     DepthSpec spec;
     DepthBook book;
+    std::uint64_t update_event_count = 0, lifecycle_event_count = 0;
+    std::optional<DepthStamp> last_update = std::nullopt;
 };
 struct PositionsView {
     SnapshotStatus status = SnapshotStatus::Unavailable;
@@ -87,6 +88,13 @@ public:
         require_broker(); spec.validate(window); return broker_->request_history(spec, window);
     }
     void cancel_history(RequestId id) { require_broker(); broker_->cancel_history(id); }
+    RequestId request_ticks(const TickSpec& spec,std::int64_t start) {
+        require_broker();spec.validate();return broker_->request_ticks(spec,start);
+    }
+    void cancel_ticks(RequestId id) {require_broker();broker_->cancel_ticks(id);tick_pages_.clear();}
+    std::vector<HistoricalTickPage> take_tick_pages() {
+        std::vector<HistoricalTickPage> out;out.swap(tick_pages_);return out;
+    }
     RequestId subscribe_depth(ContractId id, const std::string& venue, int rows) {
         require_broker();
         if (state() != ConnectionState::Ready) throw std::logic_error("Broker is not ready");
@@ -113,6 +121,28 @@ public:
         positions_.status = SnapshotStatus::Pending; return id;
     }
     const PositionsView& positions() const noexcept { return positions_; }
+    const TradingAccountsView& trading_accounts() const noexcept { return trading_.accounts(); }
+    const TradingMonitorView& trading_monitor() const noexcept { return trading_.view(); }
+    bool trading_monitor_start_available() const noexcept {
+        return enabled() && state()==ConnectionState::Ready && !trading_monitor_seen_ &&
+            trading_.accounts().status==SnapshotStatus::Complete && !trading_.accounts().accounts.empty();
+    }
+    bool trading_monitor_restart_requires_reconnect() const noexcept { return trading_monitor_seen_; }
+    RequestId start_trading_monitor(const std::string& account) {
+        require_broker();
+        if(state()!=ConnectionState::Ready) throw std::logic_error("Broker is not ready");
+        if(!trading_.allowed(account)) throw std::invalid_argument("Select a confirmed managed account");
+        if(trading_monitor_seen_) throw std::logic_error("Reconnect before another account monitor");
+        const auto monitor_state=trading_.view().state;
+        if(monitor_state==TradingMonitorState::Pending || monitor_state==TradingMonitorState::Active)
+            throw std::logic_error("Account monitor already active");
+        const auto id=broker_->start_trading_monitor(account);
+        trading_monitor_seen_=true;
+        trading_.begin(id,account,generation_); return id;
+    }
+    void stop_trading_monitor() {
+        require_broker(); broker_->stop_trading_monitor(); trading_.stop();
+    }
     const std::deque<BrokerError>& errors() const noexcept { return errors_; }
     void poll() {
         if (!broker_) return;
@@ -132,16 +162,32 @@ private:
     std::map<std::pair<std::string, ContractId>, Position> staged_positions_;
     RequestId position_id_ = 0, next_position_id_ = RequestId{1} << 32;
     std::deque<BrokerError> errors_;
+    std::vector<HistoricalTickPage> tick_pages_;
+    TradingMonitorModel trading_;
+    bool trading_monitor_seen_=false;
     void require_broker() const {
         if (!broker_) throw std::logic_error("Broker is disabled");
     }
     void invalidate() noexcept {
         contracts_.clear(); subscriptions_.clear(); quotes_.clear(); resolutions_.clear();
-        positions_ = {}; staged_positions_.clear(); position_id_ = 0; depth_.reset();
+        positions_ = {}; staged_positions_.clear(); position_id_ = 0; depth_.reset();tick_pages_.clear();
+        trading_.invalidate(generation_);
+        trading_monitor_seen_=false;
     }
-    void apply(const DepthEvent& e) { if (depth_ && depth_->request_id == e.request_id) depth_->book.apply(e); }
+    void apply(const ManagedAccountsEvent& e) { trading_.accounts(e,generation_); }
+    void apply(const TradingMonitorEvent& e) { trading_.apply(e); }
+    void apply(const DepthEvent& e) {
+        if (!depth_ || depth_->request_id != e.request_id) return;
+        if (e.kind == "update") { ++depth_->update_event_count; depth_->last_update = e.received; }
+        else ++depth_->lifecycle_event_count;
+        depth_->book.apply(e);
+    }
     void apply(const HistoricalBarEvent&) {} // Committed by the recording decorator.
     void apply(const HistoricalEnd&) {}
+    void apply(const HistoricalTickPage& e) {
+        if(tick_pages_.size()>=2)throw std::overflow_error("Historical tick delivery backlog");
+        tick_pages_.push_back(e);
+    }
     void apply(const ConnectionEvent& e) {
         if (e.state != ConnectionState::Ready && e.state != ConnectionState::Connecting) invalidate();
     }

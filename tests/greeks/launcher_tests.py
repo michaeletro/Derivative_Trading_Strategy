@@ -1,6 +1,7 @@
 """Launcher preflight only; no process, build, token display or Git mutation."""
 import importlib.util
 import os
+import socket
 from pathlib import Path
 import tempfile
 import unittest
@@ -8,6 +9,23 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('launcher',Path(__file__).parents[2]/'tools/start_dashboard.py')
 launcher=importlib.util.module_from_spec(spec);spec.loader.exec_module(launcher)
 class LauncherTests(unittest.TestCase):
+    def test_live_listener_still_refused(self):
+        with socket.socket() as server:
+            server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            server.bind(('127.0.0.1',0));server.listen()
+            with self.assertRaisesRegex(ValueError,'no process was killed'):
+                launcher.check_port(server.getsockname()[1])
+    def test_clean_tcp_shutdown_allows_immediate_restart(self):
+        with socket.socket() as server:
+            server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            server.bind(('127.0.0.1',0));server.listen()
+            port=server.getsockname()[1]
+            with socket.create_connection(('127.0.0.1',port),timeout=2) as client:
+                accepted,_=server.accept()
+                # The server actively closes first, leaving its endpoint TIME_WAIT.
+                accepted.shutdown(socket.SHUT_WR);accepted.close()
+                self.assertEqual(client.recv(1),b'')
+        launcher.check_port(port)
     def test_research_overrides_inherited_broker_mode(self):
         with patch.dict(os.environ,{'DTS_BROKER':'tws','ENABLE_IB_WS':'true'}):
             _,cmd,env=launcher.prepare(launcher.options(['--dry-run']))

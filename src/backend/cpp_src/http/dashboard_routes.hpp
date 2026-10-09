@@ -27,6 +27,18 @@ inline void mount(crow::SimpleApp& app, int port) {
     // Registering both explicitly makes startup fail with a duplicate handler.
     CROW_ROUTE(app, "/dashboard/")([serve](const crow::request& req) { return serve(req, assets::index_html, "text/html; charset=utf-8"); });
     CROW_ROUTE(app, "/dashboard/<string>")([serve](const crow::request& req, const std::string& name) {
+        if (name == "navigation.mjs") return serve(req, assets::navigation_mjs, "text/javascript; charset=utf-8");
+        if (name == "trading.mjs") return serve(req, assets::trading_mjs, "text/javascript; charset=utf-8");
+        if (name == "trading-model.mjs") return serve(req, assets::trading_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "trading.css") return serve(req, assets::trading_css, "text/css; charset=utf-8");
+        if (name == "execution-rules.mjs") return serve(req, assets::execution_rules_mjs, "text/javascript; charset=utf-8");
+        if (name == "execution-rules-model.mjs") return serve(req, assets::execution_rules_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "execution-rules.css") return serve(req, assets::execution_rules_css, "text/css; charset=utf-8");
+        if (name == "orderbook-explorer.mjs") return serve(req, assets::orderbook_explorer_mjs, "text/javascript; charset=utf-8");
+        if (name == "orderbook-explorer-model.mjs") return serve(req, assets::orderbook_explorer_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "orderbook.mjs") return serve(req, assets::orderbook_mjs, "text/javascript; charset=utf-8");
+        if (name == "orderbook-model.mjs") return serve(req, assets::orderbook_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "orderbook.css") return serve(req, assets::orderbook_css, "text/css; charset=utf-8");
         if (name == "index.html") return serve(req, assets::index_html, "text/html; charset=utf-8");
         if (name == "dashboard.css") return serve(req, assets::dashboard_css, "text/css; charset=utf-8");
         if (name == "local-signin.mjs") return serve(req, assets::local_signin_mjs, "text/javascript; charset=utf-8");
@@ -40,6 +52,10 @@ inline void mount(crow::SimpleApp& app, int port) {
         if (name == "storage.mjs") return serve(req, assets::storage_mjs, "text/javascript; charset=utf-8");
         if (name == "storage-model.mjs") return serve(req, assets::storage_model_mjs, "text/javascript; charset=utf-8");
         if (name == "history.mjs") return serve(req, assets::history_mjs, "text/javascript; charset=utf-8");
+        if (name == "variation.mjs") return serve(req, assets::variation_mjs, "text/javascript; charset=utf-8");
+        if (name == "variation-model.mjs") return serve(req, assets::variation_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "ticks.mjs") return serve(req, assets::ticks_mjs, "text/javascript; charset=utf-8");
+        if (name == "ticks-model.mjs") return serve(req, assets::ticks_model_mjs, "text/javascript; charset=utf-8");
         if (name == "history-model.mjs") return serve(req, assets::history_model_mjs, "text/javascript; charset=utf-8");
         if (name == "history.css") return serve(req, assets::history_css, "text/css; charset=utf-8");
         if (name == "hedging.mjs") return serve(req, assets::hedging_mjs, "text/javascript; charset=utf-8");

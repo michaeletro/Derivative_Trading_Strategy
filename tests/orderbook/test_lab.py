@@ -111,6 +111,20 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(a['samples'],[])
         self.assertFalse(a['partial_session_variation']['complete_day'])
 
+    def test_fifty_row_capture_keeps_full_book_and_fixed_diagnostics(self):
+        p=synthetic_sessions(count=1,seconds=40,rows=50)[0]
+        self.assertEqual(validate_input(p)['session']['requested_rows'],50)
+        a=analyze_session(p,Config(levels=10))
+        usable=[f for f in a['frames'] if f['usable']]
+        self.assertTrue(usable)
+        self.assertTrue(all(len(f['bids'])==50 and len(f['asks'])==50 for f in usable))
+        self.assertTrue(all(f['visible_depth']>f['depth_10'] for f in usable))
+        self.assertEqual(usable[0]['asks'][49][0],float(p['events'][50]['price_repr']))
+        p['session']['requested_rows']=51
+        with self.assertRaises(ValueError):validate_input(rehash(p))
+        # Model dimensionality is intentionally separate from acquisition bounds.
+        with self.assertRaises(ValueError):Config(levels=50)
+
     def test_exact_horizon_and_past_asof_grid(self):
         a=analyze_session(self.raw,self.cfg)
         self.assertTrue(a['samples'])

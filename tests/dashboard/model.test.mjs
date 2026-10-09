@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {quoteView,sample,validateSnapshot,contractQuery,createApi,numberText} from '../../src/frontend/dashboard/model.mjs';
 const quote=()=>({contract_id:42,bid:{price:99,receipt_age_ms:0},ask:{price:101,receipt_age_ms:0},mid:100,data_type:'delayed'});
 const snapshot=()=>({session_id:'test-1',broker:{read_only:true,state:'ready'},subscriptions:[],positions:{status:'unavailable',positions:null}});
@@ -75,4 +76,36 @@ test('mutations are not retried after transport uncertainty',async()=>{
 });
 test('authentication rejection is distinguishable from transient failure',async()=>{
   const api=createApi(async()=>({status:401,ok:false}));await assert.rejects(api.request('/api/dashboard'),e=>e.status===401);
+});
+
+const exportBody='session_id,qualified\n1,true\n';
+const artifact=()=>({name:'blocks',file:'blocks.csv',content_type:'text/csv',bytes:Buffer.byteLength(exportBody),sha256:createHash('sha256').update(exportBody).digest('hex'),rows:1});
+const exportResponse=(body=exportBody,headers={})=>new Response(body,{status:200,headers:{'Content-Type':'text/csv','Content-Length':String(Buffer.byteLength(body)),...headers}});
+test('dataset exports retain auth headers and verify exact saved bytes',async()=>{
+  let sent;const api=createApi(async(path,options)=>{sent={path,options};return exportResponse();});api.setToken('test-secret');
+  const blob=await api.downloadResearchArtifact('a'.repeat(32),artifact());assert.equal(await blob.text(),exportBody);
+  assert.equal(sent.path,'/api/depth/research/jobs/'+'a'.repeat(32)+'/artifacts/blocks');
+  assert.equal(sent.options.headers.Authorization,'Bearer test-secret');assert.equal(sent.options.redirect,'error');assert.equal(sent.options.mode,'same-origin');assert.equal(sent.options.credentials,'omit');
+  api.useBrowserSession();await api.downloadResearchArtifact('a'.repeat(32),artifact());assert.equal(sent.options.credentials,'same-origin');assert.equal(sent.options.headers['X-DTS-Local-Request'],'1');assert.equal(sent.options.headers.Authorization,undefined);
+});
+test('dataset downloads refuse arbitrary paths and unbounded metadata before transport',async()=>{
+  let calls=0;const api=createApi(async()=>{calls++;return exportResponse();});
+  for(const [job,a] of [['../secret',artifact()],['a'.repeat(32),{...artifact(),name:'../blocks'}],['a'.repeat(32),{...artifact(),file:'private.txt'}],
+    ['a'.repeat(32),{...artifact(),bytes:64*1024*1024+1}],['a'.repeat(32),{...artifact(),sha256:'x'}]])await assert.rejects(api.downloadResearchArtifact(job,a));
+  assert.equal(calls,0);
+});
+test('dataset integrity failure never yields a downloadable blob',async()=>{
+  for(const response of [()=>exportResponse(exportBody.replace('true','fals')),()=>exportResponse(exportBody,{'Content-Type':'text/html'}),
+    ()=>exportResponse(exportBody+'extra'),()=>exportResponse(exportBody.slice(1))]) {
+    const api=createApi(async()=>response());await assert.rejects(api.downloadResearchArtifact('a'.repeat(32),artifact()));
+  }
+});
+test('dataset byte reader enforces its limit without trusting Content-Length',async()=>{
+  const api=createApi(async()=>new Response(exportBody+'extra',{headers:{'Content-Type':'text/csv'}}));
+  await assert.rejects(api.downloadResearchArtifact('a'.repeat(32),artifact()),/byte limit/);
+});
+test('signing out suppresses an in-flight dataset download and auth failures stay distinguishable',async()=>{
+  let finish;const api=createApi(()=>new Promise(resolve=>{finish=resolve;}));api.setToken('secret');
+  const pending=api.downloadResearchArtifact('a'.repeat(32),artifact());api.clear();finish(exportResponse());await assert.rejects(pending,/superseded/);
+  const denied=createApi(async()=>new Response('',{status:403}));await assert.rejects(denied.downloadResearchArtifact('a'.repeat(32),artifact()),e=>e.status===403);
 });

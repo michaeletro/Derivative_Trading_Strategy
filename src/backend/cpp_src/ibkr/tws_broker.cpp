@@ -14,6 +14,7 @@ struct TwsBroker::Impl {
     std::unique_ptr<EClientSocket> client;
     std::unique_ptr<EReader> reader;
     bool started_api = false;
+    std::vector<BrokerEvent> pending;
     explicit Impl(TwsConfig c) : config(std::move(c)), session(config.timeout) {
         if (config.host == "localhost") config.host = "127.0.0.1";
         in_addr address{};
@@ -27,7 +28,7 @@ struct TwsBroker::Impl {
         if (client) client->eDisconnect();
         signal.issueSignal();
         reader.reset(); // Join SDK reader before destroying callback/client state.
-        client.reset(); callbacks.clear(); started_api = false;
+        client.reset(); callbacks.clear(); started_api = false; pending.clear();
     }
 };
 TwsBroker::TwsBroker(TwsConfig config) : impl_(std::make_unique<Impl>(std::move(config))) {}
@@ -67,6 +68,28 @@ bool TwsBroker::unsubscribe(RequestId id) {
 void TwsBroker::request_positions(RequestId id) {
     impl_->session.request_positions(id, Clock::now()); impl_->client->reqPositions();
 }
+RequestId TwsBroker::start_trading_monitor(const std::string& account) {
+    auto& p=*impl_;
+    // Drain pre-request decoder/mailbox work without introducing a second
+    // application poller or dropping already delivered market/account events.
+    auto before=poll(); p.pending=std::move(before);
+    const auto ids=p.session.start_trading_monitor(account,Clock::now());
+    p.callbacks.configure_monitor(ids.monitor,account);
+    try {
+        p.client->reqPositionsMulti(static_cast<int>(ids.positions),account,"");
+        p.client->reqAccountSummary(static_cast<int>(ids.summary),"All",
+            "AccountType,NetLiquidation,TotalCashValue,BuyingPower,AvailableFunds,ExcessLiquidity,InitMarginReq,MaintMarginReq,Currency");
+        p.client->reqAllOpenOrders();
+        ExecutionFilter filter; filter.m_acctCode=account;
+        p.client->reqExecutions(static_cast<int>(ids.executions),filter);
+    } catch(const std::exception&) {
+        p.session.monitor_bad(TradingSection::Positions,ids.positions,-1056);
+    }
+    return ids.monitor;
+}
+void TwsBroker::stop_trading_monitor() {
+    impl_->callbacks.configure_monitor(0,""); impl_->session.stop_trading_monitor();
+}
 RequestId TwsBroker::request_history(const HistorySpec& spec,HistoryWindow window) {
     spec.validate(window);
     const auto native=ibkr_detail::to_native(spec.contract);
@@ -78,6 +101,16 @@ RequestId TwsBroker::request_history(const HistorySpec& spec,HistoryWindow windo
 void TwsBroker::cancel_history(RequestId id) {
     impl_->session.cancel_history(id); // SDK cancellation is sent by poll().
 }
+RequestId TwsBroker::request_ticks(const TickSpec& spec,std::int64_t start) {
+    const auto id=impl_->session.ticks(spec,start,Clock::now());
+    impl_->client->reqHistoricalTicks(static_cast<int>(id),ibkr_detail::to_native(spec.contract),
+        utc_text(start),"",1000,spec.type,spec.use_rth?1:0,false,TagValueListSPtr{});
+    return id;
+}
+void TwsBroker::cancel_ticks(RequestId id) {
+    // IBKR exposes no cancelHistoricalTicks. Ignore this request's late callbacks.
+    impl_->session.cancel_ticks(id);
+}
 RequestId TwsBroker::subscribe_depth(const DepthSpec& spec) {
     spec.validate(); auto native = ibkr_detail::to_native(spec.contract); native.exchange = spec.venue;
     const auto id = impl_->session.depth(spec, Clock::now());
@@ -86,6 +119,7 @@ RequestId TwsBroker::subscribe_depth(const DepthSpec& spec) {
 bool TwsBroker::unsubscribe_depth(RequestId id) { return impl_->session.cancel_depth(id); }
 std::vector<BrokerEvent> TwsBroker::poll() {
     auto& p = *impl_;
+    std::vector<BrokerEvent> output; output.swap(p.pending);
     const auto before = p.session.state();
     const bool positions_were_pending = p.session.positions_pending();
     try {
@@ -96,6 +130,11 @@ std::vector<BrokerEvent> TwsBroker::poll() {
         p.callbacks.drain(p.session);
         p.session.expire(Clock::now());
         if(p.client&&p.client->isConnected()) {
+            for(const auto& ids:p.session.trading_monitor_cancellations()) {
+                p.callbacks.configure_monitor(0,"");
+                p.client->cancelPositionsMulti(static_cast<int>(ids.positions));
+                p.client->cancelAccountSummary(static_cast<int>(ids.summary));
+            }
             for(auto id:p.session.history_cancellations())p.client->cancelHistoricalData(static_cast<int>(id));
             for(auto id:p.session.depth_cancellations())p.client->cancelMktDepth(static_cast<int>(id), false);
         }
@@ -107,6 +146,8 @@ std::vector<BrokerEvent> TwsBroker::poll() {
     } catch (const std::exception&) {
         p.session.fail(-1014, "TWS message processing failed"); p.shutdown();
     }
-    return p.session.poll();
+    auto events=p.session.poll();
+    output.insert(output.end(),std::make_move_iterator(events.begin()),std::make_move_iterator(events.end()));
+    return output;
 }
 } // namespace dts

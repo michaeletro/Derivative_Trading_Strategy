@@ -1,3 +1,8 @@
+import {mountVariation} from './variation.mjs';
+import {mountNavigation} from './navigation.mjs';
+import {mountOrderbook} from './orderbook.mjs';
+import {mountTrading} from './trading.mjs';
+import {mountTicks} from './ticks.mjs';
 import {takeLaunchCode, validSessionStatus, reopenMessage} from './local-signin.mjs';
 import {mountHedging} from './hedging.mjs';
 import {mountSde} from './sde.mjs';
@@ -13,6 +18,10 @@ const $=id=>document.getElementById(id);
 $('access-title').parentElement.querySelector('p').textContent='The launcher signs in locally using your saved profile. Manual token entry is a fallback, not your IBKR password.';
 $('forget').textContent='Sign out';
 const api=createApi();
+const variationLab=mountVariation(api,error=>lock(error.message));
+const orderbookLab=mountOrderbook(api,error=>lock(error.message));
+const tradingStatus=mountTrading(api,error=>lock(error.message));
+const ticksLab=mountTicks(api,error=>lock(error.message));
 const hedgingLab=mountHedging(api,error=>lock(error.message));
 const sdeLab=mountSde(api,error=>lock(error.message));
 const pricingLab=mountPricing(api,error=>lock(error.message));
@@ -20,9 +29,11 @@ const greeksLab=mountGreeks(api,error=>lock(error.message));
 const replayLab=mountReplay(api,error=>lock(error.message));
 const historyLab=mountHistory(api,error=>lock(error.message),v=>replayLab.selectDataset(v));
 const storageLab=mountStorage(api,error=>lock(error.message));
+const navigation=mountNavigation();
 let unlocked=false, busy=false, current=null, currentAt=0, fresh=false, revision=0, timer;
 let session='', selected=null, pendingResolution=null, candidates=[], requestedPositions=false;
 let histories=new Map(), quoteRows=new Map(), positionSignature='';
+let accessLayoutUnlocked=false;
 const text=(id,value)=>{ $(id).textContent=value; };
 const node=(tag,value,className='')=>{ const n=document.createElement(tag); n.textContent=value; n.className=className; return n; };
 const notify=message=>{ text('notice',message); $('notice').hidden=!message; };
@@ -157,6 +168,8 @@ function renderCandidates() {
     if(c.security_type==='STK'&&c.currency==='USD'){
       const historyButton=node('button','Historical bars','secondary');
       historyButton.addEventListener('click',()=>historyLab.selectContract(c));item.append(historyButton);
+      const ticksButton=node('button','Historical ticks','secondary');
+      ticksButton.addEventListener('click',()=>ticksLab.selectContract(c));item.append(ticksButton);
     }
     root.append(item);
   }
@@ -226,6 +239,7 @@ function renderChart() {
   text('chart-label',row?`${row.contract.symbol} / ${selected} · browser polling observations, not historical ticks.`:'Select a subscribed instrument. This is not historical tick data.');
   text('chart-time',valid.length?`${valid.length} observations · last ${new Date(valid.at(-1).time).toLocaleTimeString()}`:'No recorded observations');
   $('chart-empty').hidden=valid.length>0;
+  if($('market-workspace').hidden){if(!valid.length)$('chart').width=$('chart').width;return;}
   const canvas=$('chart'), box=canvas.getBoundingClientRect(), scale=window.devicePixelRatio||1;
   if(!box.width||!box.height) return;
   canvas.width=Math.round(box.width*scale); canvas.height=Math.round(box.height*scale);
@@ -243,6 +257,14 @@ function renderChart() {
   ctx.stroke();ctx.fillStyle=css.getPropertyValue('--accent');for(const p of valid) {ctx.beginPath();ctx.arc(x(p),y(p),2,0,Math.PI*2);ctx.fill();}
 }
 function render() {
+  document.body.dataset.localAccess=unlocked?'unlocked':'locked';
+  text('access-title',unlocked?'Local session unlocked':'Local access');
+  if(unlocked&&!accessLayoutUnlocked)$('broker-connection-details').open=false;
+  accessLayoutUnlocked=unlocked;
+  orderbookLab.setAccess(unlocked);orderbookLab.update(fresh?current:null);
+  tradingStatus.setAccess(unlocked);tradingStatus.update(fresh?current:null);
+  ticksLab.setAccess(unlocked);
+  variationLab.setAccess(unlocked);
   hedgingLab.setAccess(unlocked);
   sdeLab.setAccess(unlocked);
   pricingLab.setAccess(unlocked);
@@ -253,6 +275,7 @@ function render() {
   storageLab.update(fresh?current?.storage:null,fresh?current?.broker?.state:null);
   text('build-info',fresh?buildLabel(current?.build,current?.broker?.mode):'Build identity: unlock or refresh to inspect the running server.');
   const broker=fresh?current?.broker:null, state=broker?.state;
+  text('connection-summary',!unlocked?'Locked':!fresh?'Status unavailable':state==='ready'?'Connected · read only':state==='disconnected'?'Disconnected · connect here':titleCase(state??'Unknown'));
   text('session-badge',!unlocked?'LOCKED':!fresh?'DATA UNAVAILABLE':broker?.simulation?'SIMULATION':'READ ONLY');
   $('session-badge').className='badge'+(broker?.simulation?' warning':ready()?' positive':'');
   text('http-status',!unlocked?'Locked':fresh?'Available':busy?'Checking…':'Unavailable');
@@ -294,14 +317,15 @@ async function autoSignIn() {
     if(!state.authenticated) { lock(reopenMessage); return; }
     unlocked=true; current=null; fresh=false; session=''; clearSession();
     await readSnapshot(version);
-    if(version===revision) notify('Signed in locally. The saved token was not copied into the page. Connect to the broker only when intended.');
+    if(version===revision) notify('');
   } catch(error) {
     if(version===revision) lock(error.message || reopenMessage);
-  } finally { if(version===revision) { busy=false; render(); schedule(); } }
+  } finally { if(version===revision) { busy=false; render(); schedule(); navigation.refresh(); } }
 }
 // A browser may reuse an existing tab for a fragment-only handoff. Normal
 // workspace anchors must not initiate authentication or change the session.
 window.addEventListener('hashchange',()=>{
   if(window.location.hash.startsWith('#local-signin=')) autoSignIn();
 });
+window.addEventListener('dts:workspacechange',()=>renderChart());
 autoSignIn();

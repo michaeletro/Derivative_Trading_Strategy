@@ -50,6 +50,9 @@ def prepare(args):
             if line.startswith('CMAKE_HOME_DIRECTORY:INTERNAL=') and Path(line.split('=',1)[1]).resolve()!=ROOT:
                 raise ValueError('This build directory belongs to another checkout; choose --build-dir with a different path')
     env=dict(os.environ,HTTP_PORT=str(args.port),DTS_BROKER='tws' if args.mode=='tws' else 'none',ENABLE_IB_WS='false')
+    # Preserve the virtual-environment path (resolving a symlink loses its site-packages).
+    # The server passes a sanitized environment to this fixed offline worker.
+    env['DTS_RESEARCH_PYTHON'] = str(Path(sys.executable).absolute())
     if args.profile:
         # Explicit profile is authoritative over stale shell exports. CLI overrides profile paths/mode/HTTP port.
         for field,key in ENV_KEYS.items():
@@ -70,6 +73,17 @@ def prepare(args):
     env['DTS_DATA_DIR']=str(data.expanduser().resolve())
     env['DTS_BACKUP_DIR']=str(backup.expanduser().resolve())
     return build,cmd,env
+
+def check_port(port):
+    try:
+        with socket.socket() as sock:
+            # Match Crow's reusable listener: a clean shutdown may leave accepted
+            # connections in TIME_WAIT, which must not prevent an immediate restart.
+            # SO_REUSEPORT is deliberately not enabled; a live listener still fails.
+            sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            sock.bind(('127.0.0.1',port))
+    except OSError as e:
+        raise ValueError(f'Port {port} is unavailable. Stop the intended old server or select another --port; no process was killed') from e
 
 def main(argv=None):
     try:
@@ -92,9 +106,7 @@ def main(argv=None):
                 try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 except BlockingIOError as e:raise ValueError('Recording database already in use. Stop the owning server or choose a separate --data-dir') from e
             finally:os.close(fd)
-        try:
-            with socket.socket() as sock:sock.bind(('127.0.0.1',args.port))
-        except OSError as e:raise ValueError(f'Port {args.port} is unavailable. Stop the intended old server or select another --port; no process was killed') from e
+        check_port(args.port)
         for cmd in [configure,['cmake','--build',str(build),'--parallel',str(args.jobs)],['ctest','--test-dir',str(build),'--output-on-failure']]:
             subprocess.run(cmd,cwd=ROOT,check=True)
         binary=build/'server'
