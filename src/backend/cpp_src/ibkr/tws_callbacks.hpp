@@ -4,6 +4,18 @@
 #include "Decimal.h"
 #include "DefaultEWrapper.h"
 #include "bar.h"
+#include "Order.h"
+#include "OrderState.h"
+#include "Execution.h"
+#include "protobufUnix/ManagedAccounts.pb.h"
+#include "protobufUnix/PositionMulti.pb.h"
+#include "protobufUnix/PositionMultiEnd.pb.h"
+#include "protobufUnix/AccountSummary.pb.h"
+#include "protobufUnix/AccountSummaryEnd.pb.h"
+#include "protobufUnix/OpenOrder.pb.h"
+#include "protobufUnix/OpenOrdersEnd.pb.h"
+#include "protobufUnix/ExecutionDetails.pb.h"
+#include "protobufUnix/ExecutionDetailsEnd.pb.h"
 #include "HistoricalTickLast.h"
 #include "HistoricalTickBidAsk.h"
 #include "protobufUnix/HistoricalTicksLast.pb.h"
@@ -25,6 +37,15 @@
 #include <mutex>
 
 namespace dts::ibkr_detail {
+inline TradingContract monitor_contract(const ::Contract& c) {
+    return TradingContract{c.conId,c.symbol,c.secType,c.exchange,c.currency};
+}
+inline TradingContract monitor_contract(const protobuf::Contract& c) {
+    return TradingContract{c.conid(),c.symbol(),c.sectype(),c.exchange(),c.currency()};
+}
+inline std::optional<double> monitor_number(double value) {
+    return std::isfinite(value) && std::abs(value)<1e100 ? std::optional<double>{value}:std::nullopt;
+}
 inline double number(const std::string& text) {
     std::size_t used = 0;
     const double result = std::stod(text, &used);
@@ -79,9 +100,11 @@ inline ::Contract to_native(const ContractQuery& q) {
 class Callbacks final : public DefaultEWrapper {
 public:
     std::atomic<bool> acknowledged{false};
+    void configure_monitor(RequestId token,const std::string& account) { monitor_token_.store(token); monitor_account_=account; }
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.clear(); overflow_ = false; depth_protobuf_ = false; error_protobuf_mirror_pending_ = false; acknowledged.store(false);
+        monitor_token_.store(0); monitor_account_.clear(); monitor_protobuf_.fill(false);
     }
     void drain(TwsState& state) {
         std::vector<std::function<void(TwsState&)>> work;
@@ -96,6 +119,107 @@ public:
     void connectAck() override { acknowledged.store(true); }
     void nextValidId(int) override { post([](TwsState& s) { s.ready(); }); }
     void connectionClosed() override { post([](TwsState& s) { s.fail(-1011, "TWS connection closed"); }); }
+    void managedAccounts(const std::string& accounts) override {
+        if(!consume_monitor_mirror(0)) deliver_accounts(accounts);
+    }
+    void managedAccountsProtoBuf(const protobuf::ManagedAccounts& p) override {
+        monitor_protobuf_[0]=true;
+        if(!p.has_accountslist()) { post([](TwsState& s){s.managed_accounts(ManagedAccountsEvent{});}); return; }
+        deliver_accounts(p.accountslist());
+    }
+    void positionMulti(int id,const std::string& account,const std::string& model,const ::Contract& c,Decimal quantity,double average) override {
+        if(consume_monitor_mirror(1)) return;
+        if(account.empty()) { bad_monitor(TradingSection::Positions,id); return; }
+        if(!monitor_matches(account)) return;
+        TradingPosition row{monitor_contract(c),DecimalFunctions::decimalToString(quantity),monitor_number(average),model};
+        post_monitor_position(id,account,std::move(row));
+    }
+    void positionMultiProtoBuf(const protobuf::PositionMulti& p) override {
+        monitor_protobuf_[1]=true;
+        if(!p.has_account() || p.account().empty()) { bad_monitor(TradingSection::Positions,p.reqid()); return; }
+        if(!monitor_matches(p.account())) return;
+        if(!p.has_contract() || !p.has_position()) { bad_monitor(TradingSection::Positions,p.reqid()); return; }
+        TradingPosition row{monitor_contract(p.contract()),p.position(),p.has_avgcost()?monitor_number(p.avgcost()):std::nullopt,p.modelcode()};
+        post_monitor_position(p.reqid(),p.account(),std::move(row));
+    }
+    void positionMultiEnd(int id) override { if(!consume_monitor_mirror(2)) end_monitor(TradingSection::Positions,id); }
+    void positionMultiEndProtoBuf(const protobuf::PositionMultiEnd& p) override {
+        monitor_protobuf_[2]=true; end_monitor(TradingSection::Positions,p.reqid());
+    }
+    void accountSummary(int id,const std::string& account,const std::string& tag,const std::string& value,const std::string& currency) override {
+        if(consume_monitor_mirror(3)) return;
+        if(account.empty()) { bad_monitor(TradingSection::AccountValues,id); return; }
+        if(!monitor_matches(account)) return;
+        post_monitor_value(id,account,TradingAccountValue{tag,value,currency});
+    }
+    void accountSummaryProtoBuf(const protobuf::AccountSummary& p) override {
+        monitor_protobuf_[3]=true;
+        if(!p.has_account() || p.account().empty()) { bad_monitor(TradingSection::AccountValues,p.reqid()); return; }
+        if(monitor_matches(p.account())) post_monitor_value(p.reqid(),p.account(),TradingAccountValue{p.tag(),p.value(),p.currency()});
+    }
+    void accountSummaryEnd(int id) override { if(!consume_monitor_mirror(4)) end_monitor(TradingSection::AccountValues,id); }
+    void accountSummaryEndProtoBuf(const protobuf::AccountSummaryEnd& p) override {
+        monitor_protobuf_[4]=true; end_monitor(TradingSection::AccountValues,p.reqid());
+    }
+    void openOrder(int id,const ::Contract& c,const ::Order& order,const ::OrderState& state) override {
+        if(consume_monitor_mirror(5)) return;
+        if(order.account.empty()) { bad_monitor(TradingSection::OpenOrders,static_cast<int>(monitor_token_.load())); return; }
+        if(!monitor_matches(order.account)) return;
+        TradingOpenOrder row;
+        row.contract=monitor_contract(c); row.order_id=id; row.client_id=order.clientId; row.perm_id=order.permId;
+        row.action=order.action; row.order_type=order.orderType; row.quantity=DecimalFunctions::decimalToString(order.totalQuantity);
+        row.status=state.status; row.order_ref=order.orderRef; row.limit_price=monitor_number(order.lmtPrice);
+        post_monitor_order(order.account,std::move(row));
+    }
+    void openOrderProtoBuf(const protobuf::OpenOrder& p) override {
+        monitor_protobuf_[5]=true;
+        if(!p.has_order()) { bad_monitor(TradingSection::OpenOrders,static_cast<int>(monitor_token_.load())); return; }
+        const auto& order=p.order();
+        if(!order.has_account() || order.account().empty()) { bad_monitor(TradingSection::OpenOrders,static_cast<int>(monitor_token_.load())); return; }
+        if(!monitor_matches(order.account())) return;
+        if(!p.has_orderid() || !p.has_contract() || !order.has_clientid() || !order.has_totalquantity() || !order.has_action() || !order.has_ordertype()) {
+            bad_monitor(TradingSection::OpenOrders,static_cast<int>(monitor_token_.load())); return;
+        }
+        TradingOpenOrder row;
+        row.contract=monitor_contract(p.contract()); row.order_id=p.orderid(); row.client_id=order.clientid(); row.perm_id=order.permid();
+        row.action=order.action(); row.order_type=order.ordertype(); row.quantity=order.totalquantity(); row.order_ref=order.orderref();
+        if(p.has_orderstate()) row.status=p.orderstate().status();
+        if(order.has_lmtprice()) row.limit_price=monitor_number(order.lmtprice());
+        post_monitor_order(order.account(),std::move(row));
+    }
+    void openOrderEnd() override {
+        if(!consume_monitor_mirror(6)) end_monitor(TradingSection::OpenOrders,static_cast<int>(monitor_token_.load()));
+    }
+    void openOrdersEndProtoBuf(const protobuf::OpenOrdersEnd&) override {
+        monitor_protobuf_[6]=true; end_monitor(TradingSection::OpenOrders,static_cast<int>(monitor_token_.load()));
+    }
+    void execDetails(int id,const ::Contract& c,const ::Execution& execution) override {
+        if(consume_monitor_mirror(7)) return;
+        if(execution.acctNumber.empty()) { bad_monitor(TradingSection::Executions,id); return; }
+        if(!monitor_matches(execution.acctNumber)) return;
+        TradingExecution row;
+        row.contract=monitor_contract(c); row.exec_id=execution.execId; row.time=execution.time; row.side=execution.side;
+        row.quantity=DecimalFunctions::decimalToString(execution.shares); row.order_id=execution.orderId;
+        row.client_id=execution.clientId; row.perm_id=execution.permId; row.price=monitor_number(execution.price);
+        post_monitor_execution(id,execution.acctNumber,std::move(row));
+    }
+    void execDetailsProtoBuf(const protobuf::ExecutionDetails& p) override {
+        monitor_protobuf_[7]=true;
+        if(!p.has_execution()) { bad_monitor(TradingSection::Executions,p.reqid()); return; }
+        const auto& execution=p.execution();
+        if(!execution.has_acctnumber() || execution.acctnumber().empty()) { bad_monitor(TradingSection::Executions,p.reqid()); return; }
+        if(!monitor_matches(execution.acctnumber())) return;
+        if(!p.has_contract() || !execution.has_orderid() || !execution.has_clientid() || !execution.has_shares()) { bad_monitor(TradingSection::Executions,p.reqid()); return; }
+        TradingExecution row;
+        row.contract=monitor_contract(p.contract()); row.exec_id=execution.execid(); row.time=execution.time(); row.side=execution.side();
+        row.quantity=execution.shares(); row.order_id=execution.orderid(); row.client_id=execution.clientid(); row.perm_id=execution.permid();
+        if(execution.has_price()) row.price=monitor_number(execution.price());
+        post_monitor_execution(p.reqid(),execution.acctnumber(),std::move(row));
+    }
+    void execDetailsEnd(int id) override { if(!consume_monitor_mirror(8)) end_monitor(TradingSection::Executions,id); }
+    void execDetailsEndProtoBuf(const protobuf::ExecutionDetailsEnd& p) override {
+        monitor_protobuf_[8]=true; end_monitor(TradingSection::Executions,p.reqid());
+    }
     void tickPrice(int id, TickType field, double price, const TickAttrib&) override {
         const auto now = Clock::now();
         post([=](TwsState& s) { s.price(static_cast<RequestId>(id), static_cast<int>(field), price, now); });
@@ -216,6 +340,51 @@ public:
     void positionEndProtoBuf(const protobuf::PositionEnd&) override { positionEnd(); }
     void errorProtoBuf(const protobuf::ErrorMessage& p) override { error_protobuf_mirror_pending_=true; deliver_error(p.id(), p.errorcode(), p.errormsg()); }
 private:
+    std::atomic<RequestId> monitor_token_{0};
+    std::string monitor_account_;
+    std::array<bool,9> monitor_protobuf_{};
+    bool consume_monitor_mirror(std::size_t index) {
+        const bool mirror=monitor_protobuf_[index]; monitor_protobuf_[index]=false; return mirror;
+    }
+    bool monitor_matches(const std::string& account) const { return monitor_token_.load()!=0 && account==monitor_account_; }
+    void deliver_accounts(const std::string& text) {
+        ManagedAccountsEvent event; event.success=text.size()<=8192;
+        if(event.success && !text.empty()) {
+            std::size_t start=0;
+            for(;;) {
+                const auto end=text.find(',',start); auto account=text.substr(start,end==std::string::npos?end:end-start);
+                const auto first=account.find_first_not_of(" "); const auto last=account.find_last_not_of(" ");
+                account=first==std::string::npos?std::string{}:account.substr(first,last-first+1);
+                if(!trading_account(account) || event.accounts.size()>=128) { event.success=false; event.accounts.clear(); break; }
+                event.accounts.push_back(std::move(account)); if(end==std::string::npos) break; start=end+1;
+            }
+        }
+        post([event=std::move(event)](TwsState& s){s.managed_accounts(event);});
+    }
+    void bad_monitor(TradingSection section,int id) {
+        post([section,id](TwsState& s){s.monitor_bad(section,id>0?static_cast<RequestId>(id):0);});
+    }
+    void end_monitor(TradingSection section,int id) {
+        const auto now=Clock::now(); const auto wall=std::chrono::system_clock::now();
+        post([section,id,now,wall](TwsState& s){s.monitor_end(section,id>0?static_cast<RequestId>(id):0,now,wall);});
+    }
+    void post_monitor_position(int id,std::string account,TradingPosition row) {
+        if(!row.valid()) { bad_monitor(TradingSection::Positions,id); return; }
+        const auto now=Clock::now(); const auto wall=std::chrono::system_clock::now(); post([id,account=std::move(account),row=std::move(row),now,wall](TwsState& s){s.monitor_position(static_cast<RequestId>(id),account,row,now,wall);});
+    }
+    void post_monitor_value(int id,std::string account,TradingAccountValue row) {
+        if(!row.valid()) { bad_monitor(TradingSection::AccountValues,id); return; }
+        const auto now=Clock::now(); const auto wall=std::chrono::system_clock::now(); post([id,account=std::move(account),row=std::move(row),now,wall](TwsState& s){s.monitor_value(static_cast<RequestId>(id),account,row,now,wall);});
+    }
+    void post_monitor_order(std::string account,TradingOpenOrder row) {
+        if(!row.valid()) { bad_monitor(TradingSection::OpenOrders,static_cast<int>(monitor_token_.load())); return; }
+        const auto token=monitor_token_.load(); const auto now=Clock::now(); const auto wall=std::chrono::system_clock::now();
+        post([token,account=std::move(account),row=std::move(row),now,wall](TwsState& s){s.monitor_order(token,account,row,now,wall);});
+    }
+    void post_monitor_execution(int id,std::string account,TradingExecution row) {
+        if(!row.valid()) { bad_monitor(TradingSection::Executions,id); return; }
+        const auto now=Clock::now(); const auto wall=std::chrono::system_clock::now(); post([id,account=std::move(account),row=std::move(row),now,wall](TwsState& s){s.monitor_execution(static_cast<RequestId>(id),account,row,now,wall);});
+    }
     std::mutex mutex_;
     std::vector<std::function<void(TwsState&)>> queue_;
     bool overflow_ = false;

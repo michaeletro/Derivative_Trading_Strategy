@@ -1,6 +1,7 @@
 import {mountVariation} from './variation.mjs';
 import {mountNavigation} from './navigation.mjs';
 import {mountOrderbook} from './orderbook.mjs';
+import {mountTrading} from './trading.mjs';
 import {mountTicks} from './ticks.mjs';
 import {takeLaunchCode, validSessionStatus, reopenMessage} from './local-signin.mjs';
 import {mountHedging} from './hedging.mjs';
@@ -19,6 +20,7 @@ $('forget').textContent='Sign out';
 const api=createApi();
 const variationLab=mountVariation(api,error=>lock(error.message));
 const orderbookLab=mountOrderbook(api,error=>lock(error.message));
+const tradingStatus=mountTrading(api,error=>lock(error.message));
 const ticksLab=mountTicks(api,error=>lock(error.message));
 const hedgingLab=mountHedging(api,error=>lock(error.message));
 const sdeLab=mountSde(api,error=>lock(error.message));
@@ -260,6 +262,7 @@ function render() {
   if(unlocked&&!accessLayoutUnlocked)$('broker-connection-details').open=false;
   accessLayoutUnlocked=unlocked;
   orderbookLab.setAccess(unlocked);orderbookLab.update(fresh?current:null);
+  tradingStatus.setAccess(unlocked);tradingStatus.update(fresh?current:null);
   ticksLab.setAccess(unlocked);
   variationLab.setAccess(unlocked);
   hedgingLab.setAccess(unlocked);

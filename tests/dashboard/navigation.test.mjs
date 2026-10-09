@@ -14,7 +14,7 @@ test('primary research routes reuse existing book panels without changing their 
   assert.equal(resolveRoute('#research').orderbookTab,'recordings');
 });
 test('old deep links retain their numerical, archive and broker destinations',()=>{
-  for(const key of ['history','ticks','replay','storage','positions','pricing','sensitivities','sde','hedging','variation','lab-catalog','roadmap'])assert.equal(resolveRoute('#'+key).section,key);
+  for(const key of ['trading','history','ticks','replay','storage','positions','pricing','sensitivities','sde','hedging','variation','lab-catalog','roadmap'])assert.equal(resolveRoute('#'+key).section,key);
   assert.equal(resolveRoute('#instruments').section,'market-workspace');
 });
 test('launch tickets remain exclusively owned by the sign-in handler',()=>{

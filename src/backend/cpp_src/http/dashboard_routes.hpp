@@ -28,6 +28,9 @@ inline void mount(crow::SimpleApp& app, int port) {
     CROW_ROUTE(app, "/dashboard/")([serve](const crow::request& req) { return serve(req, assets::index_html, "text/html; charset=utf-8"); });
     CROW_ROUTE(app, "/dashboard/<string>")([serve](const crow::request& req, const std::string& name) {
         if (name == "navigation.mjs") return serve(req, assets::navigation_mjs, "text/javascript; charset=utf-8");
+        if (name == "trading.mjs") return serve(req, assets::trading_mjs, "text/javascript; charset=utf-8");
+        if (name == "trading-model.mjs") return serve(req, assets::trading_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "trading.css") return serve(req, assets::trading_css, "text/css; charset=utf-8");
         if (name == "orderbook-explorer.mjs") return serve(req, assets::orderbook_explorer_mjs, "text/javascript; charset=utf-8");
         if (name == "orderbook-explorer-model.mjs") return serve(req, assets::orderbook_explorer_model_mjs, "text/javascript; charset=utf-8");
         if (name == "orderbook.mjs") return serve(req, assets::orderbook_mjs, "text/javascript; charset=utf-8");

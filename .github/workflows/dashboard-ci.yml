@@ -30,7 +30,7 @@ jobs:
           cmake --build build-dashboard --parallel 2
           ctest --test-dir build-dashboard --output-on-failure
       - name: Presentation and token-isolation unit tests
-        run: node --test tests/dashboard/model.test.mjs
+        run: node --test tests/dashboard/*.test.mjs
       - name: Install pinned browser test tools
         run: |
           python -m pip install playwright==1.57.0
@@ -38,7 +38,9 @@ jobs:
       - name: Browser acceptance (synthetic fixtures, never IBKR)
         env:
           DTS_SCREENSHOT_DIR: dashboard-screenshots
-        run: python tests/dashboard/browser_tests.py
+        run: |
+          python tests/dashboard/browser_tests.py
+          python tests/dashboard/trading_browser_tests.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -30,6 +30,8 @@ public:
     RequestId subscribe(const Contract&) override;
     bool unsubscribe(RequestId) override;
     void request_positions(RequestId) override;
+    RequestId start_trading_monitor(const std::string&) override;
+    void stop_trading_monitor() override;
     std::vector<BrokerEvent> poll() override;
 private:
     struct Impl;

@@ -24,6 +24,12 @@ any subsequent history cleanup with collaborators; no history rewrite is made he
 - Missing/incomplete/unsupported position data is unavailable or failed, not a
   fabricated empty portfolio. Returned complete positions are snapshots, not live
   risk controls. Request IDs persist across reconnects.
+- Trading status adds separately requested account-specific position updates and
+  periodic account-summary reads. Account-wide open orders and executions remain
+  request-scoped snapshots. Each completion and receipt age is independent;
+  an active monitor never enables orders or establishes continuously reconciled
+  trading risk. Account values/order/execution rows stay out of the market-data
+  archive and research exports. Stop monitoring cancels only read subscriptions.
 - The asset repository opens existing source SQLite data read-only; it does not
   create/migrate that source database or restore/export CSVs. HTTP startup now
   opens or initializes a separate, private recording schema with an identity check.

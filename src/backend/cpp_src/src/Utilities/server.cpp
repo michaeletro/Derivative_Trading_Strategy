@@ -14,6 +14,7 @@ namespace asio = boost::asio;
 #include "experiments_json.hpp"
 #include "depth_json.hpp"
 #include "readiness_json.hpp"
+#include "trading_json.hpp"
 #include "orderbook_jobs.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
@@ -412,6 +413,37 @@ private:
     }
     void routes() {
         auth_routes();
+        // Account monitoring is explicitly requested, read-only, and shares the
+        // same broker owner/mutex/event stream as capture. GET never connects.
+        CROW_ROUTE(app_, "/api/trading/status")([this](const crow::request& req) {
+            return guarded(req, [&] {
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                return dts::trading_http::current(broker_, mode_ == "tws" ? "ibkr_tws" : mode_,
+                    instance_ + "-" + std::to_string(broker_.generation()), worker_failed_);
+            });
+        });
+        CROW_ROUTE(app_, "/api/trading/monitor").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                const auto body = object(req); dts::history_http::fields(body, {"account"});
+                const auto account = text(body, "account");
+                if (account.empty()) throw std::invalid_argument("Choose an exact managed account");
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                if (mode_ != "tws") throw std::logic_error("Account monitoring requires native TWS; no synthetic fallback");
+                if (worker_failed_) throw std::logic_error("Acquisition worker failed; reconnect before monitoring");
+                broker_.start_trading_monitor(account);
+                return dts::trading_http::current(broker_, "ibkr_tws",
+                    instance_ + "-" + std::to_string(broker_.generation()), worker_failed_);
+            });
+        });
+        CROW_ROUTE(app_, "/api/trading/stop").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] {
+                dts::history_http::fields(object(req), {});
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                if (broker_.enabled()) broker_.stop_trading_monitor();
+                return dts::trading_http::current(broker_, mode_ == "tws" ? "ibkr_tws" : mode_,
+                    instance_ + "-" + std::to_string(broker_.generation()), worker_failed_);
+            });
+        });
         CROW_ROUTE(app_, "/api/variation/status")([this](const crow::request& req) {
             return guarded(req, [&] { return variation_jobs_.status(); });
         });

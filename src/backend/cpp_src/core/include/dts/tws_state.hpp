@@ -17,6 +17,52 @@ public:
     }
     ConnectionState state() const noexcept { return state_; }
     bool positions_pending() const noexcept { return position_request_ != 0; }
+    void managed_accounts(const ManagedAccountsEvent& e) {
+        if(state_!=ConnectionState::Connecting && state_!=ConnectionState::Ready) return;
+        monitor_model_.accounts(e,0); emit(ManagedAccountsEvent{monitor_model_.accounts().status==SnapshotStatus::Complete,monitor_model_.accounts().accounts});
+        if(monitor_.monitor && monitor_model_.view().state==TradingMonitorState::Failed) monitor_failure(-1050);
+    }
+    TradingMonitorRequests start_trading_monitor(const std::string& account,Clock::time_point now) {
+        require_ready();
+        if(!monitor_model_.allowed(account)) throw std::invalid_argument("Select a confirmed managed account");
+        if(monitor_seen_) throw std::logic_error("Reconnect before another account monitor");
+        throttle(now);
+        TradingMonitorRequests requests{allocate(),allocate(),allocate(),allocate()};
+        monitor_model_.begin(requests.monitor,account,0); monitor_=requests; monitor_seen_=true;
+        monitor_deadline_=now+timeout_; monitor_pending_={true,true,true,true}; return requests;
+    }
+    void stop_trading_monitor() {
+        if(monitor_.monitor) monitor_cancels_.push_back(monitor_);
+        monitor_={}; monitor_pending_={}; monitor_model_.stop();
+    }
+    std::vector<TradingMonitorRequests> trading_monitor_cancellations() {
+        std::vector<TradingMonitorRequests> out; out.swap(monitor_cancels_); return out;
+    }
+    void monitor_position(RequestId id,const std::string& account,const TradingPosition& row,Clock::time_point now=Clock::now(),std::chrono::system_clock::time_point wall=std::chrono::system_clock::now()) {
+        if(id==monitor_.positions && selected_monitor_account(account)) monitor_event(TradingSection::Positions,row,now,wall);
+    }
+    void monitor_value(RequestId id,const std::string& account,const TradingAccountValue& row,Clock::time_point now=Clock::now(),std::chrono::system_clock::time_point wall=std::chrono::system_clock::now()) {
+        if(id==monitor_.summary && selected_monitor_account(account)) monitor_event(TradingSection::AccountValues,row,now,wall);
+    }
+    void monitor_order(RequestId token,const std::string& account,const TradingOpenOrder& row,Clock::time_point now=Clock::now(),std::chrono::system_clock::time_point wall=std::chrono::system_clock::now()) {
+        if(token==monitor_.monitor && selected_monitor_account(account) && monitor_pending_[2]) monitor_event(TradingSection::OpenOrders,row,now,wall);
+    }
+    void monitor_execution(RequestId id,const std::string& account,const TradingExecution& row,Clock::time_point now=Clock::now(),std::chrono::system_clock::time_point wall=std::chrono::system_clock::now()) {
+        if(id==monitor_.executions && selected_monitor_account(account) && monitor_pending_[3]) monitor_event(TradingSection::Executions,row,now,wall);
+    }
+    void monitor_end(TradingSection section,RequestId id,Clock::time_point now=Clock::now(),std::chrono::system_clock::time_point wall=std::chrono::system_clock::now()) {
+        const auto index=static_cast<std::size_t>(section);
+        const RequestId expected=section==TradingSection::Positions?monitor_.positions:
+            section==TradingSection::AccountValues?monitor_.summary:section==TradingSection::Executions?monitor_.executions:monitor_.monitor;
+        if(!monitor_.monitor || id!=expected || !monitor_pending_[index]) return;
+        monitor_event(section,TradingSectionEnd{},now,wall);
+        if(monitor_.monitor) monitor_pending_[index]=false;
+    }
+    void monitor_bad(TradingSection section,RequestId id,int code=-1052) {
+        const auto expected=section==TradingSection::Positions?monitor_.positions:
+            section==TradingSection::AccountValues?monitor_.summary:section==TradingSection::Executions?monitor_.executions:monitor_.monitor;
+        if(monitor_.monitor && id==expected) monitor_failure(code);
+    }
     void start(Clock::time_point now) {
         clear(); state_ = ConnectionState::Connecting; deadline_ = now + timeout_;
         emit(ConnectionEvent{state_});
@@ -210,6 +256,8 @@ public:
         if (code == 1100 || code == 1101 || code == 1300 || code == 502 || code == 504 || code == 326) {
             fail(code, message); return;
         }
+        if(monitor_.monitor && (id==monitor_.positions || id==monitor_.summary || id==monitor_.executions ||
+            (id==0 && (code<2000 || code>=10000)))) monitor_failure(code);
         if (depth_id_ && id == depth_id_) {
             depth_signal(code == 317 ? "reset" : "error", code, stamp);
             if (code != 317) { depth_cancels_.push_back(depth_id_); depth_id_ = 0; }
@@ -233,6 +281,8 @@ public:
         if (state_ == ConnectionState::Connecting && now >= deadline_) {
             fail(-1001, "TWS handshake timed out"); return;
         }
+        if(monitor_.monitor && now>=monitor_deadline_ &&
+            std::any_of(monitor_pending_.begin(),monitor_pending_.end(),[](bool pending){return pending;})) monitor_failure(-1055);
         if(history_id_ && now>=history_deadline_)finish_history("failed",-1023);
         if(tick_id_ && now>=tick_deadline_)finish_ticks("failed",-1043);
         std::vector<RequestId> expired;
@@ -247,6 +297,32 @@ public:
         std::vector<BrokerEvent> out; out.swap(events_); return out;
     }
 private:
+    TradingMonitorModel monitor_model_;
+    TradingMonitorRequests monitor_;
+    bool monitor_seen_=false;
+    std::array<bool,4> monitor_pending_{};
+    Clock::time_point monitor_deadline_{};
+    std::vector<TradingMonitorRequests> monitor_cancels_;
+    bool selected_monitor_account(const std::string& account) const {
+        return monitor_.monitor && account==monitor_model_.view().account;
+    }
+    void monitor_failure(int code) {
+        if(!monitor_.monitor) return;
+        emit(TradingMonitorEvent{monitor_.monitor,TradingSection::Positions,TradingSectionEnd{false,code}});
+        stop_trading_monitor();
+    }
+    void monitor_event(TradingSection section,TradingMonitorPayload value,Clock::time_point now,std::chrono::system_clock::time_point wall) {
+        if(!monitor_.monitor) return;
+        if(now>=monitor_deadline_ && std::any_of(monitor_pending_.begin(),monitor_pending_.end(),[](bool pending){return pending;})) {
+            monitor_failure(-1055); return;
+        }
+        TradingMonitorEvent event{monitor_.monitor,section,std::move(value),now,wall};
+        monitor_model_.apply(event);
+        if(monitor_model_.view().state==TradingMonitorState::Failed) {
+            monitor_failure(monitor_model_.view().positions.error_code); return;
+        }
+        emit(std::move(event));
+    }
     RequestId tick_id_=0;
     TickSpec tick_spec_;
     std::int64_t tick_start_=0;
@@ -284,6 +360,7 @@ private:
     std::vector<BrokerEvent> events_;
     std::deque<Clock::time_point> requests_;
     void clear() noexcept {
+        monitor_={}; monitor_seen_=false; monitor_pending_={}; monitor_cancels_.clear(); monitor_model_.invalidate(0);
         tick_id_=0;tick_rows_.clear();
         resolutions_.clear(); subscriptions_.clear(); events_.clear(); requests_.clear();
         history_id_=0;history_cancels_.clear(); depth_id_=0; depth_sequence_=0; depth_cancels_.clear();

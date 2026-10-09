@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/dashboard/sde.css">
   <link rel="stylesheet" href="/dashboard/hedging.css">
   <link rel="stylesheet" href="/dashboard/orderbook.css">
+  <link rel="stylesheet" href="/dashboard/trading.css">
 </head>
 <body>
 <a class="skip" href="#workspace-title">Skip to workspace</a>
@@ -34,6 +35,7 @@
       <a href="#variation" data-workspace-link>Variation research pilot</a><a href="#pricing" data-workspace-link>Pricing lab</a><a href="#sensitivities" data-workspace-link>Greeks &amp; scenarios</a><a href="#sde" data-workspace-link>SDE discretization</a><a href="#hedging" data-workspace-link>Delta hedging</a><a href="#lab-catalog" data-workspace-link>Saved experiments</a>
     </details>
     <details class="nav-group"><summary>Broker &amp; help</summary>
+      <a href="#trading" data-workspace-link>Trading status</a>
       <a href="#instruments" data-workspace-link>Instruments &amp; quotes</a><a href="#positions" data-workspace-link>Position snapshot</a><a href="#roadmap" data-workspace-link>Help &amp; study roadmap</a>
     </details>
   </nav>
@@ -166,6 +168,27 @@
       <div class="ob-plots"><div><h3>Recorded midpoint</h3><svg id="ob-result-price" viewBox="0 0 520 180" role="img" aria-label="Recorded midpoint with invalid periods omitted"></svg></div><div><h3>Recorded depth imbalance</h3><svg id="ob-result-imb" viewBox="0 0 520 180" role="img" aria-label="Recorded depth imbalance with invalid periods omitted"></svg></div></div>
       <p id="ob-replay-note" class="hint">Replay and charts are decimated for display, never for fitting. Missing/invalid intervals are not fills. The offline report does not receive new live ticks.</p></div><div id="ob-comparison"></div>
       <details><summary>Coverage, exclusions and partial-session variance</summary><pre id="ob-result-coverage"></pre></details><details><summary>Evaluation, paired-date errors and Cont diagnostic</summary><pre id="ob-result-evaluation"></pre></details><details><summary>Frozen request, source hashes and implementation identity</summary><pre id="ob-result-provenance"></pre></details></article>
+    </div>
+  </section>
+  <section class="panel trading-workspace" id="trading" data-workspace-section hidden aria-labelledby="trading-title">
+    <header class="section-heading"><div><p class="eyebrow">Account &amp; order preparation</p><h2 id="trading-title">Trading status</h2></div><span id="trading-source" class="badge">NOT LOADED</span></header>
+    <div class="trading-body">
+      <p class="section-description">Read broker account and order state before defining an automated strategy. Order execution is disabled. This workspace cannot submit, modify or cancel orders.</p>
+      <div class="trading-overview"><article><span>Account mode</span><strong id="trading-mode">Account mode unverified</strong><small>Ports and profile names do not verify paper or live mode.</small></article><article><span>Monitoring</span><strong id="trading-state">Unavailable</strong><small id="trading-poll">EXPLICIT LOAD REQUIRED</small></article><article><span>Strategy execution</span><strong>Disabled</strong><small>No strategy or risk limits configured.</small></article></div>
+      <div class="trading-toolbar"><label>Managed account<select id="trading-account" disabled><option value="">Select an account</option></select></label><div class="actions"><button id="trading-refresh" type="button" class="secondary" disabled>Load / refresh status</button><button id="trading-start" type="button" disabled>Start account monitoring</button><button id="trading-stop" type="button" class="secondary" disabled>Stop monitoring</button></div></div>
+      <p id="trading-account-note" class="hint">Load status to inspect the authoritative managed-account list.</p><p id="trading-restart" class="hint">One account monitor may be started per broker connection.</p>
+      <p class="hint">Starting monitoring reads the explicitly selected account. Stopping monitoring stops these requests; existing broker orders remain working. Navigation and display polling never connect the broker or start monitoring.</p>
+      <p id="trading-note" role="status" aria-live="polite">Unlock local access to inspect trading status.</p><p id="trading-error" class="notice" role="status" hidden></p>
+      <p id="trading-identity" class="hint">No account monitor loaded.</p><p id="trading-freshness" class="hint">Update age unavailable.</p><p id="trading-wall-time" class="hint"></p>
+      <h3>Positions</h3><p id="trading-positions-status" class="hint"></p><p class="hint">Continuing broker updates after the initial snapshot, with model scope retained when reported. Rows from different models are not combined. Missing or partial positions are not zero exposure. Average cost is a broker-reported value; no risk estimate is calculated.</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Monitored positions"><table><thead><tr><th>Instrument / conId</th><th>Security</th><th>Model scope</th><th>Quantity</th><th>Average cost</th><th>Currency</th><th>Basis</th></tr></thead><tbody id="trading-positions-body"></tbody></table></div>
+      <h3>Account summary</h3><p id="trading-account_summary-status" class="hint"></p><p class="hint">IBKR periodic account-summary updates. Values retain the broker's tag and currency. This view does not certify available buying power or readiness to trade.</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Monitored account summary"><table><thead><tr><th>Broker tag</th><th>Reported value</th><th>Currency</th></tr></thead><tbody id="trading-values-body"></tbody></table></div>
+      <h3>Open orders snapshot</h3><p id="trading-open_orders-status" class="hint"></p><p class="hint">Account-wide broker snapshot. Completion does not establish continuous order reconciliation; subsequent fills, changes and cancellations may require a fresh broker connection and snapshot.</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Monitored open orders"><table><thead><tr><th>Instrument / conId</th><th>Order ID</th><th>Permanent ID</th><th>Action</th><th>Type</th><th>Quantity</th><th>Limit</th><th>Status</th><th>Filled</th><th>Remaining</th></tr></thead><tbody id="trading-orders-body"></tbody></table></div>
+      <h3>Execution history snapshot</h3><p id="trading-executions-status" class="hint"></p><p class="hint">Request-scoped broker history; it may not contain every account execution. Broker-reported execution time is displayed as supplied.</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Monitored execution history"><table><thead><tr><th>Execution ID</th><th>Instrument / conId</th><th>Order ID</th><th>Side</th><th>Quantity</th><th>Price</th><th>Broker time</th></tr></thead><tbody id="trading-executions-body"></tbody></table></div>
+      <aside class="trading-prerequisites"><h3>Before automated trading</h3><p>Define the strategy, instruments, schedule and risk limits with the account owner. Verify account mode and market-data suitability, establish continuous order reconciliation, and validate the execution and stop controls. No strategy has been selected or activated here.</p><ul id="trading-blockers"><li>Status not loaded; execution remains disabled.</li></ul></aside>
     </div>
   </section>
   <section class="panel positions" id="positions" data-workspace-section hidden aria-labelledby="positions-title">

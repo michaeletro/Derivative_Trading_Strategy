@@ -3,6 +3,7 @@
 #include "historical.hpp"
 #include "historical_ticks.hpp"
 #include "depth.hpp"
+#include "trading_monitor.hpp"
 #include <variant>
 #include <vector>
 
@@ -15,7 +16,8 @@ struct BrokerError { RequestId request_id; int code; std::string message; };
 struct ContractEvent { RequestId request_id; Contract contract; };
 struct ContractsComplete { RequestId request_id; bool success; };
 using BrokerEvent = std::variant<ConnectionEvent, Quote, PositionEvent,
-    PositionsComplete, BrokerError, ContractEvent, ContractsComplete, HistoricalBarEvent, HistoricalEnd, DepthEvent, HistoricalTickPage>;
+    PositionsComplete, BrokerError, ContractEvent, ContractsComplete, HistoricalBarEvent, HistoricalEnd, DepthEvent, HistoricalTickPage,
+    ManagedAccountsEvent, TradingMonitorEvent>;
 
 struct ContractQuery {
     std::string symbol;
@@ -62,6 +64,10 @@ public:
     virtual RequestId subscribe(const Contract& contract) = 0;
     virtual bool unsubscribe(RequestId subscription_id) = 0;
     virtual void request_positions(RequestId request_id) = 0;
+    virtual RequestId start_trading_monitor(const std::string&) {
+        throw std::logic_error("Account monitoring requires the native TWS adapter");
+    }
+    virtual void stop_trading_monitor() {}
     virtual std::vector<BrokerEvent> poll() = 0;
 };
 } // namespace dts

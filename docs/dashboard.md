@@ -93,6 +93,61 @@ clients. Forget token only clears this tab; it does not disconnect the broker.
   Native broker APIs retain Bearer authentication. There are no arbitrary asset
   paths, broker-address fields or raw-message forwarding controls.
 
+## Trading status and execution preparation
+
+The **Trading status** workspace at `/#trading` adds authenticated account reads
+to the existing native connection. It is the first preparation step for future
+execution. The server still has no order submission, order cancellation, strategy
+activation or account-write method. Existing data collection and saved research
+results do not establish a profitable trading rule.
+
+1. Start the dashboard using the existing profile and Python environment:
+   `python tools/start_dashboard.py --profile paper-tws --mode tws`.
+2. Verify the intended session in TWS and leave Read-Only API enabled. Connect
+   explicitly through the dashboard's broker controls.
+3. Open **Trading status**, choose **Load / refresh status**, inspect the broker's
+   managed accounts and select the exact account to monitor. A port or account
+   prefix does not verify live/paper identity; the workspace labels it unverified.
+4. Choose **Start monitoring**. Positions, account summary, account-wide open
+   orders and executions have separate pending/completion/failure indicators.
+   Pending or failed data never represents a verified empty portfolio.
+5. Choose **Stop monitoring** explicitly to cancel the read subscriptions. This
+   neither cancels orders nor stops order-book recording. Navigation and sign-out
+   only stop this tab's display; the shared server monitor continues until stopped
+   or disconnected.
+
+After the initial position marker, account-specific position changes continue to
+update the display. Positions retain model codes and distinct rows for each
+reported model and contract; they are not silently combined into account totals.
+Account summary is an IBKR periodic subscription (typically
+three-minute updates), not an immediate buying-power check. Open orders from all
+visible clients are an account-filtered snapshot; another client's subsequent
+orders are not guaranteed to stream. Execution history is limited to what TWS
+returns for the request, not a complete lifetime account ledger. These scopes and
+each component's receipt age are disclosed independently. The overall monitor
+state **Active** means the initial read requests completed, never permission to
+trade. No account rows enter the market-data archive or research exports.
+
+One monitor start is permitted per native connection. The open-order end marker
+has no request ID, so a stopped or failed monitor requires a deliberate broker
+disconnect/reconnect before another start. Display refresh does not reissue
+broker requests. Lost acknowledgements require explicit status reconciliation;
+mutations are not retried automatically. Restart/disconnect invalidates account
+state rather than retaining it as current.
+
+Future automatic execution requires owner-specified instruments, entry/exit
+rules, position/exposure and daily loss limits. It also requires a durable intent
+and order journal, continuously reconciled order/fill risk, fresh real-time inputs,
+broker what-if previews, idempotent submission, uncertain-outcome recovery and
+tested stop/cancel controls. Forecasting RV/BPV alone does not define a buy/sell
+decision. These capabilities are not provided by the Trading status increment.
+
+Authenticated routes are `GET /api/trading/status`,
+`POST /api/trading/monitor` with `{"account":"<exact managed account>"}` and
+`POST /api/trading/stop` with `{}`. No credentials are returned; account data is
+held in memory and is cleared on disconnect. Isolated tests use explicitly
+synthetic fixtures and disposable archives; they do not verify a live account.
+
 ## Validation
 
 `node --test tests/dashboard/model.test.mjs` runs dependency-free frontend rules

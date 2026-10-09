@@ -7,6 +7,7 @@ export const routes = Object.freeze({
   results: {workspace:'results', title:'Results & exports', description:'Reopen saved research, inspect its evidence and download verified outputs.', section:'orderbook', orderbookTab:'results'},
   instruments: {workspace:'instruments', title:'Instruments & quotes', description:'Resolve a contract explicitly, inspect quotes, or select historical data.', section:'market-workspace'},
   positions: {workspace:'positions', title:'Position snapshot', description:'Inspect a requested broker snapshot. Holdings are not a continuously reconciled stream.', section:'positions'},
+  trading: {workspace:'trading', title:'Trading status', description:'Inspect account, position and order monitoring. Strategy execution remains disabled.', section:'trading'},
   history: {workspace:'history', title:'Historical prices & volumes', description:'Request daily or intraday bars and reopen saved datasets.', section:'history'},
   ticks: {workspace:'ticks', title:'Historical ticks', description:'Download and replay trades or best quotes. These are not historical depth ladders.', section:'ticks'},
   storage: {workspace:'storage', title:'Local data & backups', description:'Inspect durable observations and create a backup when the broker is disconnected.', section:'storage'},

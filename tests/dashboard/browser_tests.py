@@ -17,7 +17,7 @@ class Handler(SimpleHTTPRequestHandler):
         assets = {'/dashboard/orderbook.mjs': 'orderbook.mjs', '/dashboard/orderbook-model.mjs': 'orderbook-model.mjs', '/dashboard/orderbook.css': 'orderbook.css', '/': 'index.html', '/dashboard/': 'index.html', '/dashboard/index.html': 'index.html',
                   '/dashboard/dashboard.css': 'dashboard.css', '/dashboard/app.mjs': 'app.mjs', '/dashboard/local-signin.mjs':'local-signin.mjs', '/dashboard/model.mjs': 'model.mjs', '/dashboard/pricing.mjs': 'pricing.mjs', '/dashboard/pricing-model.mjs': 'pricing-model.mjs', '/dashboard/greeks.mjs': 'greeks.mjs', '/dashboard/greeks-model.mjs': 'greeks-model.mjs', '/dashboard/greeks.css': 'greeks.css', '/dashboard/storage.mjs': 'storage.mjs', '/dashboard/storage-model.mjs': 'storage-model.mjs', '/dashboard/history.mjs': 'history.mjs', '/dashboard/history-model.mjs': 'history-model.mjs', '/dashboard/history.css': 'history.css', '/dashboard/replay.mjs': 'replay.mjs', '/dashboard/replay-model.mjs': 'replay-model.mjs', '/dashboard/replay.css': 'replay.css', '/dashboard/sde.mjs': 'sde.mjs', '/dashboard/sde-model.mjs': 'sde-model.mjs', '/dashboard/sde.css': 'sde.css', '/dashboard/hedging.mjs': 'hedging.mjs', '/dashboard/hedging-model.mjs': 'hedging-model.mjs', '/dashboard/hedging.css': 'hedging.css'}
         name = assets.get(urlparse(self.path).path)
-        if urlparse(self.path).path in ['/dashboard/navigation.mjs','/dashboard/orderbook-explorer.mjs','/dashboard/orderbook-explorer-model.mjs','/dashboard/ticks.mjs','/dashboard/ticks-model.mjs',
+        if urlparse(self.path).path in ['/dashboard/navigation.mjs','/dashboard/trading.mjs','/dashboard/trading-model.mjs','/dashboard/trading.css','/dashboard/orderbook-explorer.mjs','/dashboard/orderbook-explorer-model.mjs','/dashboard/ticks.mjs','/dashboard/ticks-model.mjs',
                                       '/dashboard/variation.mjs','/dashboard/variation-model.mjs']:
             name=urlparse(self.path).path.rsplit('/',1)[-1]
         if not name:
@@ -141,6 +141,10 @@ def main():
             page.evaluate('location.hash="pricing"');expect(page.locator('#pricing')).to_be_visible()
             expect(page.locator('#orderbook')).to_be_hidden()
             expect(page.locator('a[href="#pricing"][data-workspace-link]')).to_have_attribute('aria-current','page')
+            page.evaluate('location.hash="trading"');expect(page.locator('#trading')).to_be_visible()
+            expect(page.locator('#workspace-title')).to_have_text('Trading status')
+            expect(page.locator('#trading-mode')).to_have_text('Account mode unverified')
+            assert not any(path.startswith('/api/trading/') for _,path,_ in calls), 'Trading navigation must not load/start monitoring'
             page.set_viewport_size({'width':390,'height':844})
             expect(page.locator('#workspace-sidebar')).to_be_hidden()
             page.locator('#workspace-menu').click();expect(page.locator('#workspace-sidebar')).to_be_visible()
