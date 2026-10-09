@@ -66,6 +66,7 @@ jobs:
       - name: Browser-to-worker acceptance and synthetic live-control protocol
         run: |
           python tests/dashboard/trading_browser_tests.py
+          python tests/dashboard/execution_rules_browser_tests.py
           python tests/workspace/browser_tests.py build-workspace/server
           python tests/workspace/explorer_browser_tests.py build-workspace/server
           python tests/ticks/browser_tests.py build-workspace/server build-workspace/tick_tests

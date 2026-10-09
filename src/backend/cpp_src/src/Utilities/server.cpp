@@ -15,6 +15,7 @@ namespace asio = boost::asio;
 #include "depth_json.hpp"
 #include "readiness_json.hpp"
 #include "trading_json.hpp"
+#include "execution_rules_json.hpp"
 #include "orderbook_jobs.hpp"
 #include <dts/recording_broker.hpp>
 #include <dts/read_only_service.hpp>
@@ -413,6 +414,14 @@ private:
     }
     void routes() {
         auth_routes();
+        // A stateless scenario calculator. It neither reads trading risk from
+        // the broker nor creates an order, monitor, strategy or durable intent.
+        CROW_ROUTE(app_, "/api/trading/rules")([this](const crow::request& req) {
+            return guarded(req, [&] { return dts::execution_rules_http::presets(); });
+        });
+        CROW_ROUTE(app_, "/api/trading/rules/preview").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req, [&] { return dts::execution_rules_http::preview(object(req)); });
+        });
         // Account monitoring is explicitly requested, read-only, and shares the
         // same broker owner/mutex/event stream as capture. GET never connects.
         CROW_ROUTE(app_, "/api/trading/status")([this](const crow::request& req) {

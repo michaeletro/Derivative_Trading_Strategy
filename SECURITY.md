@@ -49,6 +49,12 @@ against live accounts based on this branch's test results.
 
 ## Before any future execution implementation
 
+The execution-rule planner is a stateless scenario calculator with fixed,
+disabled presets. It accepts no account number, writes no intent/order journal,
+and never touches the broker. Supplied eligibility/cash/state flags are untrusted
+scenario assertions, not permission to execute. No actual trading risk is inferred
+from a successful preview. See `docs/execution-rules.md` for input semantics.
+
 Require explicit account identity, position/open-order/execution reconciliation,
 durable client IDs, deduplication, quote freshness and feed-type checks, exposure
 and buying-power limits, and tested cancellation/kill-switch semantics. Timeouts

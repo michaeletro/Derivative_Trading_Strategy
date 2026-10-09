@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="/dashboard/hedging.css">
   <link rel="stylesheet" href="/dashboard/orderbook.css">
   <link rel="stylesheet" href="/dashboard/trading.css">
+  <link rel="stylesheet" href="/dashboard/execution-rules.css">
 </head>
 <body>
 <a class="skip" href="#workspace-title">Skip to workspace</a>
@@ -174,7 +175,30 @@
     <header class="section-heading"><div><p class="eyebrow">Account &amp; order preparation</p><h2 id="trading-title">Trading status</h2></div><span id="trading-source" class="badge">NOT LOADED</span></header>
     <div class="trading-body">
       <p class="section-description">Read broker account and order state before defining an automated strategy. Order execution is disabled. This workspace cannot submit, modify or cancel orders.</p>
-      <div class="trading-overview"><article><span>Account mode</span><strong id="trading-mode">Account mode unverified</strong><small>Ports and profile names do not verify paper or live mode.</small></article><article><span>Monitoring</span><strong id="trading-state">Unavailable</strong><small id="trading-poll">EXPLICIT LOAD REQUIRED</small></article><article><span>Strategy execution</span><strong>Disabled</strong><small>No strategy or risk limits configured.</small></article></div>
+      <div class="trading-overview"><article><span>Account mode</span><strong id="trading-mode">Account mode unverified</strong><small>Ports and profile names do not verify paper or live mode.</small></article><article><span>Monitoring</span><strong id="trading-state">Unavailable</strong><small id="trading-poll">EXPLICIT LOAD REQUIRED</small></article><article><span>Strategy execution</span><strong>Disabled</strong><small>Provisional scenario rules are available below; no strategy is activated.</small></article></div>
+      <section class="execution-rules" aria-labelledby="rules-title">
+        <header class="rules-heading"><div><p class="eyebrow">Capital &amp; instrument rules</p><h3 id="rules-title">Execution rule planner</h3></div><span class="badge">SCENARIO ONLY · ORDERS OFF</span></header>
+        <p>Compare provisional $500 live, $500 paper rehearsal and $1M paper research limits. The paper rehearsal uses the same capital constraints as the smaller account. These are reviewable defaults, not a validated trading strategy.</p>
+        <div class="rules-toolbar"><label>Rule preset<select id="rules-profile" disabled><option>Load rules first</option></select></label><button id="rules-load" type="button" class="secondary" disabled>Load / refresh rules</button><button id="rules-reset" type="button" class="secondary" disabled>Reset account assumptions</button></div>
+        <p id="rules-profile-basis" class="hint"></p><div id="rules-limits" class="rules-limits"></div>
+        <p class="hint">USD stocks/ETFs, whole shares and limit prices only. Buy scenarios reserve cash and count outstanding buys toward exposure. Sell scenarios use long shares remaining after outstanding sells. No margin, shorts or fractional-share assumption.</p>
+        <form id="rules-form"><fieldset id="rules-inputs" disabled><h4>Hypothetical instrument and quote</h4>
+          <p class="hint">SPY / conId 756733 at $700 is an editable illustration, not a current quote or a verified contract selection. Enter the exact contract and tick size from broker resolution for your scenario.</p>
+          <div class="rules-grid">
+            <label>Side<select name="side"><option value="BUY">Buy</option><option value="SELL">Sell existing long shares</option></select></label>
+            <label>Symbol<input name="symbol" value="SPY" maxlength="64" required></label><label>Resolved conId<input name="contract_id" value="756733" inputmode="numeric" required></label>
+            <label>Bid (USD)<input name="bid" type="number" min="0.01" step="0.01" value="699.99" required></label><label>Ask (USD)<input name="ask" type="number" min="0.01" step="0.01" value="700.01" required></label><label>Limit price (USD)<input name="limit_price" type="number" min="0.01" step="0.01" value="700.00" required></label>
+            <label>Minimum tick (USD)<input name="min_tick" type="number" min="0.01" step="0.01" value="0.01" required></label><label>Maximum whole shares to consider<input name="requested_shares" type="number" min="1" step="1" value="1" required></label><label>Quote age (milliseconds)<input name="quote_age_ms" type="number" min="0" step="1" value="0" required></label>
+          </div><h4>Hypothetical account state</h4><p class="hint">These inputs are supplied assumptions. The account-monitor snapshots below are not imported or certified as a continuous execution risk state.</p>
+          <div class="rules-grid"><label>Settled USD cash after buy commitments<input name="available_cash" type="number" min="0" step="0.01" value="500.00" required></label><label>Gross exposure including buy commitments (USD)<input name="committed_gross_exposure" type="number" min="0" step="0.01" value="0" required></label><label>Long shares available after sell commitments<input name="available_long_shares" type="number" min="0" step="1" value="0" required></label>
+            <label>Day P&amp;L: realized + unrealized (USD)<input name="day_pnl" type="number" step="0.01" value="0" required></label><label>Buy decisions today<input name="buy_decisions_today" type="number" min="0" step="1" value="0" required></label><label>Open orders<input name="open_orders" type="number" min="0" step="1" value="0" required></label><label>Risk-state age (milliseconds)<input name="risk_age_ms" type="number" min="0" step="1" value="0" required></label></div>
+          <div class="rules-checks"><label><input name="instrument_allowed" type="checkbox">Scenario assumes this exact resolved USD stock/ETF is eligible.</label><label><input name="realtime" type="checkbox">Scenario assumes a real-time quote.</label><label><input name="rth" type="checkbox">Scenario assumes regular trading hours.</label><label><input name="risk_state_known" type="checkbox">Scenario assumes cash, positions and all outstanding orders are known.</label></div>
+          <button type="submit">Preview scenario limits</button>
+        </fieldset></form>
+        <p id="rules-note" role="status" aria-live="polite">Unlock local access, then load provisional rules.</p>
+        <div id="rules-result" class="rules-result" hidden><strong id="rules-decision" class="rules-outcome"></strong><p id="rules-sizing"></p><ul id="rules-reasons"></ul><p class="hint">Passing this calculator does not establish a signal, account mode, broker order acceptance or execution permission. No order has been submitted.</p><ul id="rules-result-limitations"></ul></div>
+        <details><summary>Preset limitations</summary><ul id="rules-limitations"></ul></details>
+      </section>
       <div class="trading-toolbar"><label>Managed account<select id="trading-account" disabled><option value="">Select an account</option></select></label><div class="actions"><button id="trading-refresh" type="button" class="secondary" disabled>Load / refresh status</button><button id="trading-start" type="button" disabled>Start account monitoring</button><button id="trading-stop" type="button" class="secondary" disabled>Stop monitoring</button></div></div>
       <p id="trading-account-note" class="hint">Load status to inspect the authoritative managed-account list.</p><p id="trading-restart" class="hint">One account monitor may be started per broker connection.</p>
       <p class="hint">Starting monitoring reads the explicitly selected account. Stopping monitoring stops these requests; existing broker orders remain working. Navigation and display polling never connect the broker or start monitoring.</p>

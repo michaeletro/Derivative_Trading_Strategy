@@ -95,6 +95,11 @@ clients. Forget token only clears this tab; it does not disconnect the broker.
 
 ## Trading status and execution preparation
 
+The [Execution rule planner](execution-rules.md) adds provisional $500 live,
+$500 paper rehearsal and $1M paper research presets with hypothetical BUY/SELL
+sizing. Open Trading status and explicitly load rules. All inputs remain scenario
+assumptions; passing a preview neither enables orders nor verifies brokerage risk.
+
 The **Trading status** workspace at `/#trading` adds authenticated account reads
 to the existing native connection. It is the first preparation step for future
 execution. The server still has no order submission, order cancellation, strategy

@@ -31,6 +31,9 @@ if(BUILD_TESTING)
     add_test(NAME replay_tests COMMAND replay_tests)
 endif()
 if(BUILD_TESTING)
+    add_executable(execution_rules_tests tests/trading/execution_rules_tests.cpp)
+    configure_executable(execution_rules_tests)
+    add_test(NAME execution_rules_tests COMMAND execution_rules_tests)
     foreach(suite core_tests tws_state_tests dashboard_service_tests recording_clock_tests trading_monitor_tests)
         add_executable(${suite} tests/${suite}.cpp)
         configure_executable(${suite})
@@ -115,6 +118,9 @@ if(DTS_BUILD_SERVER)
         add_test(NAME trading_http_tests COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/trading/http_tests.py" "$<TARGET_FILE:server>")
         set_tests_properties(trading_http_tests PROPERTIES TIMEOUT 30)
+        add_test(NAME execution_rules_http_tests COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/trading/execution_rules_http_tests.py" "$<TARGET_FILE:server>")
+        set_tests_properties(execution_rules_http_tests PROPERTIES TIMEOUT 30)
         add_test(NAME pricing_http_tests COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/pricing/http_tests.py" "$<TARGET_FILE:server>")
         add_test(NAME greeks_http_tests COMMAND "${Python3_EXECUTABLE}"

@@ -1,7 +1,9 @@
 import {createTradingController,componentLabels,componentText,timestampText,ageText,maskedAccount} from './trading-model.mjs';
 import {numberText,titleCase} from './model.mjs';
+import {mountExecutionRules} from './execution-rules.mjs';
 
 export function mountTrading(api,onAccessError) {
+  const rulePlanner=mountExecutionRules(api,onAccessError);
   const $=id=>document.getElementById(id),put=(id,value)=>{$(id).textContent=value;};
   let visible=document.body.dataset.workspace==='trading',timer=null,receivedAt=0,lastData=null;
   const controller=createTradingController(api,render,onAccessError);
@@ -63,5 +65,5 @@ export function mountTrading(api,onAccessError) {
   window.addEventListener('dts:workspacechange',event=>{visible=event.detail?.workspace==='trading';render();});
   document.addEventListener('visibilitychange',()=>render());
   render();
-  return {setAccess:controller.setAccess,update:controller.updateContext};
+  return {setAccess:value=>{controller.setAccess(value);rulePlanner.setAccess(value);},update:controller.updateContext};
 }
