@@ -36,6 +36,14 @@ def dataset_request(ids):
     return r
 
 
+def shape_request(ids):
+    from dataclasses import asdict
+    from orderbook.book_shape import BookShapeConfig
+    r=request(ids,mode='shape')
+    r['configuration']=asdict(BookShapeConfig())
+    return r
+
+
 def download(server,jid,name):
     req=Request(server.origin+BASE+'/jobs/'+jid+'/artifacts/'+name,
                 headers={'Authorization':'Bearer '+helper.TOKEN})
@@ -153,6 +161,18 @@ def main(exe):
             ck(ended['mode']=='describe')
             described=s.call(BASE+'/jobs/'+description_id+'/result')
             ck(described[0]==200 and described[1]['request']['mode']=='describe')
+            code,shape_job=s.call(BASE+'/jobs',shape_request([ids[0]]));ck(code==200)
+            shape_id=shape_job['job_id'];ended=wait(s,shape_id);assert ended['state']=='complete',ended;checks+=1
+            shape_result=s.call(BASE+'/jobs/'+shape_id+'/result')[1]
+            ck(shape_result['request']['mode']=='shape' and 'density_model' in shape_result['shape'])
+            ck({a['name'] for a in shape_result['artifacts']}=={'shape_features','shape_trades'})
+            shape_dir=root/'data/orderbook-research'/shape_id
+            shape_manifest=json.loads((shape_dir/'inputs.json').read_text())
+            ck(shape_manifest['exports'][0]['kind']=='depth_stream')
+            for artifact in shape_result['artifacts']:
+                code,headers,body=download(s,shape_id,artifact['name']);ck(code==200)
+                ck(hashlib.sha256(body).hexdigest()==artifact['sha256']==headers['X-Content-SHA256'])
+                ck(len(body)==artifact['bytes'] and headers['Content-Type']=='application/gzip')
             code,dataset_job=s.call(BASE+'/jobs',dataset_request([ids[0]]));ck(code==200)
             dataset_id=dataset_job['job_id'];ended=wait(s,dataset_id);assert ended['state']=='complete',ended;checks+=1
             dataset_dir=root/'data/orderbook-research'/dataset_id
@@ -285,6 +305,8 @@ def main(exe):
             ck(s.call(BASE+'/jobs/'+model_id)[1]['state']=='complete')
             ck(s.call(BASE+'/jobs/'+model_id+'/result')[1]['evaluation']['split']==partitions)
             ck(s.call(BASE+'/jobs/'+description_id+'/result')[1]==described[1])
+            ck(s.call(BASE+'/jobs/'+shape_id+'/result')[1]==shape_result)
+            for artifact in shape_result['artifacts']:ck(download(s,shape_id,artifact['name'])[0]==200)
             ck(s.call(BASE+'/jobs/'+dataset_id+'/result')[1]==dataset_result)
             for artifact in dataset_result['artifacts']:ck(download(s,dataset_id,artifact['name'])[0]==200)
             ck(s.call(BASE+'/jobs/'+flow_id+'/result')[1]==flow_result)

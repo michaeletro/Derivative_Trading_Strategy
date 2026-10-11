@@ -49,11 +49,12 @@ inline int bounded(const Read& r, const char* key, int lo, int hi) {
     return static_cast<int>(n);
 }
 inline bool dataset_mode(const std::string& mode) { return mode == "dataset" || mode == "proposal_experiment"; }
+inline bool stream_mode(const std::string& mode) { return dataset_mode(mode) || mode == "shape"; }
 inline void validate(const Read& r) {
     exact_fields(r, {"schema_version", "mode", "session_ids", "source", "configuration", "split"});
     bounded(r, "schema_version", 1, 1);
     const auto mode = field(r, "mode"), source = field(r, "source");
-    if ((mode != "inspect" && mode != "compare" && mode != "describe" && mode != "flow" && !dataset_mode(mode)) || (source != "ibkr_tws" && source != "mock")) throw std::invalid_argument("Invalid research mode or source acknowledgement");
+    if ((mode != "inspect" && mode != "compare" && mode != "describe" && mode != "flow" && mode != "shape" && !dataset_mode(mode)) || (source != "ibkr_tws" && source != "mock")) throw std::invalid_argument("Invalid research mode or source acknowledgement");
     const auto& ids = r["session_ids"];
     if (ids.t() != crow::json::type::List || ids.size() < 1 || ids.size() > 24) throw std::invalid_argument("Select 1..24 stopped sessions");
     std::set<std::string> seen;
@@ -63,6 +64,25 @@ inline void validate(const Read& r) {
         if (s.empty() || s.size() > 18 || s[0] == '0' || s.find_first_not_of("0123456789") != std::string::npos || !seen.insert(s).second) throw std::invalid_argument("Invalid or duplicate session ID");
     }
     const auto& c = r["configuration"];
+    if (mode == "shape") {
+        exact_fields(c, {"levels", "step_seconds", "max_side_age_seconds", "calibration_fraction", "near_band_bps",
+            "imbalance_threshold", "max_hold_seconds", "fee_per_side_usd", "slippage_bps", "paper_budget_usd",
+            "max_order_notional_usd", "strategy_variant"});
+        bounded(c, "levels", 2, 50); bounded(c, "step_seconds", 1, 60); bounded(c, "max_hold_seconds", 1, 3600);
+        const auto number = [&](const char* key, double lo, double hi) {
+            if (c[key].t() != crow::json::type::Number || !std::isfinite(c[key].d()) || c[key].d() < lo || c[key].d() > hi)
+                throw std::invalid_argument("Book-shape setting outside bounds");
+        };
+        number("max_side_age_seconds", .1, 30.); number("calibration_fraction", .2, .8);
+        number("near_band_bps", .1, 100.); number("imbalance_threshold", 0., 1.);
+        number("fee_per_side_usd", 0., 100.); number("slippage_bps", 0., 100.);
+        number("paper_budget_usd", 100., 1000000.); number("max_order_notional_usd", 1., 100000.);
+        const auto variant = field(c, "strategy_variant");
+        if (variant != "tight_bid_heavy" && variant != "compare_regimes" && variant != "none")
+            throw std::invalid_argument("Unknown book-shape replay variant");
+        if (r["split"].t() != crow::json::type::Null) throw std::invalid_argument("Book shape uses its chronological calibration prefix");
+        return;
+    }
     if (dataset_mode(mode)) {
         std::set<std::string> keys{"levels", "return_seconds", "max_side_age_seconds"};
         if(c.has("preset")){keys.insert("preset");keys.insert("quantity_unit");keys.insert("shares_confirmed");}
@@ -233,7 +253,7 @@ struct InputLimits {
     std::size_t total_bytes;
 };
 inline InputLimits input_limits(const std::string& mode) {
-    if (dataset_mode(mode)) return InputLimits{10000000, 20000000, 4000000000ULL, 8000000000ULL};
+    if (stream_mode(mode)) return InputLimits{10000000, 20000000, 4000000000ULL, 8000000000ULL};
     return (mode == "describe" || mode == "flow") ? InputLimits{500000, 500000, 200000000, 200000000}
                               : InputLimits{200000, 300000, 80000000, 120000000};
 }
@@ -290,7 +310,8 @@ inline VerifiedArtifact verified_artifact(const fs::path& output, const Read& en
     const std::map<std::string, std::pair<std::string, std::string>> allowed{
         {"features", {"features.csv.gz", "application/gzip"}}, {"minutes", {"minutes.csv.gz", "application/gzip"}},
         {"blocks", {"blocks.csv", "text/csv"}}, {"pairs", {"pairs.csv", "text/csv"}},
-        {"predictions", {"predictions.csv", "text/csv"}}, {"daily_losses", {"daily_losses.csv", "text/csv"}}};
+        {"predictions", {"predictions.csv", "text/csv"}}, {"daily_losses", {"daily_losses.csv", "text/csv"}},
+        {"shape_features", {"shape_features.csv.gz", "application/gzip"}}, {"shape_trades", {"shape_trades.csv.gz", "application/gzip"}}};
     const auto found = allowed.find(name);
     if (found == allowed.end()) throw std::invalid_argument("Unknown dataset artifact");
     exact_fields(entry, {"name", "file", "sha256", "bytes", "rows", "content_type"});
@@ -370,7 +391,7 @@ class Manager {
     void freeze(const std::string& id, const std::string& request) {
         const auto r = crow::json::load(request); const auto dir = directory(id);
         const auto limits = input_limits(field(r, "mode"));
-        const bool dataset = dataset_mode(field(r, "mode"));
+        const bool dataset = stream_mode(field(r, "mode"));
         std::vector<Json> sources; std::size_t total_bytes = 0;
         std::int64_t total_events = 0;
         for (const auto& value : r["session_ids"]) {
@@ -522,6 +543,7 @@ public:
             j["dataset_max_session_events"] = 10000000; j["dataset_max_events"] = 20000000;
             j["dataset_max_file_bytes"] = 4000000000ULL; j["dataset_max_total_bytes"] = 8000000000ULL;
             j["dataset_timeout_seconds"] = 1800; j["dataset_artifact_max_bytes"] = 256000000;
+            j["shape_max_grid_points"] = 60000; j["shape_timeout_seconds"] = 1800;
             j["dataset_message"] = "Stopped captures are streamed in bounded pages; strict receipt-clock and usable-block checks remain required. Disk headroom is checked before preparation."; }
         if(variation_)j["max_snapshots"]=60;
         j["message"] = enabled() ? "Offline worker available; selected saved inputs are frozen before analysis. Dependencies and coverage are checked when a job runs." : "Launch with tools/start_dashboard.py from the model-enabled virtual environment to enable research jobs.";
@@ -543,7 +565,7 @@ public:
             const auto n = std::stoll(std::get<std::string>(row.at("event_count"))); total += n;
             if (n > limits.session_events || total > limits.total_events) throw std::length_error("Selected captures exceed the bounded research event limit");
         }
-        if (dataset_mode(field(request, "mode"))) {
+        if (stream_mode(field(request, "mode"))) {
             const auto estimate = std::min<std::uint64_t>(limits.total_bytes, static_cast<std::uint64_t>(total) * 1024 + request["session_ids"].size() * 4096);
             require_space(root_, estimate + 2000000000ULL);
         }
@@ -560,7 +582,7 @@ public:
         if(variation_){meta["snapshot_ids"]=Json(request["snapshot_ids"]);meta["input_kind"]=field(request,"input_kind");}
         meta["created_ms"] = now_ms(); meta["finished_ms"] = nullptr; meta["state"] = "running"; meta["phase"] = "snapshotting"; meta["error"] = "";
         state_write(dir, meta); active_ = id; pending_ = raw; abort_preparation_.store(false); requested_end_.clear();
-        deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(dataset_mode(field(request, "mode")) ? 1800 : timeout_seconds_); wake_.notify_all(); return meta;
+        deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(stream_mode(field(request, "mode")) ? 1800 : timeout_seconds_); wake_.notify_all(); return meta;
     }
     Json get(const std::string& id) { std::lock_guard<std::mutex> lock(mutex_); return Json(read_json(directory(id) / "state.json", 16384)); }
     Json list() {
@@ -586,11 +608,11 @@ public:
         return ArchivedResult{raw};
     }
     VerifiedArtifact artifact(const std::string& id, const std::string& name) {
-        if (name != "features" && name != "minutes" && name != "blocks" && name != "pairs" && name != "predictions" && name != "daily_losses")
+        if (name != "features" && name != "minutes" && name != "blocks" && name != "pairs" && name != "predictions" && name != "daily_losses" && name != "shape_features" && name != "shape_trades")
             throw std::invalid_argument("Unknown dataset artifact");
         const auto saved = result(id); // Validates completed state and exact saved JSON hash.
         const auto report = crow::json::load(saved.bytes);
-        if (!report.has("request") || !dataset_mode(field(report["request"], "mode")) ||
+        if (!report.has("request") || !stream_mode(field(report["request"], "mode")) ||
             !report.has("artifacts") || report["artifacts"].t() != crow::json::type::List || report["artifacts"].size() > 6)
             throw std::logic_error("This result has no dataset exports");
         const Read* selected = nullptr;

@@ -23,6 +23,14 @@ def flow_request(**configuration):
     return r
 
 
+def shape_request(**configuration):
+    from dataclasses import asdict
+    from orderbook.book_shape import BookShapeConfig
+    r = request(mode='shape')
+    r['configuration'] = {**asdict(BookShapeConfig()), **configuration}
+    return r
+
+
 def dataset_request(**configuration):
     r = request(mode='dataset')
     r['configuration'] = {**dict(levels=5, return_seconds=60, max_side_age_seconds=5), **configuration}
@@ -55,6 +63,18 @@ def frozen_stream_inputs(job, req, payload=None):
 
 
 class RequestTests(unittest.TestCase):
+    def test_shape_separate_settings_and_no_clock_override(self):
+        cfg, learning, split = worker.validate_request(shape_request())
+        self.assertEqual(cfg.levels, 5)
+        self.assertIsNone(learning); self.assertIsNone(split)
+        for key, value in [('levels', 1), ('levels', 51), ('levels', True), ('step_seconds', 0),
+                           ('step_seconds', 61), ('calibration_fraction', .1), ('near_band_bps', float('nan')),
+                           ('fee_per_side_usd', True), ('strategy_variant', 'live'), ('clock_policy', 'override')]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                worker.validate_request(shape_request(**{key: value}))
+        r = shape_request(); r['split'] = {}
+        with self.assertRaises(ValueError): worker.validate_request(r)
+
     def test_default_request(self):
         c, l, p = worker.validate_request(request())
         self.assertEqual(c.quantity,100); self.assertEqual(l.target,'buy_cost_bps'); self.assertIsNone(p)
@@ -160,6 +180,44 @@ class WorkerTests(unittest.TestCase):
         self.job=self.root/('a'*32);self.job.mkdir(mode=0o700)
 
     def tearDown(self):self.tmp.cleanup()
+
+    def test_shape_stream_persists_full_report_and_verified_exports_without_database_access(self):
+        r = shape_request()
+        frozen_stream_inputs(self.job, r)
+        worker.write_json(self.job / 'request.json', r)
+        before = hashlib.sha256(self.db.read_bytes()).hexdigest()
+        with closing(sqlite3.connect(self.db)) as db:
+            db.execute('BEGIN EXCLUSIVE')
+            worker.execute(self.job)
+            db.rollback()
+        result = worker.read_json(self.job / 'result.json', worker.MAX_RESULT)
+        self.assertEqual(result, worker.read_json(self.job / 'output/analysis.json', worker.MAX_RESULT))
+        self.assertEqual(result['request'], r)
+        self.assertEqual(result['source'], 'synthetic')
+        self.assertIn('density_model', result['shape'])
+        self.assertEqual({a['name'] for a in result['artifacts']}, {'shape_features', 'shape_trades'})
+        for artifact in result['artifacts']:
+            path = self.job / 'output' / artifact['file']
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), artifact['sha256'])
+            self.assertEqual(path.stat().st_size, artifact['bytes'])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertIn('Book shape and regimes', (self.job / 'output/report.html').read_text())
+        self.assertEqual(before, hashlib.sha256(self.db.read_bytes()).hexdigest())
+
+    def test_shape_clock_rejection_keeps_audit_and_zero_temporal_outputs(self):
+        from depth_replay import synthetic_fixture
+        p = synthetic_fixture()
+        for e in p['events'][12:]:
+            e['received_unix_us'] = str(int(e['received_unix_us']) + 2_000_000)
+        r = shape_request()
+        frozen_stream_inputs(self.job, r, p)
+        worker.write_json(self.job / 'request.json', r)
+        worker.execute(self.job)
+        result = worker.read_json(self.job / 'result.json', worker.MAX_RESULT)
+        self.assertEqual(result['shape']['status'], 'blocked_clock')
+        self.assertEqual(result['shape']['coverage']['qualified_samples'], 0)
+        self.assertEqual(result['sessions'][0]['frames'], [])
+        self.assertTrue(all(a['rows'] == 0 for a in result['artifacts']))
 
     def test_snapshot_matches_production_export_schema(self):
         frozen_test_inputs(self.job, request(self.ids))

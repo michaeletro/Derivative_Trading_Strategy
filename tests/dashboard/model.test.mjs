@@ -88,6 +88,19 @@ test('dataset exports retain auth headers and verify exact saved bytes',async()=
   assert.equal(sent.options.headers.Authorization,'Bearer test-secret');assert.equal(sent.options.redirect,'error');assert.equal(sent.options.mode,'same-origin');assert.equal(sent.options.credentials,'omit');
   api.useBrowserSession();await api.downloadResearchArtifact('a'.repeat(32),artifact());assert.equal(sent.options.credentials,'same-origin');assert.equal(sent.options.headers['X-DTS-Local-Request'],'1');assert.equal(sent.options.headers.Authorization,undefined);
 });
+test('shape gzip exports use the fixed names and saved integrity check',async()=>{
+  for(const name of ['shape_features','shape_trades']) {
+    const bytes=new Uint8Array([31,139,8,0,1,2,3,4]);
+    const meta={name,file:name+'.csv.gz',content_type:'application/gzip',bytes:bytes.length,rows:0,
+      sha256:createHash('sha256').update(bytes).digest('hex')};
+    let sent;const api=createApi(async(path,options)=>{sent={path,options};return new Response(bytes,{headers:{'Content-Type':'application/gzip','Content-Length':String(bytes.length)}});});
+    const blob=await api.downloadResearchArtifact('a'.repeat(32),meta);
+    assert.deepEqual(new Uint8Array(await blob.arrayBuffer()),bytes);
+    assert(sent.path.endsWith('/artifacts/'+name));
+    assert.equal(sent.options.headers.Accept,'application/gzip');
+    await assert.rejects(api.downloadResearchArtifact('a'.repeat(32),{...meta,file:'shape_features.csv'}));
+  }
+});
 test('dataset downloads refuse arbitrary paths and unbounded metadata before transport',async()=>{
   let calls=0;const api=createApi(async()=>{calls++;return exportResponse();});
   for(const [job,a] of [['../secret',artifact()],['a'.repeat(32),{...artifact(),name:'../blocks'}],['a'.repeat(32),{...artifact(),file:'private.txt'}],

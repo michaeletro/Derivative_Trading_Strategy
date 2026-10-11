@@ -28,6 +28,11 @@ Json dataset_request() {
     out["configuration"] = Json(crow::json::load(R"JSON({"levels":5,"return_seconds":60,"max_side_age_seconds":5})JSON"));
     return out;
 }
+Json shape_request() {
+    auto out = request("shape");
+    out["configuration"] = Json(crow::json::load(R"JSON({"levels":5,"step_seconds":1,"max_side_age_seconds":2,"calibration_fraction":0.5,"near_band_bps":5,"imbalance_threshold":0.2,"max_hold_seconds":60,"fee_per_side_usd":1,"slippage_bps":0,"paper_budget_usd":10000,"max_order_notional_usd":1000,"strategy_variant":"compare_regimes"})JSON"));
+    return out;
+}
 }
 
 int main() {
@@ -46,6 +51,18 @@ int main() {
             check(parts.finish() == parts.finish(), "Hash finalization is stable and nonmutating");
         }
         validate_json(dataset_request());
+        validate_json(shape_request());
+        for (const auto* key : {"levels", "step_seconds", "max_side_age_seconds", "calibration_fraction", "near_band_bps",
+                               "imbalance_threshold", "max_hold_seconds", "fee_per_side_usd", "slippage_bps", "paper_budget_usd", "max_order_notional_usd"}) {
+            auto shape = shape_request(); shape["configuration"][key] = true;
+            rejects([&] { validate_json(shape); });
+        }
+        auto shape = shape_request(); shape["configuration"]["levels"] = 50; validate_json(shape);
+        shape["configuration"]["levels"] = 51; rejects([&] { validate_json(shape); });
+        shape = shape_request(); shape["configuration"]["clock_policy"] = "recorded_monotonic"; rejects([&] { validate_json(shape); });
+        shape = shape_request(); shape["configuration"]["strategy_variant"] = "live"; rejects([&] { validate_json(shape); });
+        shape = shape_request(); shape["split"] = Json::object(); rejects([&] { validate_json(shape); });
+        check(input_limits("shape").session_events == 10000000 && input_limits("shape").total_events == 20000000, "Shape analysis freezes full streaming captures");
         auto proposal=dataset_request();proposal["configuration"]["preset"]="proposal_oct2026";
         proposal["configuration"]["quantity_unit"]="shares";proposal["configuration"]["shares_confirmed"]=true;
         validate_json(proposal);

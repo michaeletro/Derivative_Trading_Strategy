@@ -174,7 +174,19 @@ export function researchRequest(form, selected) {
   if(selected.some(s=>identityKeys.some(k=>s[k]!==first[k])))
     fail(dataset?'Keep instrument, direct venue, source, route and currency identical within a dataset.':'Keep instrument, venue, source, row limit, route and currency identical within one experiment.');
   if(first.source==='mock' && !form.synthetic) fail('Explicitly acknowledge synthetic recordings before using mock data.');
-  if(!['describe','flow','dataset','proposal_experiment','inspect','compare'].includes(form.mode)) fail('Choose book characteristics, order flow, a research dataset, timed diagnostics or model comparison.');
+  if(!['describe','flow','shape','dataset','proposal_experiment','inspect','compare'].includes(form.mode)) fail('Choose book characteristics, shape regimes, order flow, a research dataset, timed diagnostics or model comparison.');
+  if(form.mode==='shape') {
+    const fields=['levels','step_seconds','max_side_age_seconds','calibration_fraction','near_band_bps','imbalance_threshold','max_hold_seconds','fee_per_side_usd','slippage_bps','paper_budget_usd','max_order_notional_usd'];
+    const c=Object.fromEntries(fields.map(k=>[k,Number(form['shape_'+k])]));c.strategy_variant=form.shape_strategy_variant;
+    if(fields.some(k=>form['shape_'+k]===undefined||String(form['shape_'+k]).trim()===''))fail('Complete the book-shape and hypothetical trading settings.');
+    if(!Number.isInteger(c.levels)||!number(c.levels,2,50)||!Number.isInteger(c.step_seconds)||!number(c.step_seconds,1,60)
+      ||!number(c.max_side_age_seconds,.1,30)||!number(c.calibration_fraction,.2,.8)||!number(c.near_band_bps,.1,100)
+      ||!number(c.imbalance_threshold,0,1)||!Number.isInteger(c.max_hold_seconds)||!number(c.max_hold_seconds,1,3600)
+      ||!number(c.fee_per_side_usd,0,100)||!number(c.slippage_bps,0,100)||!number(c.paper_budget_usd,100,1e6)
+      ||!number(c.max_order_notional_usd,1,100000)||!['tight_bid_heavy','compare_regimes','none'].includes(c.strategy_variant))
+      fail('Use 2–50 common levels, a 1–60 second sample step and valid calibration, cost and capital limits. Hypothetical capital must be $100–$1M.');
+    return {schema_version:1,mode:'shape',session_ids:selected.map(s=>s.session_id),source:first.source,configuration:c,split:null};
+  }
   if(dataset) {
     const c={levels:Number(form.dataset_levels),return_seconds:Number(form.return_seconds),max_side_age_seconds:Number(form.dataset_side_age)};
     if(!Number.isInteger(c.levels)||!number(c.levels,1,5)||![60,120].includes(c.return_seconds)||!number(c.max_side_age_seconds,1e-12,60))
@@ -221,7 +233,7 @@ export function researchRequest(form, selected) {
 export function parseJobs(p) {
   if(!p||p.schema_version!==1||!Array.isArray(p.jobs)||p.jobs.length>50||typeof p.has_more!=='boolean') fail('Invalid research catalog.');
   for(const j of p.jobs) if(!jobId(j.job_id)||!['running','complete','failed','cancelled','interrupted','timeout'].includes(j.state)
-    ||!['describe','flow','dataset','proposal_experiment','inspect','compare'].includes(j.mode)||!['ibkr_tws','mock'].includes(j.source)||!Array.isArray(j.session_ids)||j.session_ids.some(x=>!id(x))) fail('Invalid research job metadata.');
+    ||!['describe','flow','shape','dataset','proposal_experiment','inspect','compare'].includes(j.mode)||!['ibkr_tws','mock'].includes(j.source)||!Array.isArray(j.session_ids)||j.session_ids.some(x=>!id(x))) fail('Invalid research job metadata.');
   return p;
 }
 export function parseResult(r) {
@@ -229,8 +241,10 @@ export function parseResult(r) {
      ||!Array.isArray(r.sessions)||r.sessions.length>24||!r.request||!Array.isArray(r.source_hashes)) fail('Incompatible research result.');
   const descriptive=r.request.mode==='describe';
   const flow=r.request.mode==='flow';
+  const shape=r.request.mode==='shape';
   const dataset=['dataset','proposal_experiment'].includes(r.request.mode);
   if(dataset)parseDatasetMetadata(r);
+  if(shape)parseShape(r);
   if(flow&&(!r.flow||!r.flow.definitions||typeof r.flow.definitions!=='object'))fail('Invalid order-flow report conventions.');
   if(descriptive&&(!r.descriptive||r.descriptive.weighting!=='event_weighted'||!r.descriptive.definitions
       ||!Array.isArray(r.descriptive.excluded_analyses)))fail('Invalid descriptive report conventions.');
@@ -241,6 +255,18 @@ export function parseResult(r) {
     if(descriptive)parseDescription(s.descriptive);
     if(flow)parseFlow(s.flow);
     if(dataset)parseDatasetSession(s.dataset);
+    if(shape) {
+      const count=x=>Number.isSafeInteger(x)&&x>=0;
+      if(!s.clock||!['qualified_receipt_clocks','blocked_clock'].includes(s.clock.status)||!number(s.clock.max_divergence_seconds,0,1e15)
+        ||!count(s.clock.wall_regressions)||!count(s.clock.monotonic_regressions)||!s.coverage||!count(s.coverage.grid_points)||!count(s.coverage.qualified_samples)||!count(s.coverage.excluded_samples)
+        ||s.coverage.qualified_samples+s.coverage.excluded_samples!==s.coverage.grid_points||s.frames.length>s.coverage.grid_points)fail('Invalid curve-session clock or coverage audit.');
+      for(const f of s.frames) {
+        if(![null,'tight','normal','loose'].includes(f.regime)||![null,'calibration','test'].includes(f.partition))fail('Invalid sampled curve partition or regime.');
+        for(const key of ['tightness_bps','spread_bps','bid_mean_distance_bps','ask_mean_distance_bps','bid_std_distance_bps','ask_std_distance_bps'])
+          if(f[key]!==undefined&&f[key]!==null&&!number(f[key],0,1e15)||f.usable&&!number(f[key],0,1e15))fail('Invalid sampled curve statistic.');
+        if(f.usable&&!number(f.depth_imbalance,-1,1))fail('Invalid sampled curve imbalance.');
+      }
+    }
     for(const f of s.frames) {
       if(typeof f.usable!=='boolean'||!number(f.unix_us,0,1e16)||!Array.isArray(f.bids)||!Array.isArray(f.asks)||f.bids.length>maxDepthRows||f.asks.length>maxDepthRows) fail('Invalid replay frame.');
       for(const [p,q] of [...f.bids,...f.asks]) if(!number(p,1e-12,1e12)||!size(q)) fail('Invalid replay row.');
@@ -248,6 +274,60 @@ export function parseResult(r) {
   }
   if(frames>1600) fail('Research display exceeds the bounded frame limit.');
   return r;
+}
+function parseShape(r) {
+  const h=r.shape,count=x=>Number.isSafeInteger(x)&&x>=0,mapping=x=>x&&typeof x==='object'&&!Array.isArray(x),labels=['tight','normal','loose'];
+  if(!h||!['completed','blocked_clock'].includes(h.status)||!mapping(h.definitions)||h.weighting!=='equal_regular_hours_grid_states_and_per_snapshot_size_normalization'||!mapping(h.coverage)||!mapping(h.calibration)||!mapping(h.distributions)
+    ||!mapping(h.side_profiles)||!mapping(h.regimes)||!mapping(h.transitions)||!mapping(h.dwell)||!mapping(h.replay)||!mapping(h.density_model))fail('Invalid book-shape research summary.');
+  const cov=h.coverage,c=h.calibration;
+  for(const k of ['grid_points','qualified_samples','excluded_samples'])if(!count(cov[k])||cov[k]>60000)fail('Invalid curve coverage count.');
+  if(cov.qualified_samples+cov.excluded_samples!==cov.grid_points||!mapping(cov.exclusions)||Object.values(cov.exclusions).some(x=>!count(x)))fail('Inconsistent curve coverage.');
+  if(!['calibrated','insufficient_samples','degenerate_calibration'].includes(c.status)||!count(c.samples)||!count(c.test_samples)||c.samples+c.test_samples!==cov.qualified_samples
+    ||c.cutoff_unix_us!==null&&!number(c.cutoff_unix_us,0,1e16)||c.threshold_tight_bps!==null&&!number(c.threshold_tight_bps,0,1e15)
+    ||c.threshold_loose_bps!==null&&!number(c.threshold_loose_bps,0,1e15)||c.status==='calibrated'&&(!number(c.threshold_tight_bps,0,1e15)||!number(c.threshold_loose_bps,c.threshold_tight_bps+1e-10,1e15)))fail('Invalid frozen curve calibration.');
+  const distributions=(d,max)=>{if(!mapping(d)||Object.keys(d).length>100)fail('Invalid curve distribution collection.');for(const stat of Object.values(d))parseDistribution(stat,max);};
+  distributions(h.distributions,cov.qualified_samples);
+  function profiles(p,max) {
+    for(const side of ['bid','ask']) {
+      const s=p?.[side],edges=s?.distance_edges_bps;
+      if(!s||!count(s.samples)||s.samples>max||!Array.isArray(edges)||edges.length<2||edges.length>101||edges.some((x,i)=>!number(x,0,1e15)||i&&x<=edges[i-1])
+        ||!Array.isArray(s.cdf_mean)||!Array.isArray(s.mass_mean)||s.cdf_mean.length!==(s.samples?edges.length:0)||s.mass_mean.length!==(s.samples?edges.length-1:0)
+        ||s.cdf_mean.some((x,i)=>!number(x,0,1.000001)||i&&x<s.cdf_mean[i-1]-1e-8)||s.mass_mean.some(x=>!number(x,0,1.000001))
+        ||s.samples&&(Math.abs(s.mass_mean.reduce((a,b)=>a+b,0)-1)>1e-7||Math.abs(s.cdf_mean.at(-1)-1)>1e-7))fail('Invalid normalized curve profile.');
+    }
+  }
+  profiles(h.side_profiles,cov.qualified_samples);
+  for(const label of labels) {
+    const g=h.regimes[label];if(!g||!count(g.samples)||g.samples>c.test_samples||g.share!==null&&!number(g.share,0,1))fail('Invalid curve-group coverage.');
+    distributions(g.feature_distributions,g.samples);profiles(g.side_profiles,g.samples);parseDistribution(g.forward_return_bps,g.samples);parseDistribution(h.dwell[label],c.test_samples);
+  }
+  if(!Array.isArray(h.transitions.labels)||h.transitions.labels.join(':')!==labels.join(':')||!Array.isArray(h.transitions.matrix)||h.transitions.matrix.length!==3
+    ||h.transitions.matrix.some(row=>!Array.isArray(row)||row.length!==3||row.some(x=>!count(x)||x>c.test_samples)))fail('Invalid curve transition matrix.');
+  const density=h.density_model;
+  if(!['fitted_descriptive','insufficient_calibration','degenerate_width','blocked_clock','unavailable_convergence'].includes(density.status)||!Array.isArray(density.candidates)||density.candidates.length>3||!Array.isArray(density.components)||density.components.length>3)fail('Invalid curve density model.');
+  for(const candidate of density.candidates) {
+    if(!Number.isInteger(candidate.component_count)||!number(candidate.component_count,1,3)||!finite(candidate.bic)||!finite(candidate.log_likelihood))fail('Invalid density candidate.');
+    if(Object.hasOwn(candidate,'converged')&&(typeof candidate.converged!=='boolean'||typeof candidate.eligible_for_selection!=='boolean'||candidate.converged!==candidate.eligible_for_selection||!count(candidate.iterations)||!count(candidate.max_iterations)||candidate.iterations>candidate.max_iterations||typeof candidate.stop_reason!=='string'))fail('Invalid density convergence audit.');
+  }
+  if(density.status==='unavailable_convergence'&&(density.components.length||density.selected_components!==null||density.candidates.some(v=>v.eligible_for_selection)))fail('Unconverged density candidates cannot supply a fitted model.');
+  if(density.status==='fitted_descriptive') {
+    if(!Number.isInteger(density.selected_components)||!number(density.selected_components,1,3)||density.components.length!==density.selected_components)fail('Invalid density component selection.');
+    if(density.candidates.some(v=>v.component_count===density.selected_components&&Object.hasOwn(v,'converged')&&!v.converged))fail('Selected density candidate must converge.');
+    for(const component of density.components)if(typeof component.label!=='string'||!number(component.weight,0,1)||!finite(component.mean_log_width)||!number(component.std_log_width,1e-12,1e15)||!number(component.median_width_bps,0,1e15)||!count(component.test_samples)||component.test_samples>c.test_samples)fail('Invalid density component.');
+    if(Math.abs(density.components.reduce((sum,v)=>sum+v.weight,0)-1)>1e-8)fail('Density mixture weights must sum to one.');
+  }
+  const p=h.replay;
+  if(!['disabled','unavailable_calibration','hypothetical_replay'].includes(p.status)||!['tight_bid_heavy','compare_regimes','none'].includes(p.variant)||p.model!=='hypothetical_next_grid_crossing'||p.position_size_shares!==1
+    ||!number(p.cash_start,100,1e6)||!number(p.cash_end,0,1e9)||!finite(p.realized_pnl_usd)||!count(p.completed_trades)||!count(p.censored_positions)||!count(p.affordability_blocks)
+    ||!Array.isArray(p.trades)||p.trades.length>200||p.trades.length>p.completed_trades)fail('Invalid historical curve replay.');
+  for(const t of p.trades)if(!id(t.session_id)||!number(t.entry_unix_us,0,1e16)||!number(t.exit_unix_us,t.entry_unix_us+1,1e16)||t.quantity!==1
+    ||!number(t.entry_price,1e-12,1e12)||!number(t.exit_price,1e-12,1e12)||!finite(t.gross_pnl_usd)||!number(t.fees_usd,0,1e9)||!finite(t.net_pnl_usd)||typeof t.exit_reason!=='string'
+    ||Math.abs(t.gross_pnl_usd-t.fees_usd-t.net_pnl_usd)>1e-6)fail('Invalid hypothetical curve trade.');
+  if(h.status==='blocked_clock'&&(cov.qualified_samples||p.completed_trades||p.status==='hypothetical_replay'))fail('Clock-blocked selection cannot contain temporal models or replay trades.');
+  if(r.sessions.some(s=>s.clock?.status==='blocked_clock')&&h.status!=='blocked_clock')fail('A failed recording clock audit must block the selection.');
+  if(!Array.isArray(r.artifacts)||r.artifacts.length>2)fail('Invalid curve export manifest.');
+  const files={shape_features:'shape_features.csv.gz',shape_trades:'shape_trades.csv.gz'},seen=new Set();
+  for(const a of r.artifacts)if(!a||!Object.hasOwn(files,a.name)||seen.has(a.name)||a.file!==files[a.name]||!count(a.bytes)||!count(a.rows)||a.content_type!=='application/gzip'||typeof a.sha256!=='string'||!(/^[a-f0-9]{64}$/).test(a.sha256))fail('Invalid curve export metadata.');else seen.add(a.name);
 }
 function parseDatasetMetadata(r) {
   const count=x=>Number.isSafeInteger(x)&&x>=0;

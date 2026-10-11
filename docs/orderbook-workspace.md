@@ -57,6 +57,78 @@ can browse captures but reports the worker unavailable. Missing NumPy/pandas/Sci
 causes a failed analytical job, never an implicit synthetic fallback. A successful
 CI build does not verify the user's WSL dependencies or real data entitlements.
 
+## Book shape, distributions and a hypothetical trading test
+
+In **Research experiments**, select compatible stopped recordings, choose
+**Book shape & regimes**, set the fixed number of distinct price levels and
+sampling interval, and run the analysis. Open the saved result in
+**Results & exports**. The selected recording supplies the curve snapshot and
+timeline; pooled statistics cover the compatible recordings in chronological
+order. Refreshing or reopening a result never connects to TWS or sends orders.
+
+Each side is an empirical spatial distribution: a level's probability weight is
+its displayed size divided by that side's total selected size. Price distance is
+measured outward from the midpoint in basis points. The graphs show normalized
+mass and cumulative mass; statistics include weighted mean, standard deviation,
+quantiles, skewness, excess kurtosis, HHI, entropy, near-price share and a slope
+against cumulative size fraction. Exactly the chosen number of nearest distinct
+prices is required on both sides. These distributions describe visible liquidity
+inside that window, not a complete book or identified orders. Absolute depth
+retains the feed's reported quantity units.
+
+**Tightness** is the average of the bid and ask size-weighted mean distances.
+Smaller values indicate liquidity closer to the midpoint. Spread and total
+displayed size remain separate features. Tightness alone does not indicate price
+direction. The imbalance used in the replay is `(bid depth - ask depth) /
+(bid depth + ask depth)` over the same fixed level window.
+
+The calibration fraction selects an earlier chronological prefix of regular-hours
+grid positions, including excluded positions. Tight/normal/loose thresholds use
+qualified states in that prefix and remain frozen in the later test partition.
+They are descriptive width buckets, not evidence of latent economic regimes.
+An additional exploratory model compares one, two and three Gaussian components
+for log tightness using calibration-only BIC among converged candidates. Fits
+that reach the iteration cap remain diagnostics and are excluded from selection;
+their convergence audit is saved. Component labels and held-out
+likelihoods describe that fitted density; they do not establish profitable or
+stable regimes. Insufficient or degenerate calibration is reported explicitly.
+Time distributions weight qualified grid states equally; average spatial profiles
+normalize each snapshot before averaging it. Transition counts, dwell diagnostics
+and overlapping forward returns respect gaps and recording/day boundaries.
+
+The replay choices are **tight and bid-heavy**, **compare the same imbalance rule
+across regimes**, or **no trades**. A bid-heavy entry requires the configured
+imbalance threshold. The first choice also requires a tight state and exits when
+the book becomes loose. Both strategies exit on nonpositive imbalance or the
+holding-time limit. Decisions fill at the next qualified grid quote at least one
+step later: ask for buys and bid for sells, with adverse slippage and fees. This
+is a one-share, long-only, quote-based hypothetical test; there is no queue,
+market-impact, routing or execution guarantee. Cash and order caps can block
+entries. Missing future quotes censor holdings and retain their reserved cash and
+cost basis; no closing fill or profit is invented. Realized results exclude
+unresolved holdings and are grouped by entry regime for the sequential experiment.
+
+The default $10,000 budget and $1,000 order cap are research assumptions, separate
+from the disabled execution planner and your actual account. Enter $500 to test
+small-account affordability; a whole SPY share may then be unaffordable. All
+strategy variants remain offline and have no broker order interface.
+
+Every selected recording receives a whole-capture receipt-clock audit. A failure
+blocks all temporal outputs and replay for that selection; the saved result
+retains the rejection. Stale sides, crossed/locked/invalid intermediate books,
+insufficient distinct levels, resets and sequence discontinuities break adjacency.
+No synthetic fallback or clock correction is performed. The stream limits are
+10 million callbacks per capture, 20 million combined, four GB per file and eight
+GB combined; regular-hours grids are limited to 60,000 positions. Increase the
+sampling interval or reduce the selection when that grid bound is exceeded.
+
+Download **shape_features.csv.gz** for every grid position, qualification reason,
+curve statistics and frozen partition/regime, and
+**shape_trades.csv.gz** for all completed hypothetical trades. Unresolved holdings
+and input/code provenance remain in the saved JSON report. Display frames and trade previews are bounded;
+the export is not silently reduced to the display sample. Downloads verify the
+saved size and SHA-256. Reports and exports persist across server restarts.
+
 ## Live book
 
 1. Unlock using the existing local sign-in flow, connect the broker explicitly,
