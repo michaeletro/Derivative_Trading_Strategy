@@ -44,6 +44,14 @@ def shape_request(ids):
     return r
 
 
+def curve_request(ids, cutoff='2026-10-07'):
+    from dataclasses import asdict
+    from orderbook.curve_experiment import CurveExperimentConfig
+    r=request(ids,mode='shape_comparison')
+    r['configuration']=asdict(CurveExperimentConfig(train_end_date=cutoff))
+    return r
+
+
 def download(server,jid,name):
     req=Request(server.origin+BASE+'/jobs/'+jid+'/artifacts/'+name,
                 headers={'Authorization':'Bearer '+helper.TOKEN})
@@ -165,12 +173,27 @@ def main(exe):
             shape_id=shape_job['job_id'];ended=wait(s,shape_id);assert ended['state']=='complete',ended;checks+=1
             shape_result=s.call(BASE+'/jobs/'+shape_id+'/result')[1]
             ck(shape_result['request']['mode']=='shape' and 'density_model' in shape_result['shape'])
+            ck(shape_result['shape']['curve_models']['scope']=='intraday_prefix_exploratory')
             ck({a['name'] for a in shape_result['artifacts']}=={'shape_features','shape_trades'})
             shape_dir=root/'data/orderbook-research'/shape_id
             shape_manifest=json.loads((shape_dir/'inputs.json').read_text())
             ck(shape_manifest['exports'][0]['kind']=='depth_stream')
             for artifact in shape_result['artifacts']:
                 code,headers,body=download(s,shape_id,artifact['name']);ck(code==200)
+                ck(hashlib.sha256(body).hexdigest()==artifact['sha256']==headers['X-Content-SHA256'])
+                ck(len(body)==artifact['bytes'] and headers['Content-Type']=='application/gzip')
+            # A single selected date must save a readiness audit, not fabricate
+            # the additional training and test days required by this operation.
+            code,curve_job=s.call(BASE+'/jobs',curve_request([ids[0]]));ck(code==200)
+            curve_id=curve_job['job_id'];ended=wait(s,curve_id);assert ended['state']=='complete',ended;checks+=1
+            curve_result=s.call(BASE+'/jobs/'+curve_id+'/result')[1]
+            ck(curve_result['request']['mode']=='shape_comparison')
+            ck(curve_result['curve_experiment']['status']=='insufficient_dates')
+            ck(curve_result['curve_experiment']['daily']==[] and curve_result['curve_experiment']['arms']=={})
+            ck({a['name'] for a in curve_result['artifacts']}=={'curve_features','curve_daily','curve_trades'})
+            ck(helper.TOKEN not in json.dumps(curve_result))
+            for artifact in curve_result['artifacts']:
+                code,headers,body=download(s,curve_id,artifact['name']);ck(code==200)
                 ck(hashlib.sha256(body).hexdigest()==artifact['sha256']==headers['X-Content-SHA256'])
                 ck(len(body)==artifact['bytes'] and headers['Content-Type']=='application/gzip')
             code,dataset_job=s.call(BASE+'/jobs',dataset_request([ids[0]]));ck(code==200)
@@ -307,6 +330,8 @@ def main(exe):
             ck(s.call(BASE+'/jobs/'+description_id+'/result')[1]==described[1])
             ck(s.call(BASE+'/jobs/'+shape_id+'/result')[1]==shape_result)
             for artifact in shape_result['artifacts']:ck(download(s,shape_id,artifact['name'])[0]==200)
+            ck(s.call(BASE+'/jobs/'+curve_id+'/result')[1]==curve_result)
+            for artifact in curve_result['artifacts']:ck(download(s,curve_id,artifact['name'])[0]==200)
             ck(s.call(BASE+'/jobs/'+dataset_id+'/result')[1]==dataset_result)
             for artifact in dataset_result['artifacts']:ck(download(s,dataset_id,artifact['name'])[0]==200)
             ck(s.call(BASE+'/jobs/'+flow_id+'/result')[1]==flow_result)

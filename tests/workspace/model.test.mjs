@@ -10,6 +10,22 @@ const session=()=>({session_id:'1',contract_id:'9001',symbol:'SYNTHETIC',currenc
   started_ms:1700000000000,ended_ms:1700000100000,state:'stop',event_count:'101'});
 const form=()=>({mode:'inspect',quantity:'100',levels:'5',step_seconds:'1',horizon_seconds:'30',lookback_seconds:'30',max_side_age_seconds:'5',target:'buy_cost_bps',synthetic:true});
 const shapeForm=()=>({mode:'shape',synthetic:true,shape_levels:'5',shape_step_seconds:'1',shape_max_side_age_seconds:'2',shape_calibration_fraction:'0.5',shape_near_band_bps:'5',shape_imbalance_threshold:'0.2',shape_max_hold_seconds:'60',shape_fee_per_side_usd:'1',shape_slippage_bps:'0',shape_paper_budget_usd:'10000',shape_max_order_notional_usd:'1000',shape_strategy_variant:'compare_regimes'});
+const curveForm=()=>({...shapeForm(),mode:'shape_comparison',curve_train_end_date:'2026-10-08',curve_fee_scenarios_usd:'0, 0.35, 1'});
+test('multi-day request freezes whole-date cutoff and distinct explicit cost scenarios',()=>{
+  const r=researchRequest({...curveForm(),shape_calibration_fraction:'bad',shape_strategy_variant:'live',shape_step_seconds:'5'},[session()]);
+  assert.equal(r.mode,'shape_comparison');assert.equal(r.configuration.train_end_date,'2026-10-08');assert.deepEqual(r.configuration.fee_scenarios_usd,[0,.35,1]);assert.equal(r.configuration.step_seconds,5);
+  assert.equal('calibration_fraction' in r.configuration,false);assert.equal('strategy_variant' in r.configuration,false);
+  assert.equal(parseJobs({schema_version:1,has_more:false,jobs:[{job_id:'b'.repeat(32),mode:r.mode,source:'mock',state:'complete',session_ids:['1']}]}).jobs[0].mode,r.mode);
+});
+test('multi-day request refuses invalid cutoff and ambiguous fee scenarios',()=>{
+  for(const change of [{curve_train_end_date:''},{curve_train_end_date:'2026-02-30'},{curve_train_end_date:'2026-10-07,2026-10-08'},{curve_fee_scenarios_usd:''},{curve_fee_scenarios_usd:'0, .35'},{curve_fee_scenarios_usd:'1, 1'},{curve_fee_scenarios_usd:'-1, 1'},{curve_fee_scenarios_usd:'0, 1, 2, 3, 4, 5'},{curve_fee_scenarios_usd:'true, 1'},{curve_fee_scenarios_usd:'101, 1'}])assert.throws(()=>researchRequest({...curveForm(),...change},[session()]));
+});
+test('multi-day fixed levels allow changed capture caps without mixing instrument identity',()=>{
+  const recordings=[{...session(),requested_rows:10},{...session(),session_id:'2',requested_rows:30}];
+  assert.deepEqual(researchRequest(curveForm(),recordings).session_ids,['1','2']);
+  for(const change of [{contract_id:'9002'},{venue:'IEX'},{source:'ibkr_tws'},{contract_route:'BATS'},{currency:'EUR'}])assert.throws(()=>researchRequest(curveForm(),[recordings[0],{...recordings[1],...change}]));
+  assert.throws(()=>researchRequest(shapeForm(),recordings));
+});
 test('shape request freezes independent settings and retains affordability as a replay rule',()=>{
   const r=researchRequest({...shapeForm(),shape_paper_budget_usd:'500',shape_max_order_notional_usd:'1000',quantity:'bad'},[session()]);
   assert.equal(r.mode,'shape');assert.equal(r.configuration.paper_budget_usd,500);assert.equal(r.configuration.max_order_notional_usd,1000);assert.equal(r.split,null);
@@ -73,6 +89,33 @@ test('shape continuity provenance preserves callback reasons without treating th
   const r=continuityShapeResult();r.shape.coverage.continuity_break_counts={crossed_or_locked:123};r.sessions[0].coverage.continuity_break_counts={crossed_or_locked:123};
   assert.equal(parseResult(r).shape.coverage.qualified_samples,80);
   for(const bad of [{reason:-1},{reason:'1'},[],{reason:Infinity}]){r.shape.coverage.continuity_break_counts=bad;assert.throws(()=>parseResult(r));}
+});
+const curveResult=(ready=true)=>{
+  const r=ready?continuityShapeResult():shapeResult();r.request=researchRequest(curveForm(),[session()]);delete r.shape;
+  const summary=()=>({completed_trades:2,continuous_completed_trades:1,recovery_completed_trades:1,censored_positions:0,gross_pnl_usd:-.04,realized_pnl_usd:-4.04,fees_paid_usd:4,continuous_gross_pnl_usd:-.02,recovery_gross_pnl_usd:-.02,continuous_realized_pnl_usd:-2.02,recovery_realized_pnl_usd:-2.02,recovery_rate:.5,average_gross_pnl_usd:-.02,average_net_pnl_usd:-2.02,holding_seconds:emptyShapeDistribution(),return_bps:emptyShapeDistribution()});
+  r.curve_experiment={status:ready?'held_out_comparison':'blocked_clock',definitions:{},coverage:ready?{grid_points:80,qualified_samples:80,excluded_samples:0,exclusions:{}}:{grid_points:0,qualified_samples:0,excluded_samples:0,exclusions:{}},
+    readiness:{training_dates:ready?['2026-10-07','2026-10-08']:[],test_dates:ready?['2026-10-09']:[],training_samples:ready?40:0,test_samples:ready?40:0,minimum_training_dates:2,minimum_test_dates:1,minimum_partition_samples:30,reasons:[],train_end_date:'2026-10-08',date_coverage:ready?[{session_date:'2026-10-07',partition:'calibration',grid_points:20,qualified_samples:20,excluded_samples:0,coverage_fraction:.001},{session_date:'2026-10-08',partition:'calibration',grid_points:20,qualified_samples:20,excluded_samples:0,coverage_fraction:.001},{session_date:'2026-10-09',partition:'test',grid_points:40,qualified_samples:40,excluded_samples:0,coverage_fraction:.002}]:[]},
+    calibration:{status:ready?'calibrated':'insufficient_samples',training_samples:ready?40:0,test_samples:ready?40:0,threshold_tight_bps:ready?1:null,threshold_loose_bps:ready?3:null},
+    daily:ready?['baseline','tight_gate'].map(arm=>({...summary(),session_date:'2026-10-09',partition:'test',arm,fee_per_side_usd:1})):[],arms:ready?{baseline:summary(),tight_gate:summary()}:{},cost_scenarios:ready?[{fee_per_side_usd:1,arms:{baseline:summary(),tight_gate:summary()}}]:[]};return r;
+};
+test('multi-day parser preserves held-out arms and separate ordinary/recovery accounting',()=>{const r=curveResult();assert.equal(parseResult(r).curve_experiment.daily.length,2);assert.equal(parseResult(curveResult(false)).curve_experiment.status,'blocked_clock');});
+test('multi-day parser rejects date leakage, fabricated readiness, mixed cohorts and unsafe exports',()=>{
+  for(const mutate of [r=>r.curve_experiment.readiness.training_dates=['2026-10-07','2026-10-09'],r=>r.curve_experiment.readiness.test_dates=['2026-10-08'],r=>r.curve_experiment.readiness.training_samples=39,r=>r.curve_experiment.daily[0].partition='calibration',r=>r.curve_experiment.daily[0].session_date='2026-10-08',r=>r.curve_experiment.daily[0].continuous_completed_trades=2,r=>r.curve_experiment.arms.baseline.continuous_realized_pnl_usd=0,r=>r.curve_experiment.status='insufficient_dates',r=>r.curve_experiment.cost_scenarios[0].fee_per_side_usd=.35,r=>r.curve_experiment.readiness.date_coverage[0].coverage_fraction=2,r=>r.artifacts=[{name:'curve_trades',file:'../private.csv.gz',sha256:'a'.repeat(64),bytes:1,rows:1,content_type:'application/gzip'}]]){const r=curveResult();mutate(r);assert.throws(()=>parseResult(r));}
+});
+test('multi-day parser retains cohort-specific holding times without substituting all-trade means',()=>{
+  const r=curveResult();r.curve_experiment.daily[0].continuous_mean_holding_seconds=3;r.curve_experiment.daily[0].recovery_mean_holding_seconds=7;
+  assert.equal(parseResult(r).curve_experiment.daily[0].continuous_mean_holding_seconds,3);
+  r.curve_experiment.daily[0].continuous_mean_holding_seconds=-1;assert.throws(()=>parseResult(r));
+  r.curve_experiment.daily[0].continuous_mean_holding_seconds=3;r.curve_experiment.daily[0].continuous_completed_trades=0;r.curve_experiment.daily[0].recovery_completed_trades=2;assert.throws(()=>parseResult(r));
+});
+const curveModelFixture=()=>{
+  const profile=()=>({samples:40,cdf_mean:[0,.2,.8],mass_mean:[0,.2,.6],above_range_mass_mean:.2,below_range_mass_mean:0,outside_range_mass_mean:.2});
+  const fit=()=>({family:'lognormal',status:'converged',converged:true,parameters:{mu:0,sigma:1},parameter_bounds:{},bounds_hit:[],training_rmse:.1,test_rmse:.2,training_mae:.1,test_mae:.2,cdf:[0,.6,.9],model_tail_mass_above_range:.1,model_mass_below_range:0,iterations:10,message:'Converged'});
+  return {schema_version:1,status:'analyzed',definitions:{},sample_counts:{calibration:40,test:40},slope_models:Object.fromEntries(['bid','ask','asymmetry'].map(s=>[s,{calibration:{linear_slope_bps:emptyShapeDistribution()},test:{linear_slope_bps:emptyShapeDistribution()}}])),spatial_cdf_models:{edges_bps:[0,1,2],edge_calibration:{source:'calibration_only'},bid:{calibration:profile(),test:profile(),candidates:[fit()]},ask:{calibration:profile(),test:profile(),candidates:[fit()]}}};
+};
+test('shared curve model parser retains censored CDF tails and supports intraday exploration',()=>{const r=curveResult();r.curve_experiment.models=curveModelFixture();assert.equal(parseResult(r).curve_experiment.models.spatial_cdf_models.bid.test.above_range_mass_mean,.2);const s=continuityShapeResult();s.shape.curve_models=curveModelFixture();assert.equal(parseResult(s).shape.curve_models.status,'analyzed');});
+test('shared curve model parser rejects mass fabrication, reversed CDF and failed fits claiming errors',()=>{
+  for(const mutate of [m=>m.spatial_cdf_models.bid.test.cdf_mean=[0,.8,.2],m=>m.spatial_cdf_models.bid.test.outside_range_mass_mean=0,m=>m.spatial_cdf_models.edge_calibration.source='test',m=>m.spatial_cdf_models.bid.candidates[0].status='nonconverged',m=>m.sample_counts.test=41,m=>m.spatial_cdf_models.bid.candidates[0].cdf=[0,.9,.8]]){const r=curveResult();r.curve_experiment.models=curveModelFixture();mutate(r.curve_experiment.models);assert.throws(()=>parseResult(r));}
 });
 const event=(n,changes={})=>({event_id:String(n+100),sequence:String(n),kind:n===1?'start':'update',origin:'adapter',
   received_unix_us:String(1700000000000000+n*1000),received_monotonic_ns:String(1000000000+n*1000000),

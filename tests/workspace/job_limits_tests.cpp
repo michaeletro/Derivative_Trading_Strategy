@@ -33,6 +33,11 @@ Json shape_request() {
     out["configuration"] = Json(crow::json::load(R"JSON({"levels":5,"step_seconds":1,"max_side_age_seconds":2,"calibration_fraction":0.5,"near_band_bps":5,"imbalance_threshold":0.2,"max_hold_seconds":60,"fee_per_side_usd":1,"slippage_bps":0,"paper_budget_usd":10000,"max_order_notional_usd":1000,"strategy_variant":"compare_regimes"})JSON"));
     return out;
 }
+Json curve_request() {
+    auto out = request("shape_comparison");
+    out["configuration"] = Json(crow::json::load(R"JSON({"levels":5,"step_seconds":5,"max_side_age_seconds":2,"near_band_bps":5,"imbalance_threshold":0.2,"max_hold_seconds":60,"fee_per_side_usd":1,"slippage_bps":0,"paper_budget_usd":10000,"max_order_notional_usd":1000,"train_end_date":"2026-10-08","fee_scenarios_usd":[0,0.35,1]})JSON"));
+    return out;
+}
 }
 
 int main() {
@@ -52,6 +57,19 @@ int main() {
         }
         validate_json(dataset_request());
         validate_json(shape_request());
+        validate_json(curve_request());
+        for (const auto* day : {"2026-02-30", "2100-02-29", "1969-12-31", "2101-01-01", "../private", "2026-1-08"}) {
+            auto curve = curve_request(); curve["configuration"]["train_end_date"] = day;
+            rejects([&] { validate_json(curve); });
+        }
+        auto curve = curve_request(); curve["configuration"]["train_end_date"] = "2000-02-29"; validate_json(curve);
+        for (const auto* fees : {"[]", "[0,0]", "[true,1]", "[0,0.35]", "[0,101,1]", "[0,1,2,3,4,5]", "[\"1\"]"}) {
+            curve = curve_request(); curve["configuration"]["fee_scenarios_usd"] = Json(crow::json::load(fees));
+            rejects([&] { validate_json(curve); });
+        }
+        curve = curve_request(); curve["configuration"]["calibration_fraction"] = .5; rejects([&] { validate_json(curve); });
+        curve = curve_request(); curve["split"] = Json::object(); rejects([&] { validate_json(curve); });
+        check(input_limits("shape_comparison").session_events == 10000000 && input_limits("shape_comparison").total_events == 20000000, "Whole-date curve comparison retains complete streaming captures");
         for (const auto* key : {"levels", "step_seconds", "max_side_age_seconds", "calibration_fraction", "near_band_bps",
                                "imbalance_threshold", "max_hold_seconds", "fee_per_side_usd", "slippage_bps", "paper_budget_usd", "max_order_notional_usd"}) {
             auto shape = shape_request(); shape["configuration"][key] = true;

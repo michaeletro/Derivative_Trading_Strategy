@@ -31,6 +31,14 @@ def shape_request(**configuration):
     return r
 
 
+def curve_request(**configuration):
+    from dataclasses import asdict
+    from orderbook.curve_experiment import CurveExperimentConfig
+    r = request(mode='shape_comparison')
+    r['configuration'] = {**asdict(CurveExperimentConfig(train_end_date='2026-10-08')), **configuration}
+    return r
+
+
 def dataset_request(**configuration):
     r = request(mode='dataset')
     r['configuration'] = {**dict(levels=5, return_seconds=60, max_side_age_seconds=5), **configuration}
@@ -63,6 +71,16 @@ def frozen_stream_inputs(job, req, payload=None):
 
 
 class RequestTests(unittest.TestCase):
+    def test_multiday_curve_configuration_is_explicit_and_fee_scenarios_are_bounded(self):
+        cfg, learning, split = worker.validate_request(curve_request())
+        self.assertEqual(cfg.step_seconds, 5); self.assertIsNone(learning); self.assertIsNone(split)
+        for key, value in [('train_end_date', '2026-02-30'), ('train_end_date', '2101-01-01'),
+                           ('fee_scenarios_usd', []), ('fee_scenarios_usd', [0, 0]), ('fee_scenarios_usd', [True, 1]),
+                           ('fee_scenarios_usd', [0, .35]), ('fee_scenarios_usd', [0, 101, 1]),
+                           ('calibration_fraction', .5), ('strategy_variant', 'live'), ('step_seconds', True)]:
+            with self.subTest(key=key), self.assertRaises(ValueError): worker.validate_request(curve_request(**{key: value}))
+        r = curve_request(); r['split'] = {}
+        with self.assertRaises(ValueError): worker.validate_request(r)
     def test_shape_separate_settings_and_no_clock_override(self):
         cfg, learning, split = worker.validate_request(shape_request())
         self.assertEqual(cfg.levels, 5)
@@ -180,6 +198,27 @@ class WorkerTests(unittest.TestCase):
         self.job=self.root/('a'*32);self.job.mkdir(mode=0o700)
 
     def tearDown(self):self.tmp.cleanup()
+
+    def test_multiday_curve_insufficient_dates_persists_audit_and_three_exports(self):
+        sys.path.insert(0, str(ROOT / 'tests/orderbook'))
+        from test_book_shape import fixture
+        header, events, _ = fixture()
+        r = curve_request(train_end_date='2026-10-09')
+        frozen_stream_inputs(self.job, r, {**header, 'events': events})
+        worker.write_json(self.job / 'request.json', r)
+        before = hashlib.sha256(self.db.read_bytes()).hexdigest()
+        worker.execute(self.job)
+        result = worker.read_json(self.job / 'result.json', worker.MAX_RESULT)
+        self.assertEqual(result['curve_experiment']['status'], 'insufficient_dates')
+        self.assertFalse(result['curve_experiment']['daily'])
+        self.assertFalse(result['curve_experiment']['arms'])
+        self.assertEqual({a['name'] for a in result['artifacts']}, {'curve_daily', 'curve_trades', 'curve_features'})
+        self.assertEqual(result, worker.read_json(self.job / 'output/analysis.json', worker.MAX_RESULT))
+        for artifact in result['artifacts']:
+            path = self.job / 'output' / artifact['file']
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), artifact['sha256'])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(before, hashlib.sha256(self.db.read_bytes()).hexdigest())
 
     def test_shape_stream_persists_full_report_and_verified_exports_without_database_access(self):
         r = shape_request()

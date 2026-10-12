@@ -147,6 +147,71 @@ and input/code provenance remain in the saved JSON report. Display frames and tr
 the export is not silently reduced to the display sample. Downloads verify the
 saved size and SHA-256. Reports and exports persist across server restarts.
 
+## Multi-day comparison and richer curve modeling
+
+In **Research experiments**, choose **Multi-day curves & strategy comparison**.
+Select compatible stopped SPY/BATS recordings and enter **Training through New
+York trading date**. All selected trading dates through that date train the
+thresholds and distribution models; all later dates are held out. The minimum is
+two qualified training dates and one later qualified test date, with at least
+30 states in each partition. These are software pilot minima, not a statistical
+power calculation. Multiple recordings on the same date still count as one date.
+Partial-day coverage and excluded states remain visible. Insufficient dates or
+failed receipt clocks save an audit without accepted comparison fits or trades.
+
+This operation initially uses a five-second sample step. Change it explicitly to
+1..60 seconds; the combined regular-hours grid must fit within 60,000 positions.
+For example, three full 6.5-hour days exceed that limit at one second. Select
+the same number of delivered distinct levels on both sides throughout the study.
+Collection itself is independent of this analysis bound.
+
+The held-out arms are **imbalance baseline** and **tight entry gate**. The gate
+adds the earlier-data tight-curve condition to the same imbalance entry rule.
+Both arms have identical imbalance, holding-time and quality-recovery exits,
+subsequent observed-quote fill assumptions, budgets, slippage and fees. There is
+no additional loose-curve exit in this comparison. Each date starts independent
+hypothetical portfolios; this explicit research convention is not a continuous
+funded equity curve. Within a date, an unresolved holding retains its cost basis
+and blocks another entry, including in subsequent captures.
+
+Results show daily and pooled outcomes, same-date tight-gate-minus-baseline
+differences, and separate continuous and recovery cohorts. Realized P&L excludes
+unresolved holdings, whose reserved exposure and paid entry fees remain visible.
+**Fee scenarios per side** accepts one to five distinct USD assumptions, including
+the configured base fee. Each scenario replays affordability and trading afresh.
+The defaults `0, 0.35, 1` are sensitivity assumptions, not verification of the
+account's commission plan. Paired daily summaries do not establish significance.
+
+The curve-model panel is available in both this operation and a new **Book shape
+& regimes** run. For each bid/ask snapshot it fits outward distance in basis
+points against cumulative normalized displayed-size fraction: linear slope,
+quadratic slope and curvature, R², residual RMSE, near/far secants and bid-minus-ask
+asymmetry. Quadratic fits require three independent levels; unsupported metrics
+remain missing. Example curves stay within the observed fraction range and flag
+nonmonotone polynomial fits. Per-state regressions are descriptive geometry.
+
+Positive lognormal and Weibull working CDFs approximate the mean normalized
+spatial liquidity profile by bounded least squares, fitted separately by side.
+The common 65-edge distance grid, parameters and optimizer-start selection use
+training states only. Later CDF error is evaluated with those values frozen.
+Failed or nonconverged fits withhold accepted parameters and curves. Held-out
+liquidity beyond the training grid stays explicit and is never renormalized into
+the last bin. A fitted family's tail is a working-model extrapolation, not an
+estimate of missing exchange depth. This describes the selected displayed-size
+window, not the distribution of identified exchange orders. See the official
+[SciPy least-squares documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html).
+
+Single-recording models retain their chronological intraday prefix split and are
+labeled exploratory; they do not satisfy whole-date comparison readiness. Older
+saved results can still reopen; rerun them to add the new model panel and 33
+geometry columns to the feature export.
+
+Download **curve_features.csv.gz** for every sampled grid position and geometry,
+**curve_daily.csv.gz** for all dates, arms and fee scenarios, and
+**curve_trades.csv.gz** for every completed hypothetical trade across those
+scenarios. Display previews are bounded; complete exports and saved JSON/HTML
+remain private and persist across restart. These operations have no order router.
+
 ## Live book
 
 1. Unlock using the existing local sign-in flow, connect the broker explicitly,

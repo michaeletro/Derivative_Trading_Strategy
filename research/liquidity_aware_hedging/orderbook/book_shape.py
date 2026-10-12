@@ -383,8 +383,10 @@ def _regime_diagnostics(rows, test, cfg, edges):
     return regimes, dict(labels=list(LABELS), matrix=transitions), {k: distribution(v) for k, v in dwell.items()}, lag
 
 
-def replay_experiment(rows, cfg, calibrated=True):
+def replay_experiment(rows, cfg, calibrated=True, *, entry_gate=None):
     """Causal quote replay with retained inventory and explicit soft-gap exits."""
+    if entry_gate not in (None, 'tight'):
+        raise LabError('Unknown hypothetical replay entry gate')
     result = dict(status='disabled' if cfg.strategy_variant == 'none' else 'unavailable_calibration',
                   variant=cfg.strategy_variant, cash_start=cfg.paper_budget_usd, cash_end=cfg.paper_budget_usd,
                   realized_pnl_usd=0., completed_trades=0, censored_positions=0,
@@ -403,6 +405,9 @@ def replay_experiment(rows, cfg, calibrated=True):
                   recovery_completed_trades_by_entry_regime={label: 0 for label in LABELS},
                   continuous_realized_pnl_by_entry_regime={label: 0. for label in LABELS},
                   recovery_realized_pnl_by_entry_regime={label: 0. for label in LABELS})
+    if entry_gate == 'tight':
+        result['entry_rule'] = 'Depth imbalance >= threshold and tight regime; exits are unchanged from the configured variant.'
+    result['entry_gate'] = entry_gate
     if cfg.strategy_variant == 'none' or not calibrated:
         return result
     result['status'] = 'hypothetical_replay'
@@ -501,7 +506,8 @@ def replay_experiment(rows, cfg, calibrated=True):
                     position['recovery_decision_unix_us'] = row['unix_us']
                     result['recovery_exit_decisions'] += 1
         elif pending is None and row['regime'] is not None and row['depth_imbalance'] >= cfg.imbalance_threshold:
-            if cfg.strategy_variant == 'compare_regimes' or row['regime'] == 'tight':
+            if ((cfg.strategy_variant == 'compare_regimes' or row['regime'] == 'tight')
+                    and (entry_gate is None or row['regime'] == entry_gate)):
                 # Censored holdings still reserve cash and consume the one-share
                 # position slot. There is no invented liquidation after a gap.
                 if not unresolved:
@@ -569,6 +575,11 @@ def analyze_book_shape(sources: list[FrozenStream], config: BookShapeConfig, out
         sessions[-1]['identity']['currency'] = session.get('currency', 'unrecorded')
     calibration, train, test = _calibrate(all_rows, config)
     qualified = train + test
+    from .shape_curve_models import analyze_curve_models, FEATURE_NAMES as CURVE_FEATURES
+    curve_models = analyze_curve_models(train, test, config)
+    curve_models['scope'] = 'intraday_prefix_exploratory'
+    if clock_blocked:
+        curve_models['status'] = 'blocked_clock'
     maximum = max((float(r['_' + side + '_distances'][-1]) for r in qualified for side in ('bid', 'ask')), default=1.)
     edges = np.linspace(0., maximum, 31)
     density = _density_model(train, test) if not clock_blocked else dict(status='blocked_clock', candidates=[], components=[])
@@ -585,13 +596,15 @@ def analyze_book_shape(sources: list[FrozenStream], config: BookShapeConfig, out
     for session in sessions:
         for frame in session['frames']:
             row = by_time[(session['identity']['session_id'], frame['unix_us'])]
-            frame.update(regime=row['regime'], partition=row['partition'], density_component=row.get('density_component'))
+            frame.update(regime=row['regime'], partition=row['partition'], density_component=row.get('density_component'),
+                         **{key: row.get(key) for key in CURVE_FEATURES})
     exclusions, continuity_breaks = Counter(), Counter()
     for session in sessions:
         exclusions.update(session['coverage']['exclusions'])
         continuity_breaks.update(session['coverage'].get('continuity_break_counts', {}))
     files = [Path(__file__), ROOT / 'research/liquidity_aware_hedging/depth_replay.py',
-             Path(__file__).with_name('research_dataset.py')]
+             Path(__file__).with_name('research_dataset.py'), Path(__file__).with_name('shape_curve_models.py'),
+             Path(__file__).with_name('descriptive.py')]
     report = dict(kind='orderbook_book_shape_analysis', schema_version=1, version=VERSION,
                   status='blocked_clock' if clock_blocked else 'completed',
                   source='synthetic' if sources[0].source == 'mock' else 'ibkr_tws', config=asdict(config),
@@ -603,7 +616,7 @@ def analyze_book_shape(sources: list[FrozenStream], config: BookShapeConfig, out
                   calibration=calibration, distributions=_feature_distributions(qualified),
                   partition_distributions=dict(calibration=_feature_distributions(train), test=_feature_distributions(test)),
                   side_profiles=_profiles(qualified, edges), regimes=regimes, transitions=transitions, dwell=dwell,
-                  forward_return_horizon_seconds=lag, density_model=density, replay=replay, artifacts=[],
+                  forward_return_horizon_seconds=lag, density_model=density, curve_models=curve_models, replay=replay, artifacts=[],
                   boundaries=['Completed direct-venue displayed depth only; actual source and receipt clocks are retained.',
                               'A failed whole-capture clock audit blocks every temporal model and replay in the selection.',
                               'Exactly the configured number of nearest distinct price levels are used; missing levels are not zeros.',
@@ -614,7 +627,7 @@ def analyze_book_shape(sources: list[FrozenStream], config: BookShapeConfig, out
     if output is not None:
         folder = _private_output(output)
         fields = ['session_id', 'session_date', 'unix_us', 'time_ns', 'sequence', 'epoch', 'segment', 'usable', 'quality',
-                  'structural_segment', 'partition', 'regime', 'density_component', 'midpoint', 'bid', 'ask', 'bid_age_seconds', 'ask_age_seconds', *FEATURES]
+                  'structural_segment', 'partition', 'regime', 'density_component', 'midpoint', 'bid', 'ask', 'bid_age_seconds', 'ask_age_seconds', *FEATURES, *CURVE_FEATURES]
         features_writer = _Csv(folder, 'shape_features', fields, compress=True)
         for row in all_rows:
             features_writer.write(row)

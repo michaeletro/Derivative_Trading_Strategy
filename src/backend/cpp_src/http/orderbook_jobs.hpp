@@ -49,12 +49,12 @@ inline int bounded(const Read& r, const char* key, int lo, int hi) {
     return static_cast<int>(n);
 }
 inline bool dataset_mode(const std::string& mode) { return mode == "dataset" || mode == "proposal_experiment"; }
-inline bool stream_mode(const std::string& mode) { return dataset_mode(mode) || mode == "shape"; }
+inline bool stream_mode(const std::string& mode) { return dataset_mode(mode) || mode == "shape" || mode == "shape_comparison"; }
 inline void validate(const Read& r) {
     exact_fields(r, {"schema_version", "mode", "session_ids", "source", "configuration", "split"});
     bounded(r, "schema_version", 1, 1);
     const auto mode = field(r, "mode"), source = field(r, "source");
-    if ((mode != "inspect" && mode != "compare" && mode != "describe" && mode != "flow" && mode != "shape" && !dataset_mode(mode)) || (source != "ibkr_tws" && source != "mock")) throw std::invalid_argument("Invalid research mode or source acknowledgement");
+    if ((mode != "inspect" && mode != "compare" && mode != "describe" && mode != "flow" && mode != "shape" && mode != "shape_comparison" && !dataset_mode(mode)) || (source != "ibkr_tws" && source != "mock")) throw std::invalid_argument("Invalid research mode or source acknowledgement");
     const auto& ids = r["session_ids"];
     if (ids.t() != crow::json::type::List || ids.size() < 1 || ids.size() > 24) throw std::invalid_argument("Select 1..24 stopped sessions");
     std::set<std::string> seen;
@@ -64,23 +64,49 @@ inline void validate(const Read& r) {
         if (s.empty() || s.size() > 18 || s[0] == '0' || s.find_first_not_of("0123456789") != std::string::npos || !seen.insert(s).second) throw std::invalid_argument("Invalid or duplicate session ID");
     }
     const auto& c = r["configuration"];
-    if (mode == "shape") {
-        exact_fields(c, {"levels", "step_seconds", "max_side_age_seconds", "calibration_fraction", "near_band_bps",
+    if (mode == "shape" || mode == "shape_comparison") {
+        std::set<std::string> keys{"levels", "step_seconds", "max_side_age_seconds", "near_band_bps",
             "imbalance_threshold", "max_hold_seconds", "fee_per_side_usd", "slippage_bps", "paper_budget_usd",
-            "max_order_notional_usd", "strategy_variant"});
+            "max_order_notional_usd"};
+        if (mode == "shape") { keys.insert("calibration_fraction"); keys.insert("strategy_variant"); }
+        else { keys.insert("train_end_date"); keys.insert("fee_scenarios_usd"); }
+        exact_fields(c, keys);
         bounded(c, "levels", 2, 50); bounded(c, "step_seconds", 1, 60); bounded(c, "max_hold_seconds", 1, 3600);
         const auto number = [&](const char* key, double lo, double hi) {
             if (c[key].t() != crow::json::type::Number || !std::isfinite(c[key].d()) || c[key].d() < lo || c[key].d() > hi)
                 throw std::invalid_argument("Book-shape setting outside bounds");
         };
-        number("max_side_age_seconds", .1, 30.); number("calibration_fraction", .2, .8);
+        number("max_side_age_seconds", .1, 30.);
         number("near_band_bps", .1, 100.); number("imbalance_threshold", 0., 1.);
         number("fee_per_side_usd", 0., 100.); number("slippage_bps", 0., 100.);
         number("paper_budget_usd", 100., 1000000.); number("max_order_notional_usd", 1., 100000.);
-        const auto variant = field(c, "strategy_variant");
-        if (variant != "tight_bid_heavy" && variant != "compare_regimes" && variant != "none")
-            throw std::invalid_argument("Unknown book-shape replay variant");
-        if (r["split"].t() != crow::json::type::Null) throw std::invalid_argument("Book shape uses its chronological calibration prefix");
+        if (mode == "shape") {
+            number("calibration_fraction", .2, .8);
+            const auto variant = field(c, "strategy_variant");
+            if (variant != "tight_bid_heavy" && variant != "compare_regimes" && variant != "none")
+                throw std::invalid_argument("Unknown book-shape replay variant");
+        } else {
+            const auto day = field(c, "train_end_date");
+            if (day.size() != 10) throw std::invalid_argument("Training cutoff must be an ISO trading date");
+            for (std::size_t i = 0; i < day.size(); ++i)
+                if ((i == 4 || i == 7) ? day[i] != '-' : (day[i] < '0' || day[i] > '9'))
+                    throw std::invalid_argument("Training cutoff must be an ISO trading date");
+            const int year = std::stoi(day.substr(0, 4)), month = std::stoi(day.substr(5, 2)), date = std::stoi(day.substr(8, 2));
+            const int month_days[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+            const bool leap = year % 400 == 0 || (year % 4 == 0 && year % 100 != 0);
+            if (year < 1970 || year > 2100 || month < 1 || month > 12 || date < 1 || date > month_days[month] + (month == 2 && leap ? 1 : 0))
+                throw std::invalid_argument("Invalid training cutoff calendar date");
+            const auto& fees = c["fee_scenarios_usd"];
+            if (fees.t() != crow::json::type::List || fees.size() < 1 || fees.size() > 5)
+                throw std::invalid_argument("Select one through five fee scenarios");
+            std::set<double> seen_fees;
+            for (const auto& fee : fees) {
+                if (fee.t() != crow::json::type::Number || !std::isfinite(fee.d()) || fee.d() < 0 || fee.d() > 100 || !seen_fees.insert(fee.d()).second)
+                    throw std::invalid_argument("Fee scenarios must be distinct finite amounts in 0..100 USD");
+            }
+            if (!seen_fees.count(c["fee_per_side_usd"].d())) throw std::invalid_argument("Include the base fee in the scenario list");
+        }
+        if (r["split"].t() != crow::json::type::Null) throw std::invalid_argument("Book-curve research uses its own explicit calibration settings");
         return;
     }
     if (dataset_mode(mode)) {
@@ -311,7 +337,9 @@ inline VerifiedArtifact verified_artifact(const fs::path& output, const Read& en
         {"features", {"features.csv.gz", "application/gzip"}}, {"minutes", {"minutes.csv.gz", "application/gzip"}},
         {"blocks", {"blocks.csv", "text/csv"}}, {"pairs", {"pairs.csv", "text/csv"}},
         {"predictions", {"predictions.csv", "text/csv"}}, {"daily_losses", {"daily_losses.csv", "text/csv"}},
-        {"shape_features", {"shape_features.csv.gz", "application/gzip"}}, {"shape_trades", {"shape_trades.csv.gz", "application/gzip"}}};
+        {"shape_features", {"shape_features.csv.gz", "application/gzip"}}, {"shape_trades", {"shape_trades.csv.gz", "application/gzip"}},
+        {"curve_features", {"curve_features.csv.gz", "application/gzip"}}, {"curve_daily", {"curve_daily.csv.gz", "application/gzip"}},
+        {"curve_trades", {"curve_trades.csv.gz", "application/gzip"}}};
     const auto found = allowed.find(name);
     if (found == allowed.end()) throw std::invalid_argument("Unknown dataset artifact");
     exact_fields(entry, {"name", "file", "sha256", "bytes", "rows", "content_type"});
@@ -608,7 +636,7 @@ public:
         return ArchivedResult{raw};
     }
     VerifiedArtifact artifact(const std::string& id, const std::string& name) {
-        if (name != "features" && name != "minutes" && name != "blocks" && name != "pairs" && name != "predictions" && name != "daily_losses" && name != "shape_features" && name != "shape_trades")
+        if (name != "features" && name != "minutes" && name != "blocks" && name != "pairs" && name != "predictions" && name != "daily_losses" && name != "shape_features" && name != "shape_trades" && name != "curve_features" && name != "curve_daily" && name != "curve_trades")
             throw std::invalid_argument("Unknown dataset artifact");
         const auto saved = result(id); // Validates completed state and exact saved JSON hash.
         const auto report = crow::json::load(saved.bytes);

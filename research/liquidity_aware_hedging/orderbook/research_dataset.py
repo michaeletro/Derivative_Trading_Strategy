@@ -639,13 +639,16 @@ def write_report(output, report):
         raise LabError('Research dataset audit exceeds its saved report bound')
     experiment = report.get('experiment')
     shape = report.get('shape')
-    title = 'Book shape and regimes' if shape else 'Proposal research experiment' if experiment else 'Research measurement dataset'
+    curves = report.get('curve_experiment')
+    title = 'Multi-day curve comparison' if curves else 'Book shape and regimes' if shape else 'Proposal research experiment' if experiment else 'Research measurement dataset'
     introduction = ('Matched chronological RV/BPV model comparison; inspect coverage, paired losses and measurement limits.'
                     if experiment and experiment.get('status') == 'complete_exploratory' else
                     'Experiment readiness checks did not permit fitted predictions; inspect the saved reasons.' if experiment else
                     'Frozen measurements and adjacent-block pairs; no model has been fitted.')
     if shape:
         introduction = 'Displayed bid/ask distributions, calibrated width buckets and chronological hypothetical replay. Inspect clock audits, coverage, costs and unresolved positions; no orders are sent.'
+    if curves:
+        introduction = 'Explicit trading-date calibration, frozen spatial curve models and hypothetical rule comparisons. Inspect readiness, held-out daily outcomes, recovery exits and cost assumptions; no orders are sent.'
     page = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; base-uri \'none\'">'
             '<title>' + title + '</title><style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:20px}pre{white-space:pre-wrap}</style>'
