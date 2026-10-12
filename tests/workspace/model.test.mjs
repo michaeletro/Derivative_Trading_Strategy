@@ -117,6 +117,15 @@ test('shared curve model parser retains censored CDF tails and supports intraday
 test('shared curve model parser rejects mass fabrication, reversed CDF and failed fits claiming errors',()=>{
   for(const mutate of [m=>m.spatial_cdf_models.bid.test.cdf_mean=[0,.8,.2],m=>m.spatial_cdf_models.bid.test.outside_range_mass_mean=0,m=>m.spatial_cdf_models.edge_calibration.source='test',m=>m.spatial_cdf_models.bid.candidates[0].status='nonconverged',m=>m.sample_counts.test=41,m=>m.spatial_cdf_models.bid.candidates[0].cdf=[0,.9,.8]]){const r=curveResult();r.curve_experiment.models=curveModelFixture();mutate(r.curve_experiment.models);assert.throws(()=>parseResult(r));}
 });
+test('curve preview parser accepts unsupported fits and audits omitted collapsed fraction states',()=>{
+  const r=curveResult(),m=curveModelFixture();r.curve_experiment.models=m;
+  const side=()=>({distance_bps:[1,2,3],size_weights:[1-2e-15,1e-15,1e-15],cumulative_fraction:[1-2e-15,1-1e-15,1],fit_cumulative_fraction:[],linear_distance_bps:[],quadratic_distance_bps:[],fit_support_status:'numerically_unsupported_fraction_axis',geometry:{linear_slope_bps:null}});
+  m.examples={calibration:[{session_id:'1',session_date:'2026-10-07',unix_us:1e9,regime:'tight',bid:side(),ask:side()}],test:[]};
+  m.example_diagnostics={calibration:{candidate_states:3,returned_states:1,omitted_collapsed_fraction_states:2,selection:'first_middle_last_chronological_states'},test:{candidate_states:0,returned_states:0,omitted_collapsed_fraction_states:0,selection:'first_middle_last_chronological_states'}};
+  assert.equal(parseResult(r).curve_experiment.models.examples.calibration[0].bid.fit_support_status,'numerically_unsupported_fraction_axis');
+  m.examples.calibration[0].bid.fit_support_status='available';assert.throws(()=>parseResult(r));
+  m.examples.calibration[0].bid.fit_support_status='numerically_unsupported_fraction_axis';m.example_diagnostics.calibration.omitted_collapsed_fraction_states=1;assert.throws(()=>parseResult(r));
+});
 const event=(n,changes={})=>({event_id:String(n+100),sequence:String(n),kind:n===1?'start':'update',origin:'adapter',
   received_unix_us:String(1700000000000000+n*1000),received_monotonic_ns:String(1000000000+n*1000000),
   operation:0,side:n%2,position:0,price:n%2?99:101,size:'10',market_maker:'',smart_depth:0,code:0,...changes});
