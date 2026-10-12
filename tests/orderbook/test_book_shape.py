@@ -227,6 +227,34 @@ class BookShapeTests(unittest.TestCase):
         self.assertTrue(frames[10]['usable'] and frames[11]['usable'])
         self.assertNotEqual(frames[10]['segment'], frames[11]['segment'])
 
+    def test_intermediate_reset_rebuild_retains_hard_context_at_qualified_grid_endpoints(self):
+        header, events, _ = fixture()
+        for event in events:
+            if event['kind'] == 'update' and event['side'] == 0:
+                event['size'] = str(float(event['size']) * .4)
+        template = copy.deepcopy(events[0])
+        reset = dict(template, kind='reset', received_unix_us=str(OPEN + 10 * US + 100_000),
+                     received_monotonic_ns=str(10_000_000_000 + 20_100_000 * 1000), code=317)
+        events.append(reset)
+        for side in (0, 1):
+            for position in range(5):
+                price = 100 + (1 if side == 0 else -1) * (.01 + position * .01)
+                events.append(dict(template, kind='update', side=side, position=position, operation=0,
+                    price=price, price_repr=repr(price), size='40' if side == 0 else '100',
+                    received_unix_us=str(OPEN + 10 * US + 200_000),
+                    received_monotonic_ns=str(10_000_000_000 + 20_200_000 * 1000)))
+        events.sort(key=lambda e: int(e['received_unix_us']))
+        resequence(header, events)
+        frames = self.analyze((header, events, None))['sessions'][0]['frames']
+        self.assertTrue(frames[10]['usable'] and frames[11]['usable'])
+        self.assertNotEqual(frames[10]['structural_segment'], frames[11]['structural_segment'])
+        rows = [dict(f, partition='test', regime='tight') for f in frames[8:13]]
+        result = replay_experiment(rows, BookShapeConfig())
+        self.assertEqual(result['completed_trades'], 0)
+        self.assertEqual(result['censored_positions'], 1)
+        self.assertEqual(result['unresolved_positions'][0]['reason'], 'structural_or_session_boundary')
+        self.assertAlmostEqual(result['unresolved_cost_basis_usd'], 101.01)
+
     def test_calibration_ignores_test_values_and_exclusions(self):
         rows = [dict(usable=True, tightness_bps=1 + i % 20, unix_us=i, regime=None, partition=None) for i in range(120)]
         original, _, _ = _calibrate(rows, BookShapeConfig())
@@ -295,18 +323,87 @@ class BookShapeTests(unittest.TestCase):
         self.assertEqual(trade['net_pnl_usd'], -1)
         self.assertEqual(result['cash_end'], result['cash_start'] - 1)
 
-    def test_replay_gap_censors_and_reserves_holding_without_invented_exit(self):
+    def test_replay_soft_gap_recovers_at_later_quote_with_exact_cash_and_fees(self):
         rows = self.replay_rows()
         rows[2].update(usable=False)
         for row in rows[3:]:
             row.update(segment=2, depth_imbalance=.5)
         result = replay_experiment(rows, BookShapeConfig())
+        self.assertEqual(result['completed_trades'], 1)
+        self.assertEqual(result['censored_positions'], 0)
+        self.assertEqual(result['recovery_completed_trades'], 1)
+        self.assertEqual(result['continuous_completed_trades'], 0)
+        trade = result['trades'][0]
+        self.assertEqual(trade['entry_price'], 102)
+        self.assertEqual(trade['recovery_decision_unix_us'], 3 * US)
+        self.assertEqual(trade['exit_unix_us'], 4 * US)
+        self.assertEqual(trade['exit_price'], 104)
+        self.assertEqual(trade['interruption_count'], 1)
+        self.assertEqual(trade['max_unobserved_seconds'], 2)
+        self.assertEqual(trade['net_pnl_usd'], 0)
+        self.assertEqual(result['cash_end'], 10000)
+
+    def test_recovery_liquidation_intent_survives_repeated_soft_breaks(self):
+        rows = self.replay_rows()
+        rows[2].update(usable=False)
+        rows[3].update(segment=2)
+        rows[4].update(segment=3)
+        result = replay_experiment(rows, BookShapeConfig())
+        self.assertEqual(result['completed_trades'], 1)
+        self.assertEqual(result['recovery_exit_decisions'], 1)
+        self.assertEqual(result['trades'][0]['interruption_count'], 2)
+        self.assertEqual(result['trades'][0]['exit_unix_us'], 4 * US)
+        self.assertEqual(result['trades'][0]['continuity_cohort'], 'recovery')
+
+    def test_interrupted_entry_signal_cancels_before_any_cash_is_spent(self):
+        rows = self.replay_rows()
+        for row in rows[1:]: row['segment'] = 2
+        result = replay_experiment(rows, BookShapeConfig())
+        self.assertEqual(result['canceled_entry_signals'], 1)
+        self.assertEqual(result['trades'][0]['entry_signal_unix_us'], US)
+        self.assertEqual(result['trades'][0]['entry_unix_us'], 2 * US)
+        self.assertEqual(result['trades'][0]['entry_price'], 103)
+        self.assertEqual(result['trades'][0]['continuity_cohort'], 'continuous')
+
+    def test_structural_reset_and_recording_or_day_boundaries_keep_unresolved_exposure(self):
+        for changes in ({'epoch': 2}, {'structural_segment': 2}, {'session_id': '2'}, {'session_date': '2026-10-12'}):
+            with self.subTest(changes=changes):
+                rows = self.replay_rows()
+                for row in rows[2:]: row.update(**changes)
+                result = replay_experiment(rows, BookShapeConfig())
+                self.assertEqual(result['completed_trades'], 0)
+                self.assertEqual(result['censored_positions'], 1)
+                self.assertEqual(result['unresolved_positions'][0]['entry_price'], 102)
+                self.assertEqual(result['unresolved_positions'][0]['reason'], 'structural_or_session_boundary')
+                self.assertEqual(result['cash_end'], 10000 - 103)
+                self.assertEqual(result['entry_decisions_by_regime']['loose'], 0)
+
+    def test_recovery_decision_without_future_fill_retains_position_and_entry_fee(self):
+        rows = self.replay_rows()[:4]
+        rows[2].update(usable=False)
+        rows[3].update(segment=2)
+        result = replay_experiment(rows, BookShapeConfig())
         self.assertEqual(result['completed_trades'], 0)
+        self.assertEqual(result['recovery_exit_decisions'], 1)
         self.assertEqual(result['censored_positions'], 1)
-        self.assertEqual(result['unresolved_positions'][0]['entry_price'], 102)
-        self.assertEqual(result['cash_end'], 10000 - 103)
-        self.assertEqual(result['realized_pnl_usd'], 0)
-        self.assertEqual(result['entry_decisions_by_regime']['loose'], 0)
+        self.assertTrue(result['unresolved_positions'][0]['recovery_waiting'])
+        self.assertEqual(result['cash_end'], 9897)
+        self.assertEqual(result['fees_paid_usd'], 1)
+
+    def test_strategy_resumes_after_recovery_and_cohorts_reconcile(self):
+        rows = self.replay_rows()
+        rows[2].update(usable=False)
+        for row in rows[3:]: row.update(segment=2, depth_imbalance=.5)
+        for second in (5, 6, 7):
+            rows.append(dict(rows[-1], unix_us=second * US, depth_imbalance=-.5))
+        result = replay_experiment(rows, BookShapeConfig())
+        self.assertEqual(result['completed_trades'], 2)
+        self.assertEqual(result['recovery_completed_trades'], 1)
+        self.assertEqual(result['continuous_completed_trades'], 1)
+        self.assertAlmostEqual(result['realized_pnl_usd'], result['continuous_realized_pnl_usd'] + result['recovery_realized_pnl_usd'])
+        self.assertAlmostEqual(result['cash_end'], result['cash_start'] + result['realized_pnl_usd'])
+        for label in ('tight', 'normal', 'loose'):
+            self.assertEqual(result['completed_trades_by_entry_regime'][label], result['continuous_completed_trades_by_entry_regime'][label] + result['recovery_completed_trades_by_entry_regime'][label])
 
     def test_replay_order_cap_cash_and_exit_fee_reserve(self):
         result = replay_experiment(self.replay_rows(), BookShapeConfig(paper_budget_usd=100, max_order_notional_usd=500))

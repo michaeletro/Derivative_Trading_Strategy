@@ -41,6 +41,9 @@ DEFINITIONS = {
     'regimes': 'Baseline tight/normal/loose labels are descriptive calibration-prefix width terciles, frozen before evaluating the later partition. They do not establish latent economic regimes.',
     'dwell': 'Consecutive held-out grid-label counts multiplied by the sampling step: a discrete occupancy-duration proxy, not an exact regime lifetime. Recording, gap and partition endpoints are censored; no survival estimate is fitted.',
     'replay': 'One whole-share long-only hypothetical crossing at the next qualified grid quote, at least one sampling step after a decision. Buy at ask and sell at bid with configured adverse slippage and a fixed fee per side. No execution, queue, impact, routing, or guaranteed-fill claim.',
+    'replay_continuity': 'Shape continuity remains strict. Temporary quality breaks cancel unfilled entry/ordinary-exit signals but retain a held share and its cash reservation. At the first later qualified same-recording/day/structural-context quote, decide a recovery liquidation; sell at a later qualified observed bid at least one step afterward. Recovery liquidation intent survives further temporary breaks. Never fill at an invalid state or interpolate a gap. Structural failures, resets, recording/day boundaries and missing final quotes retain unresolved exposure. Recovery exits are reported separately from ordinary uninterrupted strategy exits.',
+    'max_unobserved_seconds': 'Largest interval between qualified sampled states across a detected interruption during a trade. This grid-based exposure diagnostic is not the exact duration of invalid callbacks.',
+    'continuity_break_counts': 'Counts of callback break decisions by reason in the replayed capture prefix through the final sampled time, including initialization and any intervening non-regular-hours reconstruction. Reasons can overlap within a callback. These are not invalid-grid counts or independent interruption episodes; the remaining capture suffix is verified for integrity and whole-capture clock quality but not included in these counters.',
 }
 
 
@@ -132,23 +135,31 @@ def _sample(source, audit, cfg, frame_cap=MAX_FRAMES, point_budget=MAX_GRID_POIN
     current = next(records, None)
     book = Book(session['requested_rows'])
     last_side = {0: None, 1: None}
-    segment, index = 0, 0
+    segment, structural_segment, index = 0, 0, 0
+    continuity_break_counts = Counter()
     latest_wall, latest_mono = first, int(audit['first_monotonic_ns'])
     previous_date = None
     previous_quality = book.quality()
     def consume(event):
-        nonlocal segment, latest_wall, latest_mono, previous_quality
+        nonlocal segment, structural_segment, latest_wall, latest_mono, previous_quality
         kind = event['kind']
         previous_sequence = book.sequence
+        previous_valid = book.valid
         receipt_mono = int(event['received_monotonic_ns'])
         if (previous_quality == 'two_sided_unverified' and all(v is not None for v in last_side.values())
                 and any(receipt_mono - v > cfg.max_side_age_seconds * 1e9 for v in last_side.values())):
             # Expiry before this callback breaks the path even if this callback
             # refreshes the old side before the next grid point.
             segment += 1
+            continuity_break_counts['stale_expiry'] += 1
         book.apply(event)
         previous_quality = book.quality()
         latest_wall, latest_mono = int(event['received_unix_us']), int(event['received_monotonic_ns'])
+        # A structural boundary is different from a transient observable curve
+        # defect. Recovery exits may cross the latter, never the former.
+        if (kind != 'update' or book.sequence != previous_sequence + 1
+                or previous_valid and not book.valid):
+            structural_segment += 1
         if kind in ('start', 'reset') or not book.valid:
             last_side[0] = last_side[1] = None
         if kind == 'update' and book.valid and event.get('side') in (0, 1):
@@ -160,6 +171,10 @@ def _sample(source, audit, cfg, frame_cap=MAX_FRAMES, point_budget=MAX_GRID_POIN
         if (kind != 'update' or previous_quality != 'two_sided_unverified'
                 or not enough_levels or book.sequence != previous_sequence + 1):
             segment += 1
+            if kind != 'update': continuity_break_counts[kind] += 1
+            if previous_quality != 'two_sided_unverified': continuity_break_counts[previous_quality] += 1
+            if not enough_levels: continuity_break_counts['insufficient_distinct_levels'] += 1
+            if book.sequence != previous_sequence + 1: continuity_break_counts['local_sequence_gap'] += 1
     for date, start, end in grids:
         if previous_date != date:
             segment += 1
@@ -184,7 +199,7 @@ def _sample(source, audit, cfg, frame_cap=MAX_FRAMES, point_budget=MAX_GRID_POIN
                 else:
                     bids, asks = bids[:cfg.levels], asks[:cfg.levels]
             row = dict(session_id=source.session_id, session_date=date, unix_us=wall, time_ns=str(mono),
-                       sequence=str(book.sequence), epoch=book.epoch, segment=segment,
+                       sequence=str(book.sequence), epoch=book.epoch, segment=segment, structural_segment=structural_segment,
                        usable=reason is None, quality=reason or 'qualified',
                        bid_age_seconds=ages[1], ask_age_seconds=ages[0], regime=None, partition=None)
             if reason is None:
@@ -212,7 +227,8 @@ def _sample(source, audit, cfg, frame_cap=MAX_FRAMES, point_budget=MAX_GRID_POIN
     while current is not None:
         current = next(records, None)
     return rows, frames, dict(grid_points=count, qualified_samples=sum(r['usable'] for r in rows),
-                              excluded_samples=sum(exclusions.values()), exclusions=dict(exclusions), status='qualified')
+                              excluded_samples=sum(exclusions.values()), exclusions=dict(exclusions), status='qualified',
+                              continuity_break_counts=dict(continuity_break_counts))
 
 
 def _feature_distributions(rows):
@@ -368,7 +384,7 @@ def _regime_diagnostics(rows, test, cfg, edges):
 
 
 def replay_experiment(rows, cfg, calibrated=True):
-    """Causal decision/next-grid crossing model; gaps censor held positions."""
+    """Causal quote replay with retained inventory and explicit soft-gap exits."""
     result = dict(status='disabled' if cfg.strategy_variant == 'none' else 'unavailable_calibration',
                   variant=cfg.strategy_variant, cash_start=cfg.paper_budget_usd, cash_end=cfg.paper_budget_usd,
                   realized_pnl_usd=0., completed_trades=0, censored_positions=0,
@@ -378,35 +394,75 @@ def replay_experiment(rows, cfg, calibrated=True):
                   model='hypothetical_next_grid_crossing', position_size_shares=1,
                   entry_rule='Depth imbalance >= threshold; tight regime additionally required for tight_bid_heavy.',
                   exit_rule='Imbalance <= 0 or hold timeout; tight_bid_heavy also exits on loose regime.',
-                  cost_model='Configured adverse bps slippage and fixed fee per side, no impact/queue/routing assumption.')
+                  cost_model='Configured adverse bps slippage and fixed fee per side, no impact/queue/routing assumption.',
+                  continuity_schema_version=1, continuity_policy='retain_position_and_exit_after_soft_recovery',
+                  interruptions=0, canceled_entry_signals=0, canceled_exit_signals=0, recovery_exit_decisions=0,
+                  recovery_completed_trades=0, continuous_completed_trades=0,
+                  recovery_realized_pnl_usd=0., continuous_realized_pnl_usd=0.,
+                  continuous_completed_trades_by_entry_regime={label: 0 for label in LABELS},
+                  recovery_completed_trades_by_entry_regime={label: 0 for label in LABELS},
+                  continuous_realized_pnl_by_entry_regime={label: 0. for label in LABELS},
+                  recovery_realized_pnl_by_entry_regime={label: 0. for label in LABELS})
     if cfg.strategy_variant == 'none' or not calibrated:
         return result
     result['status'] = 'hypothetical_replay'
-    cash, position, pending, previous = cfg.paper_budget_usd, None, None, None
+    cash, position, pending, previous, last_usable = cfg.paper_budget_usd, None, None, None, None
     trades, unresolved = [], []
-    def censor(reason):
-        nonlocal position, pending
+    def context(row):
+        return row['session_id'], row['session_date'], row.get('structural_segment', row.get('epoch', 0))
+    def cancel_pending():
+        nonlocal pending
         if pending is not None:
             result['pending_actions_censored'] += 1
+            result['canceled_entry_signals' if pending[0] == 'buy' else 'canceled_exit_signals'] += 1
+            pending = None
+    def censor(reason):
+        nonlocal position, pending
+        cancel_pending()
         if position is not None:
             unresolved.append({**position, 'reason': reason, 'position_shares': 1,
-                               'last_midpoint': previous.get('midpoint') if previous is not None else None})
+                               'last_midpoint': last_usable.get('midpoint') if last_usable is not None else None,
+                               'recovery_waiting': position['interruption_count'] > 0})
             position = None
         pending = None
     for row in rows:
         if row['partition'] != 'test':
             continue
-        if not row['usable'] or (previous is not None and not _continuous(previous, row)):
-            censor('invalid_gap_or_session_boundary')
+        hard_boundary = previous is not None and context(previous) != context(row)
+        if hard_boundary:
+            censor('structural_or_session_boundary')
+            last_usable = None
+        soft_break = (not hard_boundary and previous is not None
+                      and not _continuous(previous, row))
+        # Count one onset for an invalid sampled run, or one observed interval
+        # containing callback defects between two qualified sampled states.
+        onset = soft_break and previous['usable']
+        if onset:
+            result['interruptions'] += 1
+            if position is not None:
+                position['interruption_count'] += 1
+        if soft_break:
+            if pending is not None and (pending[0] == 'buy' or pending[1].get('_exit_reason') != 'quality_gap_recovery'):
+                cancel_pending()
+            if position is not None:
+                position['_recovery_needed'] = True
+                if last_usable is not None:
+                    position['max_unobserved_seconds'] = max(position['max_unobserved_seconds'],
+                        (row['unix_us'] - last_usable['unix_us']) / US)
         if not row['usable']:
-            previous = None
+            previous = row
             continue
         if row['regime'] is not None and row['depth_imbalance'] >= cfg.imbalance_threshold:
             result['eligible_signal_states_by_regime'][row['regime']] += 1
         if pending is not None:
             action, decision = pending
-            if row['unix_us'] < decision['unix_us'] + cfg.step_seconds * US or not _continuous(decision, row):
-                censor('missing_next_grid_quote')
+            recovery = action == 'sell' and decision.get('_exit_reason') == 'quality_gap_recovery'
+            if context(decision) != context(row):
+                censor('structural_or_session_boundary')
+            elif row['unix_us'] < decision['unix_us'] + cfg.step_seconds * US:
+                pass  # A decision can never fill on its own quote.
+            elif not recovery and not _continuous(decision, row):
+                cancel_pending()
             elif action == 'buy':
                 price = row['ask'] * (1 + cfg.slippage_bps / 10000)
                 # Reserve the eventual exit fee as well: this model never
@@ -417,24 +473,33 @@ def replay_experiment(rows, cfg, calibrated=True):
                     cash -= price + cfg.fee_per_side_usd
                     position = dict(entry_signal_unix_us=decision['unix_us'], entry_unix_us=row['unix_us'],
                                     entry_price=price, entry_regime=decision['regime'], session_id=row['session_id'],
-                                    session_date=row['session_date'], segment=row['segment'])
+                                    session_date=row['session_date'], segment=row['segment'],
+                                    structural_segment=row.get('structural_segment', row.get('epoch', 0)),
+                                    interruption_count=0, max_unobserved_seconds=0., recovery_decision_unix_us=None,
+                                    _recovery_needed=False)
                 pending = None
             else:
                 price = row['bid'] * (1 - cfg.slippage_bps / 10000)
                 gross = price - position['entry_price']
                 fees = 2 * cfg.fee_per_side_usd
                 cash += price - cfg.fee_per_side_usd
-                trades.append({**position, 'exit_signal_unix_us': decision['unix_us'], 'exit_unix_us': row['unix_us'],
+                trades.append({**{k: v for k, v in position.items() if not k.startswith('_')},
+                               'exit_signal_unix_us': decision['unix_us'], 'exit_unix_us': row['unix_us'],
                                'exit_price': price, 'exit_regime': decision['regime'], 'exit_reason': decision['_exit_reason'],
                                'quantity': 1, 'gross_pnl_usd': gross, 'fees_usd': fees, 'net_pnl_usd': gross - fees,
-                               'holding_seconds': (row['unix_us'] - position['entry_unix_us']) / US})
+                               'holding_seconds': (row['unix_us'] - position['entry_unix_us']) / US,
+                               'continuity_cohort': 'recovery' if recovery else 'continuous'})
                 position, pending = None, None
         if position is not None:
-            reason = ('imbalance_nonpositive' if row['depth_imbalance'] <= 0 else
+            reason = ('quality_gap_recovery' if position['_recovery_needed'] else
+                      'imbalance_nonpositive' if row['depth_imbalance'] <= 0 else
                       'hold_timeout' if row['unix_us'] - position['entry_unix_us'] >= cfg.max_hold_seconds * US else
                       'loose_regime' if cfg.strategy_variant == 'tight_bid_heavy' and row['regime'] == 'loose' else None)
-            if reason:
+            if reason and pending is None:
                 pending = ('sell', {**row, '_exit_reason': reason})
+                if reason == 'quality_gap_recovery':
+                    position['recovery_decision_unix_us'] = row['unix_us']
+                    result['recovery_exit_decisions'] += 1
         elif pending is None and row['regime'] is not None and row['depth_imbalance'] >= cfg.imbalance_threshold:
             if cfg.strategy_variant == 'compare_regimes' or row['regime'] == 'tight':
                 # Censored holdings still reserve cash and consume the one-share
@@ -443,6 +508,7 @@ def replay_experiment(rows, cfg, calibrated=True):
                     pending = ('buy', row)
                     result['entry_decisions_by_regime'][row['regime']] += 1
         previous = row
+        last_usable = row
     censor('end_of_selected_recording')
     result.update(cash_end=cash, realized_pnl_usd=sum(t['net_pnl_usd'] for t in trades),
                   completed_trades=len(trades), censored_positions=len(unresolved),
@@ -451,6 +517,15 @@ def replay_experiment(rows, cfg, calibrated=True):
                   completed_trades_by_entry_regime={label: sum(t['entry_regime'] == label for t in trades) for label in LABELS},
                   fees_paid_usd=len(trades) * 2 * cfg.fee_per_side_usd + len(unresolved) * cfg.fee_per_side_usd,
                   unresolved_cost_basis_usd=sum(t['entry_price'] + cfg.fee_per_side_usd for t in unresolved))
+    for cohort in ('continuous', 'recovery'):
+        group = [t for t in trades if t['continuity_cohort'] == cohort]
+        result[cohort + '_completed_trades'] = len(group)
+        result[cohort + '_realized_pnl_usd'] = sum(t['net_pnl_usd'] for t in group)
+        result[cohort + '_completed_trades_by_entry_regime'] = {label: sum(t['entry_regime'] == label for t in group) for label in LABELS}
+        result[cohort + '_realized_pnl_by_entry_regime'] = {label: sum(t['net_pnl_usd'] for t in group if t['entry_regime'] == label) for label in LABELS}
+    # Internal state is implementation detail, never part of the saved audit.
+    for holding in unresolved:
+        holding.pop('_recovery_needed', None)
     return result
 
 
@@ -511,9 +586,10 @@ def analyze_book_shape(sources: list[FrozenStream], config: BookShapeConfig, out
         for frame in session['frames']:
             row = by_time[(session['identity']['session_id'], frame['unix_us'])]
             frame.update(regime=row['regime'], partition=row['partition'], density_component=row.get('density_component'))
-    exclusions = Counter()
+    exclusions, continuity_breaks = Counter(), Counter()
     for session in sessions:
         exclusions.update(session['coverage']['exclusions'])
+        continuity_breaks.update(session['coverage'].get('continuity_break_counts', {}))
     files = [Path(__file__), ROOT / 'research/liquidity_aware_hedging/depth_replay.py',
              Path(__file__).with_name('research_dataset.py')]
     report = dict(kind='orderbook_book_shape_analysis', schema_version=1, version=VERSION,
@@ -523,7 +599,7 @@ def analyze_book_shape(sources: list[FrozenStream], config: BookShapeConfig, out
                   code_hashes={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
                   sessions=sessions, definitions=DEFINITIONS,
                   weighting='equal_regular_hours_grid_states_and_per_snapshot_size_normalization',
-                  coverage=dict(grid_points=len(all_rows), qualified_samples=len(qualified), excluded_samples=len(all_rows) - len(qualified), exclusions=dict(exclusions)),
+                  coverage=dict(grid_points=len(all_rows), qualified_samples=len(qualified), excluded_samples=len(all_rows) - len(qualified), exclusions=dict(exclusions), continuity_break_counts=dict(continuity_breaks)),
                   calibration=calibration, distributions=_feature_distributions(qualified),
                   partition_distributions=dict(calibration=_feature_distributions(train), test=_feature_distributions(test)),
                   side_profiles=_profiles(qualified, edges), regimes=regimes, transitions=transitions, dwell=dwell,
@@ -531,21 +607,22 @@ def analyze_book_shape(sources: list[FrozenStream], config: BookShapeConfig, out
                   boundaries=['Completed direct-venue displayed depth only; actual source and receipt clocks are retained.',
                               'A failed whole-capture clock audit blocks every temporal model and replay in the selection.',
                               'Exactly the configured number of nearest distinct price levels are used; missing levels are not zeros.',
-                              'Grid samples use all callbacks received by that time; resets, invalid intermediate books, stale sides and session/day boundaries break adjacency.',
+                              'Grid samples use all callbacks received by that time; resets, invalid intermediate books, stale sides and session/day boundaries break shape-statistic adjacency. Inventory recovery is an explicit separate quote-based policy.',
                               'No identified order-arrival, cancellation, exchange-time, complete-book, queue-fill or live-profit inference.',
                               'Hypothetical replay operates only on the held-out chronological partition and never sends orders.',
                               'Forward returns overlap and samples are serially dependent; no significance or profitability claim.'])
     if output is not None:
         folder = _private_output(output)
         fields = ['session_id', 'session_date', 'unix_us', 'time_ns', 'sequence', 'epoch', 'segment', 'usable', 'quality',
-                  'partition', 'regime', 'density_component', 'midpoint', 'bid', 'ask', 'bid_age_seconds', 'ask_age_seconds', *FEATURES]
+                  'structural_segment', 'partition', 'regime', 'density_component', 'midpoint', 'bid', 'ask', 'bid_age_seconds', 'ask_age_seconds', *FEATURES]
         features_writer = _Csv(folder, 'shape_features', fields, compress=True)
         for row in all_rows:
             features_writer.write(row)
         report['artifacts'].append(features_writer.close())
         trade_fields = ['session_id', 'session_date', 'segment', 'entry_signal_unix_us', 'entry_unix_us', 'entry_price',
                         'entry_regime', 'exit_signal_unix_us', 'exit_unix_us', 'exit_price', 'exit_regime', 'exit_reason',
-                        'quantity', 'gross_pnl_usd', 'fees_usd', 'net_pnl_usd', 'holding_seconds']
+                        'quantity', 'gross_pnl_usd', 'fees_usd', 'net_pnl_usd', 'holding_seconds',
+                        'structural_segment', 'continuity_cohort', 'interruption_count', 'recovery_decision_unix_us', 'max_unobserved_seconds']
         trades_writer = _Csv(folder, 'shape_trades', trade_fields, compress=True)
         for trade in complete_trades:
             trades_writer.write(trade)

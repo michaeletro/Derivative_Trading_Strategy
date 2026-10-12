@@ -260,8 +260,10 @@ export function parseResult(r) {
       if(!s.clock||!['qualified_receipt_clocks','blocked_clock'].includes(s.clock.status)||!number(s.clock.max_divergence_seconds,0,1e15)
         ||!count(s.clock.wall_regressions)||!count(s.clock.monotonic_regressions)||!s.coverage||!count(s.coverage.grid_points)||!count(s.coverage.qualified_samples)||!count(s.coverage.excluded_samples)
         ||s.coverage.qualified_samples+s.coverage.excluded_samples!==s.coverage.grid_points||s.frames.length>s.coverage.grid_points)fail('Invalid curve-session clock or coverage audit.');
+      parseContinuityBreaks(s.coverage.continuity_break_counts);
       for(const f of s.frames) {
         if(![null,'tight','normal','loose'].includes(f.regime)||![null,'calibration','test'].includes(f.partition))fail('Invalid sampled curve partition or regime.');
+        if(r.shape.replay.continuity_schema_version===1&&(!count(f.segment)||!count(f.structural_segment)))fail('Invalid sampled curve continuity provenance.');
         for(const key of ['tightness_bps','spread_bps','bid_mean_distance_bps','ask_mean_distance_bps','bid_std_distance_bps','ask_std_distance_bps'])
           if(f[key]!==undefined&&f[key]!==null&&!number(f[key],0,1e15)||f.usable&&!number(f[key],0,1e15))fail('Invalid sampled curve statistic.');
         if(f.usable&&!number(f.depth_imbalance,-1,1))fail('Invalid sampled curve imbalance.');
@@ -275,6 +277,10 @@ export function parseResult(r) {
   if(frames>1600) fail('Research display exceeds the bounded frame limit.');
   return r;
 }
+function parseContinuityBreaks(value) {
+  if(value!==undefined&&(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length>100
+    ||Object.entries(value).some(([key,count])=>typeof key!=='string'||key.length>100||!Number.isSafeInteger(count)||count<0)))fail('Invalid observed continuity-break provenance.');
+}
 function parseShape(r) {
   const h=r.shape,count=x=>Number.isSafeInteger(x)&&x>=0,mapping=x=>x&&typeof x==='object'&&!Array.isArray(x),labels=['tight','normal','loose'];
   if(!h||!['completed','blocked_clock'].includes(h.status)||!mapping(h.definitions)||h.weighting!=='equal_regular_hours_grid_states_and_per_snapshot_size_normalization'||!mapping(h.coverage)||!mapping(h.calibration)||!mapping(h.distributions)
@@ -282,6 +288,7 @@ function parseShape(r) {
   const cov=h.coverage,c=h.calibration;
   for(const k of ['grid_points','qualified_samples','excluded_samples'])if(!count(cov[k])||cov[k]>60000)fail('Invalid curve coverage count.');
   if(cov.qualified_samples+cov.excluded_samples!==cov.grid_points||!mapping(cov.exclusions)||Object.values(cov.exclusions).some(x=>!count(x)))fail('Inconsistent curve coverage.');
+  parseContinuityBreaks(cov.continuity_break_counts);
   if(!['calibrated','insufficient_samples','degenerate_calibration'].includes(c.status)||!count(c.samples)||!count(c.test_samples)||c.samples+c.test_samples!==cov.qualified_samples
     ||c.cutoff_unix_us!==null&&!number(c.cutoff_unix_us,0,1e16)||c.threshold_tight_bps!==null&&!number(c.threshold_tight_bps,0,1e15)
     ||c.threshold_loose_bps!==null&&!number(c.threshold_loose_bps,0,1e15)||c.status==='calibrated'&&(!number(c.threshold_tight_bps,0,1e15)||!number(c.threshold_loose_bps,c.threshold_tight_bps+1e-10,1e15)))fail('Invalid frozen curve calibration.');
@@ -323,6 +330,41 @@ function parseShape(r) {
   for(const t of p.trades)if(!id(t.session_id)||!number(t.entry_unix_us,0,1e16)||!number(t.exit_unix_us,t.entry_unix_us+1,1e16)||t.quantity!==1
     ||!number(t.entry_price,1e-12,1e12)||!number(t.exit_price,1e-12,1e12)||!finite(t.gross_pnl_usd)||!number(t.fees_usd,0,1e9)||!finite(t.net_pnl_usd)||typeof t.exit_reason!=='string'
     ||Math.abs(t.gross_pnl_usd-t.fees_usd-t.net_pnl_usd)>1e-6)fail('Invalid hypothetical curve trade.');
+  const continuityFields=['continuity_schema_version','continuity_policy','interruptions','canceled_entry_signals','canceled_exit_signals','recovery_exit_decisions','recovery_completed_trades','continuous_completed_trades','recovery_realized_pnl_usd','continuous_realized_pnl_usd',
+    'continuous_completed_trades_by_entry_regime','recovery_completed_trades_by_entry_regime','continuous_realized_pnl_by_entry_regime','recovery_realized_pnl_by_entry_regime'];
+  const audited=Object.hasOwn(p,'continuity_schema_version');
+  if(!audited&&(continuityFields.some(k=>Object.hasOwn(p,k))||p.trades.some(t=>['continuity_cohort','interruption_count','recovery_decision_unix_us','max_unobserved_seconds'].some(k=>Object.hasOwn(t,k)))))fail('Incomplete historical continuity audit.');
+  if(audited) {
+    const step=r.request.configuration?.step_seconds;
+    if(p.continuity_schema_version!==1||p.continuity_policy!=='retain_position_and_exit_after_soft_recovery'
+      ||!Number.isInteger(step)||!number(step,1,60)
+      ||['interruptions','canceled_entry_signals','canceled_exit_signals','recovery_exit_decisions','recovery_completed_trades','continuous_completed_trades'].some(k=>!count(p[k]))
+      ||!finite(p.recovery_realized_pnl_usd)||!finite(p.continuous_realized_pnl_usd)
+      ||p.recovery_completed_trades+p.continuous_completed_trades!==p.completed_trades
+      ||Math.abs(p.recovery_realized_pnl_usd+p.continuous_realized_pnl_usd-p.realized_pnl_usd)>1e-6)fail('Invalid historical continuity totals.');
+    for(const cohort of ['continuous','recovery']) {
+      const counts=p[cohort+'_completed_trades_by_entry_regime'],pnl=p[cohort+'_realized_pnl_by_entry_regime'];
+      if(!mapping(counts)||!mapping(pnl)||Object.keys(counts).sort().join(':')!==[...labels].sort().join(':')||Object.keys(pnl).sort().join(':')!==[...labels].sort().join(':')
+        ||labels.some(k=>!count(counts[k])||!finite(pnl[k])||counts[k]===0&&Math.abs(pnl[k])>1e-6)
+        ||labels.reduce((sum,k)=>sum+counts[k],0)!==p[cohort+'_completed_trades']
+        ||Math.abs(labels.reduce((sum,k)=>sum+pnl[k],0)-p[cohort+'_realized_pnl_usd'])>1e-6)fail('Invalid continuous or recovery curve cohort.');
+    }
+    const previews={continuous:0,recovery:0};
+    for(const t of p.trades) {
+      if(!['continuous','recovery'].includes(t.continuity_cohort)||!labels.includes(t.entry_regime)||!count(t.interruption_count)||!number(t.max_unobserved_seconds,0,1e15)
+        ||!number(t.entry_signal_unix_us,0,t.entry_unix_us-step*1e6)||!number(t.exit_signal_unix_us,t.entry_unix_us,t.exit_unix_us-step*1e6)
+        ||(t.continuity_cohort==='recovery')!==(t.exit_reason==='quality_gap_recovery')
+        ||t.continuity_cohort==='continuous'&&(t.interruption_count!==0||t.recovery_decision_unix_us!==null||t.max_unobserved_seconds!==0)
+        ||t.continuity_cohort==='recovery'&&(t.interruption_count<1||t.recovery_decision_unix_us!==t.exit_signal_unix_us))fail('Invalid recovery trade audit.');
+      previews[t.continuity_cohort]++;
+    }
+    if(previews.continuous>p.continuous_completed_trades||previews.recovery>p.recovery_completed_trades)fail('Trade previews exceed continuity cohort totals.');
+    if(!Array.isArray(p.unresolved_positions)||p.unresolved_positions.length!==p.censored_positions||p.unresolved_positions.some(t=>!count(t.interruption_count)||typeof t.recovery_waiting!=='boolean'))fail('Invalid unresolved holding continuity audit.');
+    if(p.completed_trades_by_entry_regime!==undefined||p.realized_pnl_by_entry_regime!==undefined) {
+      if(!mapping(p.completed_trades_by_entry_regime)||!mapping(p.realized_pnl_by_entry_regime)||labels.some(k=>p.completed_trades_by_entry_regime[k]!==p.continuous_completed_trades_by_entry_regime[k]+p.recovery_completed_trades_by_entry_regime[k]
+        ||!finite(p.realized_pnl_by_entry_regime[k])||Math.abs(p.realized_pnl_by_entry_regime[k]-p.continuous_realized_pnl_by_entry_regime[k]-p.recovery_realized_pnl_by_entry_regime[k])>1e-6))fail('Entry curve totals disagree with continuity cohorts.');
+    }
+  }
   if(h.status==='blocked_clock'&&(cov.qualified_samples||p.completed_trades||p.status==='hypothetical_replay'))fail('Clock-blocked selection cannot contain temporal models or replay trades.');
   if(r.sessions.some(s=>s.clock?.status==='blocked_clock')&&h.status!=='blocked_clock')fail('A failed recording clock audit must block the selection.');
   if(!Array.isArray(r.artifacts)||r.artifacts.length>2)fail('Invalid curve export manifest.');

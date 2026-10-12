@@ -32,6 +32,48 @@ test('shape parser retains rejected density fits and refuses an unconverged sele
 test('shape parser rejects fabricated coverage, normalized profiles, unsafe artifacts and execution modes',()=>{
   for(const change of [r=>r.shape.coverage.qualified_samples=1,r=>r.shape.replay.status='live',r=>r.shape.replay.completed_trades=1,r=>r.shape.side_profiles.bid.cdf_mean=[0,1],r=>r.shape.transitions.matrix[0][0]=-1,r=>r.shape.calibration.threshold_tight_bps=NaN,r=>r.artifacts=[{name:'shape_features',file:'../secrets',bytes:1,rows:0,content_type:'application/gzip',sha256:'a'.repeat(64)}]]){const r=shapeResult();change(r);assert.throws(()=>parseResult(r));}
 });
+const continuityShapeResult=()=>{
+  const r=shapeResult(),h=r.shape,p=h.replay;
+  h.status='completed';h.coverage={grid_points:80,qualified_samples:80,excluded_samples:0,exclusions:{}};
+  r.sessions[0].coverage={grid_points:80,qualified_samples:80,excluded_samples:0};r.sessions[0].clock.status='qualified_receipt_clocks';r.sessions[0].clock.max_divergence_seconds=0;
+  h.calibration={status:'calibrated',samples:40,test_samples:40,cutoff_unix_us:1e9,threshold_tight_bps:1,threshold_loose_bps:3};h.density_model.status='insufficient_calibration';
+  const groups=(tight=0,normal=0,loose=0)=>({tight,normal,loose});
+  const trade=(cohort,regime,offset)=>({session_id:'1',entry_signal_unix_us:1e9+offset-1e6,entry_unix_us:1e9+offset,entry_price:100.01,entry_regime:regime,
+    exit_signal_unix_us:1e9+offset+2e6,exit_unix_us:1e9+offset+3e6,exit_price:99.99,quantity:1,gross_pnl_usd:-.02,fees_usd:2,net_pnl_usd:-2.02,
+    exit_reason:cohort==='recovery'?'quality_gap_recovery':'hold_timeout',continuity_cohort:cohort,interruption_count:cohort==='recovery'?1:0,
+    recovery_decision_unix_us:cohort==='recovery'?1e9+offset+2e6:null,max_unobserved_seconds:cohort==='recovery'?2:0});
+  Object.assign(p,{status:'hypothetical_replay',cash_end:9995.96,realized_pnl_usd:-4.04,completed_trades:2,continuity_schema_version:1,continuity_policy:'retain_position_and_exit_after_soft_recovery',
+    interruptions:1,canceled_entry_signals:0,canceled_exit_signals:1,recovery_exit_decisions:1,recovery_completed_trades:1,continuous_completed_trades:1,
+    recovery_realized_pnl_usd:-2.02,continuous_realized_pnl_usd:-2.02,continuous_completed_trades_by_entry_regime:groups(1),recovery_completed_trades_by_entry_regime:groups(0,0,1),
+    continuous_realized_pnl_by_entry_regime:groups(-2.02),recovery_realized_pnl_by_entry_regime:groups(0,0,-2.02),completed_trades_by_entry_regime:groups(1,0,1),realized_pnl_by_entry_regime:groups(-2.02,0,-2.02),
+    trades:[trade('continuous','tight',0),trade('recovery','loose',10e6)],unresolved_positions:[]});
+  return r;
+};
+test('shape continuity parser separates clean and recovery trades while allowing bounded previews',()=>{
+  const r=continuityShapeResult();assert.equal(parseResult(r).shape.replay.continuous_completed_trades,1);assert.equal(r.shape.replay.recovery_completed_trades,1);
+  r.shape.replay.trades=r.shape.replay.trades.slice(1);assert.equal(parseResult(r).shape.replay.trades[0].continuity_cohort,'recovery');
+  r.shape.replay.censored_positions=1;r.shape.replay.unresolved_positions=[{interruption_count:2,recovery_waiting:true}];assert.equal(parseResult(r).shape.replay.censored_positions,1);
+});
+test('shape continuity parser rejects partial audits, inconsistent cohorts and invented recovery timing',()=>{
+  const mutations=[r=>delete r.shape.replay.continuity_schema_version,r=>r.shape.replay.continuity_schema_version=2,r=>delete r.shape.replay.interruptions,
+    r=>r.shape.replay.continuity_policy='fill_through_gap',r=>r.shape.replay.continuous_completed_trades=2,r=>r.shape.replay.recovery_realized_pnl_usd=10,
+    r=>r.shape.replay.continuous_completed_trades_by_entry_regime={tight:1,normal:0},r=>r.shape.replay.recovery_completed_trades_by_entry_regime.loose=0,
+    r=>r.shape.replay.continuous_realized_pnl_by_entry_regime.normal=1,r=>r.shape.replay.completed_trades_by_entry_regime.tight=0,
+    r=>r.shape.replay.trades[0].interruption_count=1,r=>r.shape.replay.trades[0].max_unobserved_seconds=1,r=>r.shape.replay.trades[1].interruption_count=0,
+    r=>r.shape.replay.trades[1].recovery_decision_unix_us=r.shape.replay.trades[1].exit_unix_us,
+    r=>r.shape.replay.trades[1].exit_signal_unix_us=r.shape.replay.trades[1].exit_unix_us,
+    r=>r.shape.replay.trades[1].recovery_decision_unix_us--,r=>r.shape.replay.trades[1].exit_reason='hold_timeout',r=>r.shape.replay.trades[0].exit_reason='quality_gap_recovery',
+    r=>r.shape.replay.trades[0].entry_signal_unix_us=r.shape.replay.trades[0].entry_unix_us-500000,
+    r=>r.shape.replay.trades[0].exit_signal_unix_us=r.shape.replay.trades[0].exit_unix_us-500000,
+    r=>r.request.configuration.step_seconds=2,
+    r=>r.shape.replay.trades[1].entry_regime='fabricated',r=>r.shape.replay.censored_positions=1,r=>r.shape.replay.unresolved_positions=[{interruption_count:-1,recovery_waiting:true}]];
+  for(const change of mutations){const r=continuityShapeResult();change(r);assert.throws(()=>parseResult(r));}
+});
+test('shape continuity provenance preserves callback reasons without treating them as grid exclusions',()=>{
+  const r=continuityShapeResult();r.shape.coverage.continuity_break_counts={crossed_or_locked:123};r.sessions[0].coverage.continuity_break_counts={crossed_or_locked:123};
+  assert.equal(parseResult(r).shape.coverage.qualified_samples,80);
+  for(const bad of [{reason:-1},{reason:'1'},[],{reason:Infinity}]){r.shape.coverage.continuity_break_counts=bad;assert.throws(()=>parseResult(r));}
+});
 const event=(n,changes={})=>({event_id:String(n+100),sequence:String(n),kind:n===1?'start':'update',origin:'adapter',
   received_unix_us:String(1700000000000000+n*1000),received_monotonic_ns:String(1000000000+n*1000000),
   operation:0,side:n%2,position:0,price:n%2?99:101,size:'10',market_maker:'',smart_depth:0,code:0,...changes});

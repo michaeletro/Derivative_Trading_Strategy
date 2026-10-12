@@ -104,9 +104,25 @@ holding-time limit. Decisions fill at the next qualified grid quote at least one
 step later: ask for buys and bid for sells, with adverse slippage and fees. This
 is a one-share, long-only, quote-based hypothetical test; there is no queue,
 market-impact, routing or execution guarantee. Cash and order caps can block
-entries. Missing future quotes censor holdings and retain their reserved cash and
-cost basis; no closing fill or profit is invented. Realized results exclude
-unresolved holdings and are grouped by entry regime for the sequential experiment.
+entries. A temporary quality interruption cancels an unfilled entry or ordinary
+exit signal while retaining the held share, reserved cash and entry cost. At the
+first later qualified state in the same recording, trading day and structural
+context, the simulator decides to liquidate for recovery. That decision fills
+at a later qualified observed bid at least one sampling step afterward. The
+recovery exit intent survives further temporary interruptions; it never fills at
+an invalid state or interpolates missing prices. New signals can resume after the
+position closes. This is an explicit risk policy for the hypothetical experiment,
+not a claim that liquidity remained continuous during the gap.
+
+Resets, structural reconstruction failures, sequence gaps, recording/day
+boundaries and a missing future closing quote retain unresolved exposure and its
+cash reservation. The simulator never silently restarts with fresh capital.
+Results compare **continuous strategy exits** separately from **interruption
+recovery exits**, each grouped by the entry curve. Total realized P&L includes
+both cohorts and excludes unresolved holdings. Counts, fees, canceled simulation
+signals, recovery decision/fill times and interruption diagnostics remain in the
+saved report and complete trade CSV. Older saved reports retain their original
+semantics and are labeled for rerunning with the recovery policy.
 
 The default $10,000 budget and $1,000 order cap are research assumptions, separate
 from the disabled execution planner and your actual account. Enter $500 to test
@@ -117,6 +133,8 @@ Every selected recording receives a whole-capture receipt-clock audit. A failure
 blocks all temporal outputs and replay for that selection; the saved result
 retains the rejection. Stale sides, crossed/locked/invalid intermediate books,
 insufficient distinct levels, resets and sequence discontinuities break adjacency.
+These strict breaks still apply to curve transitions, dwell diagnostics and
+forward-return statistics; the recovery policy changes inventory handling only.
 No synthetic fallback or clock correction is performed. The stream limits are
 10 million callbacks per capture, 20 million combined, four GB per file and eight
 GB combined; regular-hours grids are limited to 60,000 positions. Increase the

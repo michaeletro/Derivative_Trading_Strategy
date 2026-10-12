@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import copy
 import csv
 import gzip
 import hashlib
@@ -18,7 +19,7 @@ from playwright.sync_api import sync_playwright, expect
 from http_tests import Server, helper
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'orderbook'))
-from test_book_shape import fixture
+from test_book_shape import fixture, resequence, OPEN, US
 
 
 def main(exe):
@@ -41,6 +42,20 @@ def main(exe):
                 s = header['session']
                 if bad_clock:
                     events[-1]['received_unix_us'] = str(int(events[-1]['received_unix_us']) + 2_000_000)
+                else:
+                    # An open hypothetical holding at 81s has a sell signal.
+                    # The between-grid crossed state cancels that signal; a
+                    # later fresh decision must close it before trading resumes.
+                    quote = next(e for e in events if e['kind'] == 'update' and e['side'] == 0 and e['position'] == 0
+                                 and int(e['received_unix_us']) == OPEN + 81 * US)
+                    for delay, price in ((US // 2, 99.9), (3 * US // 5, quote['price'])):
+                        change = copy.deepcopy(quote)
+                        change.update(received_unix_us=str(OPEN + 81 * US + delay),
+                                      received_monotonic_ns=str(int(quote['received_monotonic_ns']) + delay * 1000),
+                                      price=price, price_repr=repr(price))
+                        events.append(change)
+                    events.sort(key=lambda e: int(e['received_unix_us']))
+                    resequence(header, events)
                 sid = db.execute('''INSERT INTO depth_sessions(run_id,source,native_id,contract_id,symbol,currency,contract_route,venue,
                     requested_rows,smart_depth,started_ms,ended_ms,state,last_sequence,event_count) VALUES(?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)''',
                     (run, 'mock', 'shape-browser-' + str(bad_clock), s['contract_id'], s['symbol'], 'USD', s['contract_route'], s['venue'], 5,
@@ -88,6 +103,11 @@ def main(exe):
             expect(page.locator('#ob-shape-regimes tr')).to_have_count(3)
             expect(page.locator('#ob-shape-replay-note')).to_contain_text('No broker orders are sent')
             expect(page.locator('#ob-shape-trades tr')).not_to_have_count(1)
+            expect(page.locator('#ob-shape-cohort-heading')).to_contain_text('Continuous completed trades')
+            expect(page.locator('#ob-shape-continuity')).to_contain_text('Recovery completed trades')
+            expect(page.locator('#ob-shape-recovery-panel')).to_be_visible()
+            expect(page.locator('#ob-shape-recovery-cohorts tr')).to_have_count(3)
+            expect(page.locator('#ob-shape-trades')).to_contain_text('Recovery exit')
             page.locator('#ob-shape-profile').select_option('tight')
             expect(page.locator('#ob-shape-profile-note')).to_contain_text('Tighter curves after calibration')
             page.locator('#ob-shape-scrub').fill('75')
@@ -102,6 +122,13 @@ def main(exe):
             ck(report['request']['mode'] == 'shape' and report['shape']['replay']['completed_trades'] > 0)
             ck(report['shape']['calibration']['samples'] >= 30 and report['shape']['calibration']['test_samples'] >= 30)
             ck(report['shape']['replay']['realized_pnl_usd'] < 0)  # Fixed quotes + fees, never a profit fixture.
+            replay = report['shape']['replay']
+            ck(replay['continuity_schema_version'] == 1 and replay['continuous_completed_trades'] > 1 and replay['recovery_completed_trades'] == 1)
+            ck(replay['canceled_exit_signals'] >= 1 and replay['recovery_exit_decisions'] >= 1)
+            ck(replay['completed_trades'] == replay['continuous_completed_trades'] + replay['recovery_completed_trades'])
+            recovery = next(t for t in replay['trades'] if t['continuity_cohort'] == 'recovery')
+            ck(recovery['exit_unix_us'] > recovery['recovery_decision_unix_us'] >= OPEN + 82 * US)
+            ck(sum(replay['continuous_completed_trades_by_entry_regime'].values()) == replay['continuous_completed_trades'])
             ck(report['shape']['side_profiles']['bid']['samples'] == report['shape']['coverage']['qualified_samples'])
             for artifact in report['artifacts']:
                 with page.expect_download() as info:
@@ -111,7 +138,11 @@ def main(exe):
                 raw = path.read_bytes()
                 ck(len(raw) == artifact['bytes'] and hashlib.sha256(raw).hexdigest() == artifact['sha256'])
                 text = gzip.decompress(raw).decode()
-                ck(len(list(csv.DictReader(io.StringIO(text)))) == artifact['rows'])
+                rows = list(csv.DictReader(io.StringIO(text)))
+                ck(len(rows) == artifact['rows'])
+                if artifact['name'] == 'shape_trades':
+                    ck(sum(row['continuity_cohort'] == 'recovery' for row in rows) == replay['recovery_completed_trades'])
+                    ck(all('interruption_count' in row and 'recovery_decision_unix_us' in row for row in rows))
                 ck(helper.TOKEN not in text)
             expect(page.locator('#ob-shape-download-note')).to_contain_text('integrity hash verified')
             page.locator('#ob-shape').screenshot(path=str(shots / 'book-shape-synthetic-desktop.png'))
@@ -125,6 +156,7 @@ def main(exe):
             page.locator('#ob-results-tab').click()
             page.locator('#ob-jobs').get_by_role('button', name='Open result').click()
             expect(page.locator('#ob-shape-status')).to_contain_text('calibrated')
+            expect(page.locator('#ob-shape-trades')).to_contain_text('Recovery exit')
             with page.expect_download() as info:
                 page.locator('#ob-download').click()
             reopened = root / 'reopened.json'
@@ -142,10 +174,11 @@ def main(exe):
             page.locator('#forget').click()
             expect(page.locator('#ob-shape')).to_be_hidden()
             ck(page.locator('#ob-shape-exports').text_content() == '' and page.locator('#ob-shape-status').text_content() == '')
+            ck(page.locator('#ob-shape-continuity').text_content() == '' and page.locator('#ob-shape-recovery-cohorts').text_content() == '')
             ck(not any(path in ('/api/broker/connect', '/api/depth/subscribe', '/api/depth/unsubscribe', '/ib/send') or '/api/trading' in path for _, path in calls))
             ck(not errors)
         browser.close()
-    print(f'{checks} book-shape browser checks plus chart, settings, saved-result restart, clock-block and sign-out assertions passed (synthetic only).')
+    print(f'{checks} book-shape browser checks plus recovery exits, clean curve cohorts, chart, settings, saved-result restart, clock-block and sign-out assertions passed (synthetic only).')
 
 
 if __name__ == '__main__':
