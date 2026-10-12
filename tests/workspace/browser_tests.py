@@ -459,15 +459,20 @@ def main(exe):
             expect(page.locator('#ob-graph-dialog #ob-bids tr')).to_have_count(50)
             expect(page.locator('#ob-graph-dialog #ob-asks tr')).to_have_count(50)
             page.locator('#ob-graph-dialog').screenshot(path=str(shots/'orderbook-50-rows-synthetic-desktop.png'))
-            last_ask=page.locator('#ob-graph-dialog #ob-asks tr').nth(49)
-            # Live rows are replaced each display tick. Scroll the current row in
-            # one browser task rather than waiting for an obsolete node to settle.
-            boxes=last_ask.evaluate("""el => {const dialog=el.closest('dialog'),ladder=el.closest('#ob-expanded-ladders');
+            # The modal persists, but live rows are replaced each display tick.
+            # Resolve both descendants inside its browser task: evaluating a row
+            # locator can race its replacement before the callback begins.
+            boxes=page.locator('#ob-graph-dialog').evaluate("""dialog => {
+                const rows=dialog.querySelectorAll('#ob-asks tr'),el=rows[49],ladder=dialog.querySelector('#ob-expanded-ladders');
+                if(rows.length!==50||!el||!ladder||!ladder.contains(el))throw new Error('Expanded 50-row ask ladder is not mounted');
                 dialog.scrollTop=dialog.scrollHeight;ladder.scrollTop=ladder.scrollHeight;
                 const box=x=>{const r=x.getBoundingClientRect();return {y:r.y,height:r.height}};
-                return {row:box(el),dialog:box(dialog)}}""")
-            row_box=boxes['row'];dialog_box=boxes['dialog']
+                return {row:box(el),dialog:box(dialog),ladder:box(ladder),ladder_scroll_top:ladder.scrollTop,
+                    ladder_scroll_height:ladder.scrollHeight,ladder_client_height:ladder.clientHeight}}""")
+            row_box=boxes['row'];dialog_box=boxes['dialog'];ladder_box=boxes['ladder']
             assert row_box['y']>=dialog_box['y'] and row_box['y']+row_box['height']<=dialog_box['y']+dialog_box['height'],boxes
+            assert row_box['y']>=ladder_box['y'] and row_box['y']+row_box['height']<=ladder_box['y']+ladder_box['height'],boxes
+            assert boxes['ladder_scroll_height']>boxes['ladder_client_height'] and boxes['ladder_scroll_top']>0,boxes
             checks+=1
             page.keyboard.press('Escape')
             state['delivered_rows']=10
