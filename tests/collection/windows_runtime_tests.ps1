@@ -123,6 +123,17 @@ function Start-Process {
 }
 function Stop-Process { param($Id, $ErrorAction) $script:stopped += $Id }
 try {
+    # An elevated CI runner can default a newly created directory's owner to the
+    # Administrators group. The real task runs as an ordinary interactive user.
+    # Give only this new, GUID-named test fixture that user's ownership so the
+    # production ownership check and private-ACL behavior remain fully exercised.
+    [void][IO.Directory]::CreateDirectory($script:runtimeTestRoot)
+    $testDirectory = [IO.DirectoryInfo]::new($script:runtimeTestRoot)
+    $testOwner = $testDirectory.GetAccessControl([Security.AccessControl.AccessControlSections]::Owner)
+    $testOwner.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+    $testDirectory.SetAccessControl($testOwner)
+    Assert-True ((Get-Acl -LiteralPath $script:runtimeTestRoot).GetOwner([Security.Principal.SecurityIdentifier]).Value -eq
+        [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) 'The runtime test fixture is not owned by its current user.'
     $closedResult = @(Invoke-DerivativeDailyCollection)
     Assert-True ($closedResult[-1] -eq 0) 'A closed session did not exit successfully.'
     Assert-True ($script:started.Count -eq 1 -and $script:started[0].EndsWith(' window')) 'A closed session launched collection.'
