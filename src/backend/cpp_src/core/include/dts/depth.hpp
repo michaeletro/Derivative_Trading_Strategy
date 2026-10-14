@@ -6,6 +6,8 @@
 #include <vector>
 
 namespace dts {
+// Application resource bound; requested rows are not guaranteed delivered rows.
+inline constexpr int max_depth_rows = 50;
 // Direct USD equity depth only. A row can identify a market maker, not a unique
 // price level or individual order. No exchange sequence/time is fabricated.
 struct DepthSpec {
@@ -15,9 +17,9 @@ struct DepthSpec {
     void validate() const {
         contract.validate();
         if (contract.security_type != SecurityType::Equity || contract.currency != "USD" ||
-            venue.empty() || venue.size() > 32 || venue == "SMART" || rows < 1 || rows > 10 ||
+            venue.empty() || venue.size() > 32 || venue == "SMART" || rows < 1 || rows > max_depth_rows ||
             venue.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") != std::string::npos)
-            throw std::invalid_argument("Depth requires a resolved USD equity, explicit direct venue (not SMART), and 1..10 rows");
+            throw std::invalid_argument("Depth requires a resolved USD equity, explicit direct venue (not SMART), and 1..50 rows");
     }
 };
 struct DepthStamp {
@@ -40,6 +42,9 @@ struct DepthEvent {
     bool smart_depth = false;
     int code = 0;
     std::string origin = "adapter"; // recorder-generated terminal markers are labeled separately.
+    // Raw callback provenance is retained in a private append-only sidecar.
+    // Binary protobuf preserves presence/unknown fields; never credentials.
+    std::string callback_format, raw_payload;
 };
 inline double depth_size(const std::string& value) {
     if (value.empty() || value.size() > 64 ||
@@ -58,7 +63,7 @@ struct DepthLevel {
 class DepthBook {
 public:
     explicit DepthBook(int rows = 5) : rows_(rows) {
-        if (rows < 1 || rows > 10) throw std::invalid_argument("Invalid requested depth rows");
+        if (rows < 1 || rows > max_depth_rows) throw std::invalid_argument("Invalid requested depth rows");
     }
     void apply(const DepthEvent& e) {
         const bool contiguous = e.sequence == sequence_ + 1;
@@ -85,6 +90,12 @@ public:
         }
         auto& levels = sides_[static_cast<std::size_t>(e.side)];
         const auto position = static_cast<std::size_t>(e.position);
+        // Official IBKR 10.45 sample: IBJts/samples/Java/apidemo/
+        // MarketDataPanel.java, DeepModel.updateMktDepth, case DELETE ignores
+        // deletion past the populated tail ("this happens but seems to be harmless").
+        // Bounds/sequence/side checks above still apply. Keep this received
+        // callback; an absent row supplies no inferred cancellation quantity.
+        if (e.operation == 2 && position >= levels.size()) { ++empty_tail_deletes_; return; }
         if (position > levels.size() || (e.operation != 0 && position == levels.size())) {
             invalidate("missing_row_position"); return;
         }
@@ -104,6 +115,7 @@ public:
     bool active() const noexcept { return active_; }
     std::uint64_t sequence() const noexcept { return sequence_; }
     std::uint64_t epoch() const noexcept { return epoch_; }
+    std::uint64_t empty_tail_delete_count() const noexcept { return empty_tail_deletes_; }
     DepthStamp received() const noexcept { return received_; }
     const std::vector<DepthLevel>& asks() const noexcept { return sides_[0]; }
     const std::vector<DepthLevel>& bids() const noexcept { return sides_[1]; }
@@ -123,7 +135,7 @@ public:
 private:
     int rows_;
     std::array<std::vector<DepthLevel>, 2> sides_;
-    std::uint64_t sequence_ = 0, epoch_ = 0;
+    std::uint64_t sequence_ = 0, epoch_ = 0, empty_tail_deletes_ = 0;
     DepthStamp received_;
     bool valid_ = false, active_ = false, started_ = false, terminal_ = false;
     std::string reason_ = "not_started";

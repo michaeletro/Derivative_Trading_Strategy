@@ -36,6 +36,7 @@ def main(exe):
         with page.expect_download() as dl:page.locator('#lab-export').click()
         assert json.loads(Path(dl.value.path()).read_text())['reference']==ref
         page.locator('#lab-catalog').screenshot(path=str(output/'hedging-catalog.png'))
+        page.evaluate('location.hash="hedging"');expect(page.locator('#hedging')).to_be_visible()
         page.set_viewport_size({'width':390,'height':844});page.locator('#hedge-provenance').scroll_into_view_if_needed()
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
         assert page.locator('#hedging .sde-summary').evaluate('(el) => el.scrollWidth <= el.clientWidth+1')

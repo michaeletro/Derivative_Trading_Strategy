@@ -16,3 +16,14 @@
 .replay-lab details {margin-top:15px;border-top:1px solid var(--border);padding-top:12px}
 .replay-lab .replay-notice {color:var(--accent);overflow-wrap:anywhere;line-height:1.8}
 @media(max-width:760px){.replay-lab{padding:18px}.replay-grid,.replay-charts{grid-template-columns:minmax(0,1fr)}.replay-actions>*{max-width:100%}.replay-actions select{flex-basis:100%}.replay-lab canvas{height:220px}}
+
+.replay-metrics {display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:18px 0}
+.replay-metrics article {padding:16px;border:1px solid var(--border);border-radius:10px;min-width:0}
+.replay-metrics span {display:block;font-size:12px;color:var(--muted);line-height:1.5}
+.replay-metrics strong {display:block;margin-top:8px;font-size:22px;overflow-wrap:anywhere}
+
+.variation-inputs {display:grid;gap:10px;max-height:260px;overflow:auto;margin:15px 0}
+.variation-inputs label {display:flex;gap:10px;align-items:center;font-size:13px}
+#variation input[type=checkbox] {width:auto;flex-shrink:0}
+#var-dates {line-height:2;overflow-wrap:anywhere}
+#var-gate {border-left:3px solid var(--accent);padding:12px}

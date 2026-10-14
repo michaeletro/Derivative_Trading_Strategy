@@ -23,11 +23,15 @@ public:
     RequestId resolve(const ContractQuery&) override;
     RequestId request_history(const HistorySpec&, HistoryWindow) override;
     void cancel_history(RequestId) override;
+    RequestId request_ticks(const TickSpec&, std::int64_t) override;
+    void cancel_ticks(RequestId) override;
     RequestId subscribe_depth(const DepthSpec&) override;
     bool unsubscribe_depth(RequestId) override;
     RequestId subscribe(const Contract&) override;
     bool unsubscribe(RequestId) override;
     void request_positions(RequestId) override;
+    RequestId start_trading_monitor(const std::string&) override;
+    void stop_trading_monitor() override;
     std::vector<BrokerEvent> poll() override;
 private:
     struct Impl;

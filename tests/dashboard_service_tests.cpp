@@ -15,11 +15,11 @@ public:
     dts::RequestId resolve(const dts::ContractQuery&) override {
         const auto request = next_++;
         dts::Contract c; c.id = 41 + request; c.symbol = "DEMO"; c.exchange = "SIM"; c.currency = "USD"; c.multiplier = 1;
-        events_.push_back(dts::ContractEvent{request,c}); events_.push_back(dts::ContractsComplete{request,true}); return request;
+        events_.emplace_back(std::in_place_type<dts::ContractEvent>,dts::ContractEvent{request,c}); events_.emplace_back(std::in_place_type<dts::ContractsComplete>,dts::ContractsComplete{request,true}); return request;
     }
     dts::RequestId subscribe(const dts::Contract&) override { ++subscription_calls; return next_++; }
     bool unsubscribe(dts::RequestId) override { return true; }
-    void request_positions(dts::RequestId request) override { events_.push_back(dts::PositionsComplete{request,true}); }
+    void request_positions(dts::RequestId request) override { events_.emplace_back(std::in_place_type<dts::PositionsComplete>,dts::PositionsComplete{request,true}); }
     std::vector<dts::BrokerEvent> poll() override { std::vector<dts::BrokerEvent> out; out.swap(events_); return out; }
 };
 int main() {

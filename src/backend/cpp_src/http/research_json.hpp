@@ -49,6 +49,12 @@ inline Json snapshot_json(const research::Snapshot& s,bool full=false) {
     j["time_basis"]=s.time_basis;j["adjustment_policy"]=s.adjustment_policy;j["bar_count"]=q.bars;
     j["quality"]["nonpositive_closes"]=q.nonpositive_closes;j["quality"]["discontinuities"]=q.discontinuities;
     j["quality"]["large_return_candidates"]=q.large_return_candidates;j["quality"]["response_coverage_complete"]=q.response_coverage_complete;
+    j["quality"]["audit_version"]=2;j["quality"]["structure_validated"]=true;
+    j["quality"]["nonpositive_price_bars"]=q.nonpositive_price_bars;
+    j["quality"]["volume_expected"]=q.volume_expected;j["quality"]["missing_volume"]=q.missing_volume;j["quality"]["zero_volume"]=q.zero_volume;
+    j["quality"]["missing_weekday_candidates"]=q.missing_weekday_candidates;j["quality"]["weekend_observations"]=q.weekend_observations;
+    j["quality"]["adjustments_verified"]=false;j["quality"]["issue_display_limit"]=100;
+    std::vector<Json> issues;for(const auto& issue:q.issues){Json row;row["coordinate_s"]=issue.coordinate_s;row["kind"]=issue.kind;issues.push_back(std::move(row));}j["quality"]["issues"]=std::move(issues);
     j["quality"]["complete_market_history"]=false;j["quality"]["calendar_verified"]=false;
     std::vector<Json> warnings;for(const auto& w:q.warnings)warnings.emplace_back(w);j["quality"]["warnings"]=std::move(warnings);
     std::vector<Json> gaps;for(auto w:s.uncovered_intervals){Json g;g["start_s"]=w.start;g["end_s"]=w.end;gaps.push_back(std::move(g));}j["uncovered_intervals"]=std::move(gaps);
@@ -65,11 +71,13 @@ inline Json run(const research::Snapshot& s,const research::ReplayConfig& c,std:
     j["snapshot_id"]=std::to_string(s.id);j["snapshot_fingerprint"]=s.fingerprint;j["config"]=config_json(c);
     j["processed"]=result.processed;j["total"]=result.total;j["complete"]=result.processed==result.total;
     j["availability_policy"]=result.availability_policy;j["return_policy"]=result.return_policy;
-    j["units"]="log price returns; annualized sample volatility in decimal units, NOT implied volatility or total returns";
+    j["units"]="log price returns; cumulative price return and drawdown in decimal units; annualized sample volatility, not total returns";
+    j["cumulative_policy"]="close_over_segment_first_close_minus_one_reset_on_invalid_close_or_minute_gap";
+    j["drawdown_policy"]="close_over_segment_running_peak_minus_one";
     std::vector<Json> points;
     for(const auto& p:result.points){Json r;r["ordinal"]=p.ordinal;r["segment"]=p.segment;r["coordinate_s"]=p.coordinate_s;
         r["available_s"]=p.available_s?Json(*p.available_s):Json(nullptr);r["return_span_seconds"]=p.return_span_seconds?Json(*p.return_span_seconds):Json(nullptr);
-        r["close"]=p.close;r["log_return"]=optional(p.log_return);r["status"]=p.status;std::vector<Json> windows;
+        r["close"]=p.close;r["log_return"]=optional(p.log_return);r["cumulative_price_return"]=optional(p.cumulative_price_return);r["drawdown"]=optional(p.drawdown);r["status"]=p.status;std::vector<Json> windows;
         for(const auto& w:p.rolling){Json x;x["window"]=w.window;x["observations"]=w.observations;x["mean_log_return"]=optional(w.mean_log_return);x["annualized_volatility"]=optional(w.annualized_volatility);windows.push_back(std::move(x));}
         r["rolling"]=std::move(windows);points.push_back(std::move(r));}
     j["points"]=std::move(points);

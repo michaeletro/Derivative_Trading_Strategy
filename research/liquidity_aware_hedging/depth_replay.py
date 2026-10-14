@@ -15,6 +15,8 @@ from pathlib import Path
 
 TERMINAL = {'stop', 'error', 'gap', 'interrupted'}
 MAX_EVENTS = 200_000
+MAX_DESCRIPTIVE_EVENTS = 500_000
+MAX_DEPTH_ROWS = 50  # Application bound, not a provider delivery guarantee.
 
 
 def digest(payload: dict) -> str:
@@ -37,13 +39,14 @@ def size_number(value: str) -> Decimal:
 
 class Book:
     def __init__(self, rows: int):
-        if type(rows) is not int or not 1 <= rows <= 10:
-            raise ValueError('Rows must be 1..10')
+        if type(rows) is not int or not 1 <= rows <= MAX_DEPTH_ROWS:
+            raise ValueError('Rows must be 1..50')
         self.rows = rows
         self.asks, self.bids = [], []
         self.sequence = self.epoch = 0
         self.active = self.valid = self.started = self.terminal = False
         self.reason = 'not_started'
+        self.empty_tail_delete_count = 0
 
     def clear(self):
         self.asks.clear()
@@ -96,6 +99,12 @@ class Book:
             self.invalidate('invalid_depth_update')
             return
         levels = self.asks if side == 0 else self.bids
+        # Match official IBKR 10.45 IBJts/samples/Java/apidemo/MarketDataPanel.java
+        # DeepModel.DELETE: a bounded delete beyond the populated tail is a no-op.
+        # It remains a received callback, with no invented cancellation quantity.
+        if op == 2 and pos >= len(levels):
+            self.empty_tail_delete_count += 1
+            return
         if pos > len(levels) or (op != 0 and pos == len(levels)):
             self.invalidate('missing_row_position')
             return
@@ -180,7 +189,11 @@ class Book:
         return float(notional-reference if signed_quantity > 0 else reference-notional)
 
 
-def validate_export(payload: dict) -> dict:
+def validate_export(payload: dict, *, max_events: int = MAX_EVENTS) -> dict:
+    # Only explicit bounded callers may process larger descriptive captures.
+    # Replay, timed features and model workflows retain the original default.
+    if type(max_events) is not int or not 1 <= max_events <= MAX_DESCRIPTIVE_EVENTS:
+        raise ValueError('Export event bound must be 1..500000')
     if (not isinstance(payload, dict) or payload.get('schema_version') != 1 or
             payload.get('kind') != 'displayed_depth_export' or
             payload.get('complete_exchange_book') is not False):
@@ -188,9 +201,12 @@ def validate_export(payload: dict) -> dict:
     if payload.get('sha256') != digest(payload):
         raise ValueError('Export integrity mismatch')
     session, events = payload['session'], payload['events']
+    rows = session.get('requested_rows')
+    if type(rows) is not int or not 1 <= rows <= MAX_DEPTH_ROWS:
+        raise ValueError('Requested rows must be 1..50')
     if session.get('source') not in ('ibkr_tws', 'mock') or session.get('smart_depth') != 0 or session.get('state') not in TERMINAL:
         raise ValueError('Unknown or aggregated depth source')
-    if not isinstance(events, list) or len(events) > MAX_EVENTS:
+    if not isinstance(events, list) or len(events) > max_events:
         raise ValueError('Export too large')
     if len(events) != int(session['event_count']):
         raise ValueError('Incomplete export: event count does not match stopped session')

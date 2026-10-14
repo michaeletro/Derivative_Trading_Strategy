@@ -102,6 +102,51 @@ int main(int argc,char** argv){
             manager.cancel(service);check(store.history_state(later.queued_ids[0])=="interrupted","explicit cancellation persisted");++cases;
             service.disconnect();store.close();
         }
+        if(argc!=2) {
+            // More than 200 batches: scheduling/progress must not use the UI's
+            // truncated request ledger. Separate disposable archive only.
+            const auto multi=root/"multi";const dts::HistoryWindow years{946684800,1767225600};
+            std::size_t batches=0;std::int64_t did=0;
+            {
+                dts::storage::TimeSeriesStore store({multi,multi/"backups"},"test");
+                auto peer=std::make_unique<Peer>();auto* raw=peer.get();
+                dts::ReadOnlyService service(std::make_unique<dts::storage::RecordingBroker>(std::move(peer),store,"mock"));
+                service.connect();dts::storage::HistoricalManager manager(store);
+                auto plan=manager.request(spec(),years,"fetch_missing",service.state());did=plan.dataset_id;batches=plan.queued_ids.size();
+                check(batches>200,"multi-year plan exceeds ledger page");
+                check(store.historical_requests(did,years).size()==200,"bounded display ledger");
+                check(std::get<std::int64_t>(store.historical_progress(did,years).at("queued"))==static_cast<std::int64_t>(batches),"progress covers all batches");
+                check(manager.request(spec(),years,"refresh",service.state()).queued_ids.empty(),"pending refresh deduplicated beyond ledger");
+                check(manager.request(spec(),years,"fetch_missing",service.state()).queued_ids.empty(),"pending missing-data request deduplicated");
+                auto now=dts::Clock::now()+std::chrono::seconds(20);manager.tick(service,now);
+                raw->events={dts::HistoricalBarEvent{raw->last,bar("20000103")},dts::HistoricalEnd{raw->last,"complete",0,"",""}};
+                service.poll();manager.tick(service,now+std::chrono::seconds(1));check(raw->sent==1,"large plans preserve pacing");
+                check(store.historical_bars(did,years).size()==1,"older observed bar saved");
+                manager.cancel(service);service.poll();check(store.historical_queue().empty(),"stop drains scheduled work");
+                store.close();++cases;
+            }
+            {
+                dts::storage::TimeSeriesStore store({multi,multi/"backups"},"test");dts::storage::HistoricalManager manager(store);
+                check(!manager.busy()&&store.historical_queue().empty(),"restart never auto resumes");
+                const auto resumed=manager.request(spec(),years,"fetch_missing",dts::ConnectionState::Ready);
+                check(resumed.queued_ids.size()==batches-1,"explicit resume skips completed coverage");
+                auto cat=store.historical_catalog();check(std::get<std::int64_t>(cat[0].at("requested_start_s"))==years.start,"saved catalog keeps full period");
+                check(store.historical_bars(did,years).size()==1,"restart preserves saved bars");store.close();++cases;
+            }
+            {
+                const auto wide=root/"wide";dts::storage::TimeSeriesStore store({wide,wide/"backups"},"test");
+                auto did=store.historical_dataset(spec());dts::HistoryWindow w{years.start,years.start+2100LL*86400};
+                auto chunks=dts::historical_chunks(spec(),{w});auto ids=store.queue_history(did,chunks);
+                for(std::size_t i=0;i<ids.size();++i){
+                    store.bind_history(ids[i],i+1);std::vector<dts::BrokerEvent> events;
+                    for(auto t=chunks[i].start;t<chunks[i].end;t+=86400)events.push_back(dts::HistoricalBarEvent{i+1,bar(dts::utc_text(t,"%Y%m%d"))});
+                    events.push_back(dts::HistoricalEnd{i+1,"complete",0,"",""});store.record_history_events(events);
+                }
+                const auto bars=store.historical_bars(did,w);check(bars.size()==2100,"multi-year views exceed old 2000-row cap without truncation");
+                check(store.historical_gaps(did,w).empty(),"wide coverage complete");
+                check(std::get<std::string>(bars.front().at("volume"))=="123.5","exact source volume retained");store.close();++cases;
+            }
+        }
         std::cout<<cases<<" historical cases passed\n";
         if(argc!=2)std::filesystem::remove_all(root);
         return 0;

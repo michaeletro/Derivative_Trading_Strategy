@@ -14,7 +14,7 @@ import math
 import re
 from zoneinfo import ZoneInfo
 
-from depth_replay import Book, TERMINAL, size_number, validate_export
+from depth_replay import Book, TERMINAL, MAX_DEPTH_ROWS, size_number, validate_export
 from liquidity_dataset import DatasetConfig, build_examples
 
 
@@ -25,7 +25,7 @@ class Config:
     horizon_seconds: int = 30
     lookback_seconds: int = 10
     stale_seconds: float = 5.0
-    levels: int = 5
+    levels: int = 5  # Diagnostic/model dimensions stay bounded to10 independently of capture rows.
 
     def __post_init__(self):
         for key, lo, hi in [('step_seconds', 1, 60), ('horizon_seconds', 1, 1800),
@@ -63,7 +63,7 @@ def validate_input(data):
     s, events = data['session'], data['events']
     if (data.get('time_basis') != 'local_callback_receipt'
             or data.get('exchange_timestamp') is not None
-            or type(s['requested_rows']) is not int or not 1 <= s['requested_rows'] <= 10
+            or type(s['requested_rows']) is not int or not 1 <= s['requested_rows'] <= MAX_DEPTH_ROWS
             or not events or events[0]['kind'] != 'start'
             or events[-1]['kind'] != s['state'] or events[-1]['kind'] not in TERMINAL):
         raise LabError('Require a closed, direct, receipt-timed export')

@@ -28,6 +28,9 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):c.initialize(name,self.data)
     def test_shared_config_rejected(self):
         self.home.mkdir(mode=0o755)
+        # mkdir's mode is filtered by the caller's umask. Explicitly create the
+        # insecure fixture even when the launcher uses a private umask (0077).
+        self.home.chmod(0o755)
         with self.assertRaises(ValueError):c.initialize('research',self.data)
     def test_symlink_token_rejected(self):
         self.home.mkdir(mode=0o700);outside=Path(self.tmp.name)/'outside';outside.write_text('x'*30)

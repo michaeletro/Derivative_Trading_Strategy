@@ -25,4 +25,22 @@ CREATE TRIGGER depth_events_no_update BEFORE UPDATE ON depth_events BEGIN SELECT
 CREATE TRIGGER depth_events_no_delete BEFORE DELETE ON depth_events BEGIN SELECT RAISE(ABORT,'Immutable depth events'); END;
 PRAGMA user_version=6;
 )SQL";
+// Rebuild only the session table; dependent event rows retain their IDs and FK
+// target name. Caller requires a verified backup and disables foreign keys
+// outside the surrounding transaction, restoring them before use.
+inline constexpr const char* depth_rows_v8_migration = R"SQL(
+CREATE TABLE depth_sessions_v8(
+ session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ run_id INTEGER NOT NULL REFERENCES runs(run_id), source TEXT NOT NULL,
+ native_id TEXT NOT NULL, contract_id TEXT NOT NULL, symbol TEXT NOT NULL,
+ currency TEXT NOT NULL, contract_route TEXT NOT NULL, venue TEXT NOT NULL,
+ requested_rows INTEGER NOT NULL CHECK(requested_rows BETWEEN 1 AND 50),
+ smart_depth INTEGER NOT NULL CHECK(smart_depth=0), started_ms INTEGER NOT NULL,
+ ended_ms INTEGER, state TEXT NOT NULL, last_sequence INTEGER NOT NULL DEFAULT 0,
+ event_count INTEGER NOT NULL DEFAULT 0, UNIQUE(run_id,source,native_id));
+INSERT INTO depth_sessions_v8 SELECT * FROM depth_sessions;
+DROP TABLE depth_sessions;
+ALTER TABLE depth_sessions_v8 RENAME TO depth_sessions;
+PRAGMA user_version=8;
+)SQL";
 }

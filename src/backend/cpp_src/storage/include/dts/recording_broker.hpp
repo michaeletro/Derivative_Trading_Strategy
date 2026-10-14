@@ -90,10 +90,18 @@ public:
         store_.require_healthy();return inner_->request_history(spec,window);
     }
     void cancel_history(RequestId id) override {inner_->cancel_history(id);}
+    RequestId request_ticks(const TickSpec& spec,std::int64_t start) override {
+        store_.require_healthy();return inner_->request_ticks(spec,start);
+    }
+    void cancel_ticks(RequestId id) override {inner_->cancel_ticks(id);}
     void request_positions(RequestId id) override {
         store_.require_healthy(); inner_->request_positions(id);
         // Deliberately do not persist account identifiers or position contents.
     }
+    RequestId start_trading_monitor(const std::string& account) override {
+        store_.require_healthy(); return inner_->start_trading_monitor(account);
+    }
+    void stop_trading_monitor() override { inner_->stop_trading_monitor(); }
     std::vector<BrokerEvent> poll() override {
         store_.require_healthy();
         auto events = inner_->poll(); store_.record_depth_events(source_,events);store_.record_history_events(events); store_.record_events(source_, events);

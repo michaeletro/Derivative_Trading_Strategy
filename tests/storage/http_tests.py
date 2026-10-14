@@ -108,7 +108,43 @@ def main(exe):
         ck(r.returncode==0)
         r2=subprocess.run([sys.executable,str(ROOT/'tools/restore_timeseries.py'),'--backup',str(backups[0]),'--data-dir',str(dest)],capture_output=True,text=True)
         ck(r2.returncode!=0)
-        with sqlite3.connect(dest/'timeseries.sqlite3') as db:ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
+        with sqlite3.connect(dest/'timeseries.sqlite3') as db:
+            ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==8)
+            ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
+        # Restore a disposable copy with the known additive backfill extension.
+        schema7=root/'schema7.sqlite'
+        with sqlite3.connect(backups[0]) as source, sqlite3.connect(schema7) as db:
+            source.backup(db)
+            # Produce genuine legacy depth definitions, not merely a version
+            # label on top of the new 50-row table.
+            old_rows=db.execute('SELECT * FROM depth_sessions').fetchall()
+            db.execute('DROP TABLE depth_sessions')
+            old_ddl=(ROOT/'src/backend/cpp_src/storage/include/dts/depth_schema.hpp').read_text().split('R"SQL(')[1].split(')SQL"')[0]
+            db.executescript(old_ddl.split('CREATE TABLE depth_events')[0])
+            if old_rows:
+                db.executemany('INSERT INTO depth_sessions VALUES('+','.join('?' for _ in old_rows[0])+')',old_rows)
+            ddl=(ROOT/'src/backend/cpp_src/storage/include/dts/backfill_schema.hpp').read_text().split('R"SQL(')[1].split(')SQL"')[0]
+            db.executescript(ddl)
+        original7=schema7.read_bytes()
+        dest7=root/'restored7'
+        command=[sys.executable,str(ROOT/'tools/restore_timeseries.py'),'--backup',str(schema7),'--data-dir',str(dest7)]
+        ck(subprocess.run(command,capture_output=True,text=True).returncode==0)
+        ck(subprocess.run(command,capture_output=True,text=True).returncode!=0)
+        with sqlite3.connect(dest7/'timeseries.sqlite3') as db:
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==7)
+            ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
+            ck(db.execute("SELECT count(*) FROM sqlite_master WHERE name='history_backfills'").fetchone()[0]==1)
+        ck(schema7.read_bytes()==original7)
+        # Unknown depth definitions are refused before even creating a target.
+        malformed=root/'malformed8.sqlite'
+        with sqlite3.connect(backups[0]) as source, sqlite3.connect(malformed) as db:
+            source.backup(db)
+            db.execute('DROP TRIGGER depth_events_no_delete')
+        refused=root/'refused-restore'
+        command=[sys.executable,str(ROOT/'tools/restore_timeseries.py'),'--backup',str(malformed),'--data-dir',str(refused)]
+        ck(subprocess.run(command,capture_output=True,text=True).returncode!=0)
+        ck(not refused.exists())
         # Kill after successful durable response; abrupt exit cannot run a backup.
         (root/'source-offline.sqlite').rename(root/'assets.sqlite')
         with Server(exe,root) as s:

@@ -1,0 +1,947 @@
+import {parseDepth,depthView,maxDepthRows,appendLiveSample,liveSegments,sessionPage,researchRequest,parseJobs,parseResult,aggregate,id,jobId,terminal,replayEventPage,flowNumber} from './orderbook-model.mjs';
+import {numberText} from './model.mjs';
+import {mountBookExplorer} from './orderbook-explorer.mjs';
+import {mountCollection} from './collection.mjs';
+
+export function mountOrderbook(api,onAccessError) {
+  const $=name=>document.getElementById(name), put=(name,value)=>{$(name).textContent=value;};
+  const navigate=route=>window.dispatchEvent(new CustomEvent('dts:navigate',{detail:{route}}));
+  const explorer=mountBookExplorer({navigate});
+  const make=(tag,text,cls='')=>{const el=document.createElement(tag);el.textContent=String(text??'—');el.className=cls;return el;};
+  $('ob-shape').after($('ob-curve-models'));
+  let unlocked=false,busy=false,revision=0,context=null,generation=null;
+  let live=null,liveAt=0,loaded=false,needsReconcile=false,selected=null,pending=null;
+  let sessions=[],cursor='0',hasMore=false,selectedIds=new Set(),jobs=[],capability=null,result=null;
+  let liveTimer=null,jobTimer=null,readinessTimer=null,collectionTimer=null,collectionPoll=null,collectionLab=null,verified=false,previousEvidence=null,liveHistory=[];
+  let graphExpanded=false;
+  let archive=null,submittedJob=null,flowBinPage=0,resultJob=null,datasetBlockPage=0,datasetPairPage=0;
+  const modeLabel=mode=>mode==='shape_comparison'?'Multi-day curves & strategy comparison':mode==='shape'?'Book shape & regimes — historical replay':mode==='proposal_experiment'?'Proposal M0–M2 experiment':mode==='describe'?'Depth, slope & distributions':mode==='flow'?'Order flow over time':mode==='dataset'?'Build research dataset':mode==='compare'?'Model comparison':'Timed book diagnostics';
+  let comparisonDefaultsApplied=false;
+  const graphHomes=new Map();
+  for(const name of ['ob-live-charts','ob-live-ladders','ob-capture-actions']) {
+    const anchor=document.createComment(name+' original position');$(name).before(anchor);graphHomes.set(name,anchor);
+  }
+  function expandGraphs(value) {
+    const dialog=$('ob-graph-dialog');
+    if(value===graphExpanded)return;
+    graphExpanded=value;
+    if(value) {
+      dialog.append($('ob-live-charts'));
+      $('ob-expanded-ladders').append($('ob-live-ladders'));
+      $('ob-chart-controls').append($('ob-capture-actions'));
+      dialog.showModal();
+    } else {
+      if(dialog.open)dialog.close();
+      for(const [name,anchor] of graphHomes)anchor.after($(name));
+    }
+    put('ob-graph-expand',value?'Collapse graphs':'Expand graphs');
+    $('ob-graph-expand').setAttribute('aria-expanded',String(value));
+    renderLive();
+    $('ob-graph-expand').focus({preventScroll:true});
+  }
+  $('ob-graph-expand').addEventListener('click',()=>expandGraphs(!graphExpanded));
+  $('ob-graph-dialog').addEventListener('close',()=>expandGraphs(false));
+  window.addEventListener('resize',()=>{if(unlocked){renderLive();archiveFrame();}});
+  const ready=()=>unlocked&&context?.broker?.state==='ready';
+  const selectedSessions=()=>sessions.filter(s=>selectedIds.has(s.session_id));
+  const notify=t=>put('ob-notice',t);
+  function tab(name,updateRoute=true) {
+    if(!['live','recordings','quality','results'].includes(name))return;
+    for(const value of ['live','recordings','quality','results']) {
+      $(`ob-${value}-panel`).hidden=value!==name;
+      $(`ob-${value}-tab`).setAttribute('aria-selected',String(value===name));
+    }
+    if(name==='recordings')archiveFrame();
+    if(name==='results'&&result?.request.mode==='describe')descriptionPlots();
+    if(name==='results'&&result?.request.mode==='flow')flowPlots();
+    if(name==='results'&&result?.request.mode==='shape')shapePlots();
+    if(name==='results'&&['shape','shape_comparison'].includes(result?.request.mode))curvePlots();
+    if(name==='live')explorer.render();
+    if(updateRoute)navigate(name==='live'?'orderbook':name);
+  }
+  window.addEventListener('dts:workspacechange',event=>{if(event.detail?.orderbookTab)tab(event.detail.orderbookTab,false);});
+  for(const name of ['live','recordings','results']) $(`ob-${name}-tab`).addEventListener('click',()=>tab(name));
+  function controls() {
+    $('ob-refresh').disabled=!unlocked||busy;
+    $('ob-watch').disabled=!unlocked;
+    $('ob-contract-fields').disabled=!ready()||busy;
+    $('ob-resolve').disabled=!!pending;
+    $('ob-start').disabled=!ready()||busy||!loaded||needsReconcile||!selected||!!live?.available||!!collectionLab?.active();
+    $('ob-rows').disabled=!ready()||busy||!!live?.available||!!collectionLab?.active();
+    $('ob-stop').disabled=!unlocked||busy||(!live?.available&&!collectionLab?.active())||needsReconcile;
+    if($('collection-stop'))$('collection-stop').disabled=$('ob-stop').disabled;
+    if($('collection-refresh'))$('collection-refresh').disabled=!unlocked||busy;
+    $('ob-more').disabled=!unlocked||busy||!hasMore;
+    $('ob-jobs-refresh').disabled=!unlocked||busy;
+    for(const button of $('ob-jobs').querySelectorAll('button'))button.disabled=!unlocked||busy;
+    $('ob-research-fields').disabled=!unlocked||busy||!loaded||needsReconcile||!capability?.enabled||!!capability?.busy;
+    $('ob-run').disabled=!selectedIds.size;
+    for(const el of $('ob-sessions').querySelectorAll('input')) el.disabled=!unlocked||busy||!terminal(sessions.find(s=>s.session_id===el.value)?.state);
+    for(const el of $('ob-sessions').querySelectorAll('button'))el.disabled=!unlocked||busy||!terminal(sessions.find(s=>s.session_id===el.dataset.session)?.state);
+    for(const el of ['ob-archive-reset','ob-archive-scrub','ob-archive-export'])$(el).disabled=!unlocked||busy||!archive;
+    $('ob-archive-next').disabled=!unlocked||busy||!archive?.state.more;
+    put('ob-selection-note',`${selectedIds.size} completed recording${selectedIds.size===1?'':'s'} selected. ${$('ob-mode').value==='shape_comparison'?'Select at least two earlier trading dates and one later date. Whole-date thresholds and distribution fits are frozen before testing.':$('ob-mode').value==='shape'?'Early samples calibrate curve groups; later samples use frozen thresholds. Trading is a historical simulation.':$('ob-mode').value==='describe'?'All captured levels are described in event order; no time grid or forecast is estimated.':$('ob-mode').value==='flow'?'Each selected recording uses the chosen elapsed-time range and clock policy separately.':$('ob-mode').value==='dataset'?'Fixed one-second measurements and 30-minute blocks; receipt clocks must qualify.':'Quantity and time settings will be frozen in the saved request.'}`);
+    $('ob-download').disabled=!unlocked||!result;
+    for(const button of $('ob-dataset-exports').querySelectorAll('button'))button.disabled=!unlocked||busy||!resultJob||button.dataset.oversized==='true';
+    for(const button of $('ob-shape-exports').querySelectorAll('button'))button.disabled=!unlocked||busy||!resultJob||button.dataset.oversized==='true';
+    for(const button of $('ob-curve-exports').querySelectorAll('button'))button.disabled=!unlocked||busy||!resultJob||button.dataset.oversized==='true';
+    collectionLab?.update({unlocked,busy,ready:ready(),loaded,reconcile:needsReconcile,selected,live});
+  }
+  async function read(path,method='GET',body,rev=revision) {
+    const value=await api.request(path,method,body);
+    if(rev!==revision||!unlocked) throw new Error('Superseded workspace request.');
+    return value;
+  }
+  async function pollCollection() {
+    if(!unlocked||busy||collectionPoll){schedule();return;}
+    const rev=revision,token={};collectionPoll=token;
+    try{await collectionLab.refresh(rev);}
+    catch(error){if(rev===revision&&unlocked){if([401,403].includes(error.status))onAccessError(error);else notify(error.message||'Collection status unavailable.');}}
+    finally{if(collectionPoll===token){collectionPoll=null;if(rev===revision){controls();schedule();}}}
+  }
+  function schedule() {
+    if(!unlocked) {clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);clearTimeout(collectionTimer);liveTimer=jobTimer=readinessTimer=collectionTimer=null;return;}
+    if(collectionTimer===null)collectionTimer=setTimeout(()=>{collectionTimer=null;void pollCollection();},1000);
+    if(document.hidden){clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);liveTimer=jobTimer=readinessTimer=null;return;}
+    if(readinessTimer===null)readinessTimer=setTimeout(()=>{readinessTimer=null;work(readinessStatus);},5000);
+    if($('ob-watch').checked||pending) {
+      if(liveTimer===null) liveTimer=setTimeout(()=>{liveTimer=null;work(async rev=>{await current(rev);await resolution(rev);});},1000);
+    } else {clearTimeout(liveTimer);liveTimer=null;}
+    if(jobs.some(j=>j.state==='running')||capability?.busy) {
+      if(jobTimer===null) jobTimer=setTimeout(()=>{jobTimer=null;work(loadJobs);},2000);
+    } else {clearTimeout(jobTimer);jobTimer=null;}
+  }
+  async function work(action,mutation=false) {
+    if(!unlocked||busy) {schedule();return;}
+    busy=true;const rev=revision;controls();
+    try { await action(rev); }
+    catch(error) {
+      if(rev===revision) {
+        if([401,403].includes(error.status)) onAccessError(error);
+        else {
+          if(mutation && (!error.status || error.status>=500)) needsReconcile=true;
+          notify((error.message||'Workspace operation unavailable.')+(mutation?' No action was automatically retried; refresh to reconcile.':''));
+        }
+      }
+    } finally {if(rev===revision){busy=false;controls();schedule();}}
+  }
+  function blank(body,columns,text) {
+    const row=make('tr',''),cell=make('td',text);cell.colSpan=columns;row.append(cell);$(body).replaceChildren(row);
+  }
+  function ladder(body,rows) {
+    if(!rows.length){blank(body,3,'No usable displayed rows');return;}
+    $(body).replaceChildren(...rows.map(r=>{const tr=make('tr','');for(const v of [r.price,r.size,r.cumulative])tr.append(make('td',numberText(v,6)));return tr;}));
+  }
+  function svgNode(svg,tag,attrs,text) {
+    const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+    for(const [name,value] of Object.entries(attrs))el.setAttribute(name,String(value));
+    if(text!==undefined)el.textContent=text;svg.append(el);return el;
+  }
+  function chartBox(svg) {
+    const rect=svg.getBoundingClientRect(),width=Math.max(280,rect.width||520),height=Math.max(220,rect.height||360);
+    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+    return {width,height,left:78,right:width-22,top:26,bottom:height-43};
+  }
+  function emptyPlot(svg,text) {
+    const box=chartBox(svg);
+    svg.replaceChildren();svgNode(svg,'text',{x:box.width/2,y:box.height/2,'text-anchor':'middle',class:'ob-chart-empty'},text);
+  }
+  function axes(svg,box,xLabels,yLabels) {
+    svgNode(svg,'line',{x1:box.left,y1:box.bottom,x2:box.right,y2:box.bottom,class:'ob-axis'});
+    for(const [text,x,anchor] of xLabels)svgNode(svg,'text',{x,y:box.bottom+27,'text-anchor':anchor},text);
+    for(const [text,y] of yLabels) {
+      svgNode(svg,'line',{x1:box.left,y1:y,x2:box.right,y2:y,class:'ob-grid'});
+      svgNode(svg,'text',{x:box.left-10,y:y+4,'text-anchor':'end'},text);
+    }
+  }
+  function depthGraph(depth,view,empty='Awaiting a fresh, valid two-sided book') {
+    if(!view.usable)emptyPlot(depth,empty);
+    else {
+      depth.replaceChildren();
+      const prices=[...view.bids,...view.asks].map(r=>r.price);
+      const lo=Math.min(...prices),hi=Math.max(...prices),maxSize=Math.max(view.bids.at(-1).cumulative,view.asks.at(-1).cumulative);
+      const box=chartBox(depth),middle=(lo+hi)/2;
+      const x=p=>box.left+(box.right-box.left)*(p-lo)/(hi-lo),y=q=>box.bottom-(box.bottom-box.top)*q/maxSize;
+      axes(depth,box,[[numberText(lo,4),box.left,'start'],[numberText(middle,4),(box.left+box.right)/2,'middle'],[numberText(hi,4),box.right,'end']],
+        [[numberText(maxSize,2),box.top],[numberText(maxSize/2,2),(box.top+box.bottom)/2],['0',box.bottom]]);
+      for(const [side,rows] of [['bid',view.bids],['ask',view.asks]]) {
+        const points=[`${x(rows[0].price)},${box.bottom}`];let cumulative=0;
+        for(const row of rows) {
+          points.push(`${x(row.price)},${y(cumulative)}`,`${x(row.price)},${y(row.cumulative)}`);cumulative=row.cumulative;
+        }
+        svgNode(depth,'polygon',{points:[...points,`${x(rows.at(-1).price)},${box.bottom}`].join(' '),class:`ob-area ob-${side}-series`});
+        svgNode(depth,'polyline',{points:points.join(' '),class:`ob-${side}-series`});
+        for(const row of rows) {
+          const dot=svgNode(depth,'circle',{cx:x(row.price),cy:y(row.cumulative),r:4,class:`ob-${side}-series`});
+          svgNode(dot,'title',{},`${side==='bid'?'Bid':'Ask'} ${numberText(row.price,6)} · ${numberText(row.size,6)} reported size · cumulative ${numberText(row.cumulative,6)}`);
+        }
+      }
+    }
+  }
+  function renderCharts(view) {
+    depthGraph($('ob-live-depth'),view);
+    const timeline=$('ob-live-timeline');
+    const now=Date.now(),valid=liveHistory.filter(f=>f.usable&&f.at>=now-300000);
+    if(!valid.length)emptyPlot(timeline,'Waiting for valid display samples');
+    else {
+      timeline.replaceChildren();
+      const prices=valid.flatMap(f=>[f.bid,f.ask]);let lo=Math.min(...prices),hi=Math.max(...prices);
+      const pad=Math.max((hi-lo)*.08,Math.abs(hi)*.000001,1e-9);lo-=pad;hi+=pad;
+      const span=Math.min(300000,Math.max(10000,now-valid[0].at));
+      const box=chartBox(timeline);
+      const x=t=>box.left+(box.right-box.left)*(t-(now-span))/span,y=p=>box.bottom-(box.bottom-box.top)*(p-lo)/(hi-lo);
+      const ago=ms=>ms>=60000?'−'+numberText(ms/60000,1)+' min':'−'+numberText(ms/1000,0)+' s';
+      axes(timeline,box,[[ago(span),box.left,'start'],[ago(span/2),(box.left+box.right)/2,'middle'],['Now',box.right,'end']],
+        [[numberText(hi,4),box.top],[numberText((hi+lo)/2,4),(box.top+box.bottom)/2],[numberText(lo,4),box.bottom]]);
+      for(const side of ['bid','ask'])for(const samples of liveSegments(liveHistory,side,now)) {
+        svgNode(timeline,'polyline',{points:samples.map(f=>`${x(f.at)},${y(f[side])}`).join(' '),class:`ob-${side}-series`});
+        const last=samples.at(-1);
+        svgNode(timeline,'circle',{cx:x(last.at),cy:y(last[side]),r:2.5,class:`ob-${side}-series`});
+      }
+    }
+    put('ob-chart-note',`${live?.synthetic?'SYNTHETIC · ':''}${view.usable?'Fresh display sample.':'Current book has no usable two-sided sample.'} ${$('ob-watch').checked?'Updates about once per second.':'Display paused; the recorder runs independently.'} Timeline keeps up to five minutes in this tab; gaps are not filled.`);
+  }
+  function renderRecording() {
+    const r=live?.recording;
+    let message='Recording status not loaded. Refresh the workspace to check saved-event evidence.';
+    if(r) {
+      if(!r.available)message='Local recorder unavailable — saving is not confirmed.';
+      else if(!r.healthy)message=`Recorder needs attention — ${r.last_error||'saving is not confirmed; inspect recorder health.'}`;
+      else if(r.session_id)message=`${r.active?'Saving received callbacks':'Saved capture'} · session ${r.session_id} · ${r.committed_event_count??'unknown'} committed events · ${r.state??'state unavailable'}${r.last_commit_ms?' · archive commit '+new Date(r.last_commit_ms).toLocaleTimeString():''}. Event totals include capture lifecycle records.`;
+      else message='Local recorder ready. No matching capture is currently attached to this depth request.';
+    }
+    if(r?.session_id)message+=r.raw_metadata?.available
+      ?` Raw callback metadata available; committed through sequence ${r.raw_metadata.committed_through_sequence??'unavailable'}.`
+      :' Raw callback metadata is unavailable for this capture.';
+    put('ob-recording-status',message);put('ob-chart-recording',message);
+    $('ob-recording-status').classList.toggle('ob-recorder-warning',!!r&&(!r.available||!r.healthy));
+    const metadata=live?Object.fromEntries(['source','synthetic','available','request_id','contract_id','venue','requested_rows','active','structural_valid','quality','sequence','epoch','last_receipt_unix_us','last_event_age_ms','sequence_basis','time_basis','exchange_timestamp','source_timestamp_available','complete_exchange_book','individual_orders','direct_depth_only','recording','source_fields','metadata_fields','book'].filter(k=>k in live).map(k=>[k,live[k]])):null;
+    put('ob-live-metadata',metadata?JSON.stringify(metadata,null,2):'No metadata loaded.');
+  }
+  function renderLive() {
+    const v=live?depthView(live,Math.max(0,performance.now()-liveAt)):depthView(null);
+    if(!v.usable){verified=false;previousEvidence=null;}
+    for(const [el,k] of [['ob-spread','spread'],['ob-midpoint','midpoint'],['ob-depth','depth'],['ob-imbalance','imbalance']]) put(el,numberText(v[k],6));
+    ladder('ob-bids',v.bids);ladder('ob-asks',v.asks);renderCharts(v);renderRecording();
+    $('ob-bids').classList.toggle('ob-ladder-stale',!v.usable);$('ob-asks').classList.toggle('ob-ladder-stale',!v.usable);
+    put('ob-source',!live?'NOT LOADED':live.source==='mock'?'SYNTHETIC MOCK':live.source==='ibkr_tws'?'IBKR DISPLAYED DEPTH':'BROKER DISABLED');
+    $('ob-source').className='badge'+(live?.source==='mock'?' warning':'');
+    put('ob-quality',v.reason+(verified?' · Advancing native callbacks observed in this tab.':' · Native update progression not confirmed.'));
+    put('ob-live-identity',live?.available?`${live.venue} · conId ${live.contract_id} · request ${live.request_id} · sequence ${live.sequence} / epoch ${live.epoch} · bid ${live.book.bids.length}/${live.requested_rows} rows received (${v.bids.length} distinct prices), ask ${live.book.asks.length}/${live.requested_rows} rows received (${v.asks.length} distinct prices)`:'No depth request loaded. Resolve and explicitly start capture to receive rows.');
+    put('ob-graph-identity',$('ob-live-identity').textContent+' · '+v.reason);
+    put('ob-state',!unlocked?'Dashboard locked.':needsReconcile?'Outcome unknown — refresh before another mutation.':document.hidden?'Display paused; recording continues.':busy?'Checking workspace…':$('ob-watch').checked?'Watching snapshots; archival capture is separate.':'Display paused. Capture may still be recording.');
+  }
+  async function current(rev) {
+    try {
+      const started=performance.now();
+      const p=parseDepth(await read('/api/depth/current','GET',undefined,rev));
+      const view=depthView(p,performance.now()-started);
+      if(p.available && view.usable && p.source==='ibkr_tws') {
+        const key=`${p.request_id}:${p.contract_id}:${p.venue}:${p.epoch}`;
+        const e={key,sequence:BigInt(p.sequence),stamp:BigInt(p.last_receipt_unix_us)};
+        verified=!!previousEvidence && previousEvidence.key===key&&e.sequence>previousEvidence.sequence&&e.stamp>previousEvidence.stamp;
+        if(previousEvidence?.key===key&&e.sequence===previousEvidence.sequence&&e.stamp===previousEvidence.stamp) verified=previousEvidence.verified===true;
+        previousEvidence={...e,verified};
+      } else {verified=false;previousEvidence=null;}
+      liveHistory=appendLiveSample(liveHistory,p,Date.now(),performance.now()-started);
+      live=p;liveAt=started;explorer.observe(p,view,Date.now());if(p.readiness){explorer.readiness(p.readiness);collectionLab?.readiness(p.readiness);}renderLive();
+    } catch(e) {if(rev===revision){live=null;liveHistory=[];verified=false;previousEvidence=null;renderLive();}throw e;}
+  }
+  function renderSessions() {
+    if(!sessions.length){blank('ob-sessions',8,'No recordings loaded. No missing data is assumed to be zero.');return;}
+    const filter=$('ob-session-filter').value.trim().toLowerCase();
+    const filtered=sessions.filter(s=>!filter||[s.session_id,s.symbol,s.venue,s.source,s.state,new Date(s.started_ms).toISOString()].join(' ').toLowerCase().includes(filter));
+    $('ob-sessions').replaceChildren(...filtered.map(s=>{
+      const tr=make('tr',''),choice=make('td',''),input=document.createElement('input');input.type='checkbox';input.value=s.session_id;
+      input.setAttribute('aria-label',`Select recording ${s.session_id}`);input.checked=selectedIds.has(s.session_id);input.disabled=!terminal(s.state);
+      input.addEventListener('change',()=>{if(input.checked)selectedIds.add(s.session_id);else selectedIds.delete(s.session_id);controls();});choice.append(input);tr.append(choice);
+      for(const text of [`#${s.session_id} / ${s.symbol}`,`${s.venue} / ${s.source==='mock'?'SYNTHETIC':s.source}`,new Date(s.started_ms).toISOString().replace('T',' ').slice(0,19),s.requested_rows,s.event_count,s.state]) tr.append(make('td',text));
+      const cell=make('td',''),open=make('button','View recording','secondary');open.dataset.session=s.session_id;open.disabled=!unlocked||busy||!terminal(s.state);
+      open.setAttribute('aria-label',`View recording ${s.session_id}`);
+      open.addEventListener('click',()=>work(rev=>openArchive(rev,s.session_id)));cell.append(open);tr.append(cell);
+      return tr;
+    }));
+    if(!filtered.length)blank('ob-sessions',8,'No loaded recordings match this filter.');
+  }
+  $('ob-session-filter').addEventListener('input',renderSessions);
+  async function readinessStatus(rev){
+    try{const value=await read('/api/readiness','GET',undefined,rev);explorer.readiness(value);collectionLab?.readiness(value);}
+    catch(error){if(rev===revision)explorer.readiness(null);if([401,403].includes(error.status))throw error;}
+    await current(rev);
+  }
+  $('collection-refresh')?.addEventListener('click',()=>work(readinessStatus));
+  $('collection-stop')?.addEventListener('click',()=>{if(collectionLab?.active())collectionLab.requestStop();else if(!$('ob-stop').disabled)$('ob-stop').click();});
+  async function openArchive(rev,sid,more=false) {
+    const prior=more?archive?.state:null;
+    if(!more){archive=null;$('ob-archive').hidden=true;}
+    const body={session_id:sid,limit:1000};
+    if(prior)Object.assign(body,{after_id:prior.eventId,through_id:prior.through});
+    const page=await read('/api/depth/events','POST',body,rev);
+    if(page.session?.session_id!==sid)throw new Error('Recording identity changed.');
+    const next=replayEventPage(page,prior);archive=next;
+    $('ob-archive').hidden=false;
+    $('ob-archive-scrub').max=String(Math.max(0,next.frames.length-1));
+    let chosen=next.frames.findLastIndex(f=>f.usable);if(chosen<0)chosen=Math.max(0,next.frames.length-1);
+    $('ob-archive-scrub').value=String(chosen);
+    const s=page.session;
+    put('ob-archive-title',`${s.symbol} / ${s.venue} · recording ${sid}`);
+    put('ob-archive-summary',`${s.source==='mock'?'SYNTHETIC TEST DATA':'IBKR saved depth'} · ${s.event_count} saved events · showing events ${next.initial.count+1}–${next.state.count}. ${next.state.more?'More events remain; use Next 1,000 events.':'End of recording.'}`);
+    put('ob-archive-clock',next.state.clockWarning?'Clock discrepancy detected. View follows event sequence only; elapsed-time research remains blocked.':'Event-sequence inspection only. Timing and per-row freshness are not certified by this viewer. Research checks run separately.');
+    archiveFrame();if(!more)$('ob-archive').scrollIntoView({block:'start'});
+    notify('Saved recording opened directly from the archive. No analysis job or broker download was needed.');
+  }
+  function archiveFrame() {
+    const f=archive?.frames[Number($('ob-archive-scrub').value)];if(!f)return;
+    const bids=aggregate(f.bids),asks=aggregate(f.asks);
+    depthGraph($('ob-archive-depth'),{usable:f.usable,bids,asks},`No valid two-sided book at this event: ${f.reason}`);
+    ladder('ob-archive-bids',bids);ladder('ob-archive-asks',asks);
+    put('ob-archive-frame',`Local sequence ${f.event.sequence} · ${f.event.kind} · ${f.reason} · receipt time ${new Date(Number(f.event.received_unix_us)/1000).toISOString()} (unverified local clock)`);
+    put('ob-archive-event',JSON.stringify(f.event,null,2));
+  }
+  $('ob-archive-scrub').addEventListener('input',archiveFrame);
+  $('ob-archive-next').addEventListener('click',()=>{if(archive?.state.more)work(rev=>openArchive(rev,archive.page.session.session_id,true));});
+  $('ob-archive-reset').addEventListener('click',()=>{if(archive)work(rev=>openArchive(rev,archive.page.session.session_id));});
+  $('ob-archive-export').addEventListener('click',()=>{
+    if(!unlocked||!archive)return;
+    const s=archive.page.session;
+    const payload={schema_version:1,kind:'displayed_depth_event_page',complete_session:archive.initial.count===0&&!archive.state.more,
+      timing_validated:false,complete_exchange_book:false,time_basis:'local_callback_receipt',session:s,through_id:archive.state.through,
+      start_after_id:archive.initial.eventId,next_after_id:archive.state.eventId,has_more:archive.state.more,
+      initial_replay_checkpoint:archive.initial,metadata_fields:archive.page.metadata_fields,raw_metadata:archive.page.raw_metadata,events:archive.page.rows};
+    const u=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=document.createElement('a');
+    a.href=u;a.download=`depth-session-${s.session_id}-events-${archive.initial.count+1}-${archive.state.count}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+  });
+  async function catalog(rev,more=false) {
+    const after=more?cursor:'0';
+    const p=sessionPage(await read('/api/depth/sessions','POST',{after_id:after,limit:50},rev));
+    if(more&&p.rows.length&&BigInt(p.next_after_id)<=BigInt(after)) throw new Error('Recording pagination did not advance.');
+    const merged=new Map((more?sessions:[]).map(s=>[s.session_id,s]));for(const row of p.rows)merged.set(row.session_id,row);
+    if(merged.size>1000) throw new Error('Catalog display reached 1,000 sessions; use the paginated archive tools for older studies.');
+    sessions=[...merged.values()];cursor=p.next_after_id;hasMore=p.has_more;
+    selectedIds=new Set([...selectedIds].filter(id=>sessions.some(s=>s.session_id===id&&terminal(s.state))));
+    renderSessions();put('ob-catalog-note',`${sessions.length} recordings displayed${hasMore?' — more pages remain':''}. Active captures cannot be selected. Start dates are archive metadata, not verified eligible model dates.`);
+  }
+  function renderJobs() {
+    $('ob-jobs').replaceChildren(...jobs.map(j=>{
+      const card=make('div','','ob-job'),info=make('div','');info.append(make('p',`${modeLabel(j.mode)} · ${j.state} · ${j.source==='mock'?'SYNTHETIC':'IBKR recorded data'}`),make('small',`${j.job_id} · sessions ${j.session_ids.join(', ')}`));
+      if(j.error) {
+        info.append(make('small',j.error));
+        if(/clock|monotonic/i.test(j.error)&&j.mode!=='describe')info.append(make('p','Timing checks blocked this run. Choose Describe depth, slope & distributions in Recordings & models to study event-ordered book characteristics with the clock warning retained.','ob-recorder-warning'));
+      }
+      card.append(info);
+      if(j.state==='complete'){const b=make('button','Open result','secondary');b.disabled=!unlocked||busy;b.addEventListener('click',()=>work(async rev=>{
+        result=parseResult(await read(`/api/depth/research/jobs/${j.job_id}/result`,'GET',undefined,rev));resultJob=j.job_id;renderResult();tab('results');
+      }));card.append(b);}
+      if(j.state==='running'){const b=make('button','Cancel research','secondary');b.disabled=!unlocked||busy;b.addEventListener('click',()=>{
+        if(!window.confirm('Cancel this offline research job? Recording and archived market data will remain unchanged.'))return;
+        work(async rev=>{await read(`/api/depth/research/jobs/${j.job_id}/cancel`,'POST',{},rev);await loadJobs(rev);},true);
+      });card.append(b);}
+      return card;
+    }));
+  }
+  async function loadJobs(rev) {
+    const c=await read('/api/depth/research/status','GET',undefined,rev);
+    if(c.schema_version!==1||typeof c.enabled!=='boolean'||typeof c.busy!=='boolean')throw new Error('Incompatible research worker status.');
+    const list=parseJobs(await read('/api/depth/research/jobs','GET',undefined,rev));capability=c;jobs=list.jobs;renderJobs();
+    put('ob-worker-note',c.message);put('ob-job-note',`${jobs.length} recent runs${list.has_more?' — catalog is limited to the most recent 50':''}${list.invalid_records?` · ${list.invalid_records} invalid records not accepted`:''}. Jobs persist on disk; canceling research does not stop recording.`);
+    const submitted=jobs.find(j=>j.job_id===submittedJob);
+    if(submitted&&submitted.state!=='running') {
+      submittedJob=null;
+      if(submitted.state==='complete') {
+        result=parseResult(await read(`/api/depth/research/jobs/${submitted.job_id}/result`,'GET',undefined,rev));
+        resultJob=submitted.job_id;
+        renderResult();tab('results');notify(`${modeLabel(submitted.mode)} completed. The saved report is open below the research runs.`);
+      } else notify(`${modeLabel(submitted.mode)} ${submitted.state}: ${submitted.error||'No completed report was produced.'}`);
+    }
+  }
+  async function load(rev) {
+    await readinessStatus(rev);await collectionLab.refresh(rev);await catalog(rev);await loadJobs(rev);loaded=true;needsReconcile=false;notify('Workspace refreshed. Broker connection and capture remain explicit.');
+  }
+  $('ob-refresh').addEventListener('click',()=>work(load));
+  $('ob-more').addEventListener('click',()=>work(rev=>catalog(rev,true)));
+  $('ob-jobs-refresh').addEventListener('click',()=>work(loadJobs));
+  $('ob-watch').addEventListener('change',()=>{renderLive();schedule();});
+  function clearSelection() {pending=null;selected=null;$('ob-candidates').replaceChildren();put('ob-selected','Select a returned USD stock explicitly.');controls();}
+  for(const name of ['ob-symbol','ob-venue'])$(name).addEventListener('change',clearSelection);
+  $('ob-contract-form').addEventListener('submit',event=>{
+    event.preventDefault();if(!ready()||pending)return;
+    work(async rev=>{
+      clearSelection();const symbol=$('ob-symbol').value.trim(),venue=$('ob-venue').value;
+      const value=await read('/api/contracts/resolve','POST',{symbol,exchange:venue,security_type:'STK',currency:'USD'},rev);
+      if(!Number.isSafeInteger(value.request_id)||value.request_id<=0)throw new Error('Invalid resolution identifier.');
+      pending={id:String(value.request_id),venue};put('ob-resolution','Waiting for candidates; no depth subscription has been started.');
+    },true);
+  });
+  async function resolution(rev) {
+    if(!pending||!ready())return;const query={...pending};
+    const value=await read(`/api/contracts/requests/${query.id}`,'GET',undefined,rev);
+    if(pending?.id!==query.id)return;
+    if(value.status==='pending')return;
+    pending=null;
+    if(value.status!=='complete'){put('ob-resolution','Resolution failed. No contract selected or capture started.');return;}
+    if(!Array.isArray(value.contracts)||value.contracts.length>64)throw new Error('Invalid contract candidates.');
+    const candidates=value.contracts.filter(c=>c.security_type==='STK'&&c.currency==='USD'&&Number.isSafeInteger(c.contract_id)&&c.contract_id>0);
+    $('ob-candidates').replaceChildren(...candidates.map(c=>{
+      const b=make('button',`Select ${c.symbol} · USD · conId ${c.contract_id} · ${query.venue}`,'secondary');b.type='button';
+      b.addEventListener('click',()=>{selected={...c,venue:query.venue};put('ob-selected',`${c.symbol} · conId ${c.contract_id} · direct ${query.venue} · USD`);controls();});return b;
+    }));
+    put('ob-resolution',`${candidates.length} supported candidates. Confirm the instrument and direct venue before recording.`);
+  }
+  $('ob-start').addEventListener('click',()=>{
+    if(!selected||!ready()||!loaded||needsReconcile||live?.available||collectionLab?.active())return;
+    const rows=Number($('ob-rows').value);if(!Number.isInteger(rows)||rows<1||rows>maxDepthRows){notify(`Request 1..${maxDepthRows} rows per side. Received rows depend on the feed.`);return;}
+    const c={...selected};
+    if(!window.confirm(`Record displayed depth for ${c.symbol} / ${c.contract_id} on ${c.venue}, up to ${rows} rows per side? This writes market observations to the existing local archive. Closing the page does not stop it. No orders will be submitted.`))return;
+    work(async rev=>{
+      const ack=await read('/api/depth/subscribe','POST',{contract_id:String(c.contract_id),venue:c.venue,rows},rev);
+      if(!id(ack.request_id))throw new Error('Capture outcome unknown: invalid acknowledgement.');
+      notify(`Request ${ack.request_id} acknowledged; awaiting actual depth callbacks.`);$('ob-watch').checked=true;
+      await current(rev);await catalog(rev);
+    },true);
+  });
+  $('ob-stop').addEventListener('click',()=>{
+    if(collectionLab?.active()){collectionLab.requestStop();return;}
+    if(!live?.available||needsReconcile)return;const request=live.request_id;
+    if(!window.confirm(`Stop / clear depth request ${request}? Archived events will remain available for research.`))return;
+    work(async rev=>{const value=await read('/api/depth/unsubscribe','POST',{request_id:request},rev);
+      await current(rev);await catalog(rev);notify(value.cancelled?'Capture stopped; inspect its completed session.':'Request cleared or already stopped. Inspect the archive state before proceeding.');},true);
+  });
+  function modeControls() {
+    const describe=$('ob-mode').value==='describe',flow=$('ob-mode').value==='flow',multi=$('ob-mode').value==='shape_comparison',shape=$('ob-mode').value==='shape'||multi,experiment=$('ob-mode').value==='proposal_experiment',dataset=$('ob-mode').value==='dataset'||experiment,compare=$('ob-mode').value==='compare';
+    if(multi&&!comparisonDefaultsApplied){$('ob-research-form').elements.shape_step_seconds.value='5';comparisonDefaultsApplied=true;}
+    $('ob-timed-settings').hidden=describe||flow||shape||dataset;
+    for(const el of $('ob-timed-settings').querySelectorAll('input,select'))el.disabled=describe||flow||shape||dataset;
+    $('ob-shape-settings').hidden=!shape;
+    for(const el of $('ob-shape-settings').querySelectorAll('input,select'))el.disabled=!shape;
+    for(const name of ['ob-shape-calibration-label','ob-shape-variant-label']){$(name).hidden=multi;for(const el of $(name).querySelectorAll('input,select'))el.disabled=!shape||multi;}
+    $('ob-curve-settings').hidden=!multi;for(const el of $('ob-curve-settings').querySelectorAll('input'))el.disabled=!multi;
+    $('ob-flow-settings').hidden=!flow;
+    for(const el of $('ob-flow-settings').querySelectorAll('input,select'))el.disabled=!flow;
+    $('ob-dataset-settings').hidden=!dataset;
+    for(const el of $('ob-dataset-settings').querySelectorAll('input,select'))el.disabled=!dataset;
+    $('ob-experiment-dates').hidden=!experiment;
+    for(const el of $('ob-experiment-dates').querySelectorAll('input')){el.disabled=!experiment;el.required=experiment;}
+    if(experiment)$('ob-dataset-preset').value='proposal_oct2026';
+    $('ob-dataset-preset').disabled=!dataset||experiment;
+    $('ob-partitions').hidden=!compare;
+    for(const el of $('ob-partitions').querySelectorAll('textarea'))el.disabled=!compare;
+    put('ob-mode-note',multi?'Compare imbalance alone with tight-curve-gated imbalance on later whole trading dates, using identical exits. Fit slope, curvature and bid/ask spatial distributions on earlier dates. Strict clocks and fixed-depth coverage apply. The selection is bounded to 60,000 grid states; increase the sample interval or select shorter recordings if needed. The initial 5-second interval fits three full regular trading days.':shape?'Model normalized bid and ask distributions, calibrate tighter and looser curve groups, and compare a simple long-only historical replay after calibration. Receipt clocks must qualify; no order execution is connected.':dataset?'Prepare a research dataset with strict clock checks, coverage flags and next-block target alignment. Review readiness and exclusions before fitting any model.':describe?'Describe all captured price levels in event order. Clock problems are reported; elapsed-time and prediction analyses remain separate.':flow?'Model callback counts and interarrival times, and study depth, slope, spread and imbalance through the chosen time window. Clock checks apply before a time model is calculated.':'Timed diagnostics and prediction models require consistent receipt clocks. Failed clock checks remain enforced.');
+    controls();
+  }
+  $('ob-mode').addEventListener('change',modeControls);
+  $('ob-flow-policy').addEventListener('change',()=>{
+    const exploratory=$('ob-flow-policy').value==='recorded_monotonic';
+    put('ob-flow-policy-note',exploratory?'Exploratory assumption: treat recorded monotonic intervals as seconds, even if receipt clocks disagree. Results are provisional; this does not repair the clock or certify actual elapsed time. Clock reversals still block the model.':'A disagreement between receipt clocks produces an audit report without a time model. Agreement does not certify clock accuracy or exchange event times.');
+    $('ob-flow-policy-note').classList.toggle('ob-recorder-warning',exploratory);
+  });
+  $('ob-research-form').addEventListener('submit',event=>{
+    event.preventDefault();if(!capability?.enabled||capability.busy||needsReconcile)return;
+    let request;
+    try{const f=Object.fromEntries(new FormData(event.currentTarget));f.synthetic=event.currentTarget.elements.synthetic.checked;f.shares_confirmed=$('ob-shares-confirmed').checked;if(f.mode==='proposal_experiment')f.dataset_preset='proposal_oct2026';request=researchRequest(f,selectedSessions());}
+    catch(e){notify(e.message);return;}
+    if(!window.confirm(`Run ${modeLabel(request.mode)} on ${request.session_ids.length} completed recording(s)? Source: ${request.source==='mock'?'SYNTHETIC MOCK':'IBKR recorded data'}.${request.mode==='flow'&&request.configuration.clock_policy==='recorded_monotonic'?' Exploratory recorded-monotonic timing is an explicit assumption; results are provisional.':''} The request and results are saved. No broker request or order will be sent.`))return;
+    work(async rev=>{
+      const ack=await read('/api/depth/research/jobs','POST',request,rev);
+      if(!jobId(ack.job_id))throw new Error('Job outcome unknown. Refresh the research catalog before retrying.');
+      submittedJob=ack.job_id;result=null;resultJob=null;$('ob-result').hidden=true;
+      notify(`Research job ${ack.job_id} submitted. Recording continues independently.`);await loadJobs(rev);tab('results');
+    },true);
+  });
+  function plot(name,frames,key) {
+    const svg=$(name);svg.replaceChildren();const valid=frames.filter(f=>f.usable&&Number.isFinite(f[key]));
+    if(!valid.length)return;
+    let lo=Math.min(...valid.map(f=>f[key])),hi=Math.max(...valid.map(f=>f[key]));const pad=Math.max((hi-lo)*.07,Math.abs(hi)*.000001,1e-9);lo-=pad;hi+=pad;
+    let points=[];const flush=()=>{if(points.length){const el=document.createElementNS('http://www.w3.org/2000/svg','polyline');el.setAttribute('points',points.join(' '));svg.append(el);points=[];}};
+    frames.forEach((f,i)=>{if(i&&f.segment!==frames[i-1].segment)flush();if(!f.usable||!Number.isFinite(f[key])){flush();return;}
+      points.push(`${65+445*i/Math.max(1,frames.length-1)},${150-130*(f[key]-lo)/(hi-lo)}`);});flush();
+    for(const [v,y] of [[hi,18],[lo,156]]){const el=document.createElementNS('http://www.w3.org/2000/svg','text');el.setAttribute('x','3');el.setAttribute('y',String(y));el.textContent=numberText(v,5);svg.append(el);}
+  }
+  function frame() {
+    if(!result)return;const session=result.sessions[Number($('ob-result-session').value)],f=session?.frames[Number($('ob-result-scrub').value)];
+    if(!f){put('ob-result-frame','No replay frames available for this recording.');blank('ob-result-bids',3,'No replay rows');blank('ob-result-asks',3,'No replay rows');return;}
+    put('ob-result-frame',`${new Date(f.unix_us/1000).toISOString()}${result.request.mode==='describe'?' (unverified local receipt clock)':''} · ${f.quality} · local sequence ${f.sequence} · recorded, not live`);
+    ladder('ob-result-bids',aggregate(f.bids.map(([price,size])=>({price,size}))));ladder('ob-result-asks',aggregate(f.asks.map(([price,size])=>({price,size}))));
+  }
+  function resultSession() {
+    if(!result)return;const s=result.sessions[Number($('ob-result-session').value)];if(!s)return;
+    $('ob-result-scrub').max=String(Math.max(0,s.frames.length-1));$('ob-result-scrub').value=String(Math.max(0,s.frames.findIndex(f=>f.usable)));
+    const describe=result.request.mode==='describe',flow=result.request.mode==='flow',multi=result.request.mode==='shape_comparison',shape=result.request.mode==='shape'||multi,dataset=['dataset','proposal_experiment'].includes(result.request.mode);
+    put('ob-result-coverage',JSON.stringify(shape?{session:s.identity,coverage:s.coverage,clock:s.clock}:dataset?{session:s.identity,status:s.dataset.status,coverage:s.dataset.coverage,clock:s.dataset.clock,exclusion_counts:s.dataset.exclusion_counts}:flow?{session:s.identity,status:s.flow.status,window:s.flow.window,clock:s.flow.clock,warnings:s.flow.warnings}:describe?{session:s.identity,eligible_post_update_states:s.descriptive.eligible_events,event_quality:s.descriptive.quality_counts,clock:s.descriptive.clock}:{session:s.identity,grid_points:s.grid_count,eligible_rows:s.sample_count,grid_quality:s.quality_counts,event_quality:s.event_quality_counts,exclusions:s.missing_targets,partial_session_variation:s.partial_session_variation},null,2));
+    if(multi)curvePlots();else if(shape)renderShapeSession(s);
+    if(describe)renderDescription(s);
+    if(flow)renderFlow(s);
+    if(dataset)renderDataset(s);
+    plot('ob-result-price',s.frames,'midpoint');plot('ob-result-imb',s.frames,'depth_imbalance');frame();
+  }
+  const metricName=key=>({midpoint:'Midpoint (price)',spread:'Spread (price)',spread_bps:'Spread (bps)',
+    bid_depth:'Bid depth (reported units)',ask_depth:'Ask depth (reported units)',visible_depth:'Total visible depth (reported units)',
+    depth_imbalance:'Full-depth imbalance',top_imbalance:'Top-level imbalance',top_concentration:'Top-level concentration',
+    bid_level_count:'Bid price levels',ask_level_count:'Ask price levels',
+    bid_slope_bps_per_1000:'Bid slope (bps / 1,000 units)',ask_slope_bps_per_1000:'Ask slope (bps / 1,000 units)',
+    bid_size_hhi:'Bid size concentration (HHI)',ask_size_hhi:'Ask size concentration (HHI)',
+    bid_mean_distance_bps:'Bid mean distance (bps)',ask_mean_distance_bps:'Ask mean distance (bps)',ofi_event:'Top-of-book OFI per event'}[key]??key.replaceAll('_',' '));
+  function descriptionPlots() {
+    const d=result?.sessions[Number($('ob-result-session').value)]?.descriptive;
+    if(!d)return;
+    const key=$('ob-description-metric').value,stat=d.distributions[key],hist=$('ob-description-histogram');
+    put('ob-description-definition',result.descriptive.definitions[key]??'No characteristic selected.');
+    if(!stat?.count)emptyPlot(hist,'No eligible observations for this characteristic');
+    else {
+      hist.replaceChildren();const box=chartBox(hist),h=stat.histogram,max=Math.max(...h.counts),lo=h.edges[0],hi=h.edges.at(-1);
+      const point=lo===hi,x=v=>point?(box.left+box.right)/2:box.left+(box.right-box.left)*(v-lo)/(hi-lo),y=v=>box.bottom-(box.bottom-box.top)*v/max;
+      axes(hist,box,point?[[numberText(lo,4)+' (constant)',x(lo),'middle']]:[[numberText(lo,4),box.left,'start'],[numberText((lo+hi)/2,4),(box.left+box.right)/2,'middle'],[numberText(hi,4),box.right,'end']],
+        [[numberText(max,0),box.top],[numberText(max/2,0),(box.top+box.bottom)/2],['0',box.bottom]]);
+      for(const [i,count] of h.counts.entries()) {
+        const bar=svgNode(hist,'rect',{x:point?x(lo)-12:x(h.edges[i])+1,y:y(count),width:point?24:Math.max(.5,x(h.edges[i+1])-x(h.edges[i])-2),height:box.bottom-y(count),class:'ob-histogram-bar'});
+        svgNode(bar,'title',{},`${numberText(h.edges[i],6)} to ${numberText(h.edges[i+1],6)}: ${count} observations`);
+      }
+    }
+    const svg=$('ob-description-profile'),rows=[...d.depth_profile.bid,...d.depth_profile.ask];
+    if(!rows.length)emptyPlot(svg,'No eligible depth profile');
+    else {
+      svg.replaceChildren();const box=chartBox(svg),maxLevel=Math.max(...rows.map(r=>r.level)),max=Math.max(...rows.map(r=>r.mean_cumulative_size));
+      const x=v=>box.left+(box.right-box.left)*(v-1)/Math.max(1,maxLevel-1),y=v=>box.bottom-(box.bottom-box.top)*v/Math.max(1,max);
+      axes(svg,box,[['Level 1',box.left,'start'],[`Level ${maxLevel}`,box.right,'end']],
+        [[numberText(max,2),box.top],[numberText(max/2,2),(box.top+box.bottom)/2],['0',box.bottom]]);
+      for(const side of ['bid','ask']) {
+        svgNode(svg,'polyline',{points:d.depth_profile[side].map(r=>`${x(r.level)},${y(r.mean_cumulative_size)}`).join(' '),class:`ob-${side}-series`});
+        for(const r of d.depth_profile[side]) {
+          const dot=svgNode(svg,'circle',{cx:x(r.level),cy:y(r.mean_cumulative_size),r:3,class:`ob-${side}-series`});
+          svgNode(dot,'title',{},`${side} level ${r.level}: ${numberText(r.mean_cumulative_size,4)} cumulative; ${r.observations} observations`);
+        }
+      }
+    }
+  }
+  function renderDescription(s) {
+    const d=s.descriptive,c=d.clock,warning=c.status!=='consistent_receipt_clocks';
+    put('ob-description-clock',`${warning?'Clock quality warning':'Receipt clocks passed the consistency audit'} · maximum wall/monotonic divergence ${numberText(c.max_divergence_seconds,6)} seconds · wall regressions ${c.wall_regressions} · monotonic regressions ${c.monotonic_regressions}. ${warning?'This report uses event order only. Timing-dependent analyses remain blocked for this recording.':'This report still uses event order; exchange timestamps and per-row freshness are not certified.'}`);
+    $('ob-description-clock').classList.toggle('ob-recorder-warning',warning);
+    put('ob-description-coverage',d.eligible_events?`${numberText(d.eligible_events,0)} eligible post-update book states from ${numberText(d.total_events,0)} saved events. Statistics describe the recorded displayed book only.`:'No usable two-sided post-update book states were found. No depth or distribution estimate is available. Review the event quality and operation counts below.');
+    put('ob-description-warnings',d.warnings.join(' '));
+    put('ob-description-exclusions','Excluded from this report: '+result.descriptive.excluded_analyses.join('; ')+'.');
+    const prior=$('ob-description-metric').value,keys=Object.keys(d.distributions);
+    $('ob-description-metric').replaceChildren(...keys.map(key=>{const o=make('option',metricName(key));o.value=key;return o;}));
+    if(keys.includes(prior))$('ob-description-metric').value=prior;
+    else if(keys.includes('visible_depth'))$('ob-description-metric').value='visible_depth';
+    const fields=['count','mean','std','min','p05','p25','median','p75','p95','max','skewness','excess_kurtosis'];
+    $('ob-description-statistics').replaceChildren(...keys.map(key=>{const tr=make('tr','');const name=make('th',metricName(key));name.scope='row';name.title=result.descriptive.definitions[key]??'';tr.append(name);
+      for(const f of fields)tr.append(make('td',numberText(d.distributions[key][f],f==='count'?0:5)));return tr;}));
+    if(!keys.length)blank('ob-description-statistics',13,'No characteristic distributions available.');
+    const profile=[];
+    for(const side of ['bid','ask'])for(const row of d.depth_profile[side]) {
+      const tr=make('tr','');tr.append(make('th',side==='bid'?'Bid':'Ask'));
+      for(const key of ['level','observations','mean_size','mean_cumulative_size','mean_distance_bps'])tr.append(make('td',numberText(row[key],key==='level'||key==='observations'?0:5)));
+      profile.push(tr);
+    }
+    $('ob-description-levels').replaceChildren(...profile);if(!profile.length)blank('ob-description-levels',6,'No eligible depth profile.');
+    const counts=$('ob-description-counts');counts.replaceChildren();
+    for(const [title,values] of [['Lifecycle and updates',d.event_counts.by_kind??{}],['Displayed row operations',d.event_counts.by_side??{}],['Book-state quality',d.quality_counts]]) {
+      const card=make('div','','ob-count-card');card.append(make('h4',title));const dl=make('dl','');
+      const entries=(value,prefix='')=>{for(const [key,v] of Object.entries(value)){const label=(prefix?prefix+' · ':'')+key.replaceAll('_',' ');
+        if(v&&typeof v==='object')entries(v,label);else{dl.append(make('dt',label),make('dd',numberText(v,0)));}}};
+      entries(values);card.append(dl);counts.append(card);
+    }
+    descriptionPlots();
+  }
+  $('ob-description-metric').addEventListener('change',descriptionPlots);
+  const flowName=key=>({callback_count:'Depth callbacks per bin',callback_rate:'Depth callbacks per recorded second',interarrival_seconds:'Interarrival time (recorded seconds)',ofi_sum:'Top-of-book OFI per bin'}[key]??'Within-bin '+metricName(key));
+  const currentFlow=()=>result?.request.mode==='flow'?result.sessions[Number($('ob-result-session').value)]?.flow:null;
+  function flowHistogram(svg,stat) {
+    if(!stat?.count){emptyPlot(svg,'No eligible observations');return;}
+    svg.replaceChildren();const box=chartBox(svg),h=stat.histogram,max=Math.max(...h.counts),lo=h.edges[0],hi=h.edges.at(-1),point=lo===hi;
+    const x=v=>point?(box.left+box.right)/2:box.left+(box.right-box.left)*(v-lo)/(hi-lo),y=v=>box.bottom-(box.bottom-box.top)*v/max;
+    axes(svg,box,point?[[flowNumber(lo,6)+' (constant)',x(lo),'middle']]:[[flowNumber(lo,6),box.left,'start'],[flowNumber(hi,6),box.right,'end']],[[flowNumber(max,0),box.top],['0',box.bottom]]);
+    for(const [i,n] of h.counts.entries()) {
+      const bar=svgNode(svg,'rect',{x:point?x(lo)-12:x(h.edges[i])+1,y:y(n),width:point?24:Math.max(.5,x(h.edges[i+1])-x(h.edges[i])-2),height:box.bottom-y(n),class:'ob-histogram-bar'});
+      svgNode(bar,'title',{},`${flowNumber(h.edges[i],9)} to ${flowNumber(h.edges[i+1],9)}: ${n} observations`);
+    }
+  }
+  function flowPlots() {
+    const f=currentFlow();if(!f||$('ob-flow-content').hidden)return;
+    const key=$('ob-flow-series').value,svg=$('ob-flow-timeline');
+    const value=b=>!b.eligible?null:key==='callback_rate'?b.callback_count/b.duration_seconds:key==='callback_count'||key==='ofi_sum'?b[key]:b.means[key];
+    const values=f.bins.map(value),valid=values.filter(Number.isFinite);
+    put('ob-flow-series-note',`${flowName(key)}. ${result.flow.definitions?.[key]??''} ${f.status==='provisional'?'PROVISIONAL: elapsed time is conditional on the recorded-monotonic assumption.':''}`);
+    if(!valid.length)emptyPlot(svg,'No eligible complete bins for this series');
+    else {
+      svg.replaceChildren();const box=chartBox(svg),lo0=Math.min(...valid),hi0=Math.max(...valid),pad=Math.max((hi0-lo0)*.08,Math.abs(hi0)*.000001,1e-9),lo=lo0-pad,hi=hi0+pad;
+      const start=f.window.start_seconds,end=f.window.end_seconds,x=v=>box.left+(box.right-box.left)*(v-start)/Math.max(1e-12,end-start),y=v=>box.bottom-(box.bottom-box.top)*(v-lo)/(hi-lo);
+      axes(svg,box,[[flowNumber(start,3)+' s',box.left,'start'],[flowNumber((start+end)/2,3)+' s',(box.left+box.right)/2,'middle'],[flowNumber(end,3)+' s',box.right,'end']],[[flowNumber(hi,4),box.top],[flowNumber((lo+hi)/2,4),(box.top+box.bottom)/2],[flowNumber(lo,4),box.bottom]]);
+      // At most 10,000 complete bins; the SVG retains every eligible bin and breaks at exclusions.
+      let points=[];const flush=()=>{if(points.length){svgNode(svg,'polyline',{points:points.join(' '),class:'ob-bid-series'});if(points.length===1){const [cx,cy]=points[0].split(',');svgNode(svg,'circle',{cx,cy,r:3,class:'ob-bid-series'});}points=[];}};
+      for(const [i,b] of f.bins.entries()){if(!Number.isFinite(values[i])){flush();continue;}points.push(`${x((b.start_seconds+b.end_seconds)/2)},${y(values[i])}`);}flush();
+    }
+    flowHistogram($('ob-flow-interarrival'),f.distributions.interarrival_seconds);
+    const pmf=f.model.pmf??[],chart=$('ob-flow-pmf');
+    if(!pmf.length)emptyPlot(chart,'No eligible complete bins for a Poisson reference');
+    else {
+      chart.replaceChildren();const box=chartBox(chart),maximum=Math.max(...pmf.flatMap(p=>[p.empirical_probability,p.poisson_probability]),1e-12),width=(box.right-box.left)/pmf.length,y=v=>box.bottom-(box.bottom-box.top)*v/maximum;
+      axes(chart,box,[[pmf[0].label,box.left,'start'],[pmf.at(-1).label,box.right,'end']],[[flowNumber(maximum,4),box.top],['0',box.bottom]]);
+      const points=[];
+      for(const [i,p] of pmf.entries()) {
+        const cx=box.left+width*(i+.5),bar=svgNode(chart,'rect',{x:box.left+width*i+1,y:y(p.empirical_probability),width:Math.max(.5,width-2),height:box.bottom-y(p.empirical_probability),class:'ob-histogram-bar'});
+        svgNode(bar,'title',{},`${p.label} callbacks: observed ${flowNumber(p.empirical_probability,6)}; Poisson ${flowNumber(p.poisson_probability,6)}`);
+        points.push(`${cx},${y(p.poisson_probability)}`);
+      }
+      svgNode(chart,'polyline',{points:points.join(' '),class:'ob-ask-series'});
+    }
+  }
+  function flowBins() {
+    const f=currentFlow();if(!f)return;
+    const start=flowBinPage*200,shown=f.bins.slice(start,start+200);
+    $('ob-flow-bins').replaceChildren(...shown.map(b=>{
+      const tr=make('tr',''),status=b.eligible?'Eligible':b.exclusion_reasons.join(', ')||'Excluded';
+      for(const v of [flowNumber(b.start_seconds,3),flowNumber(b.end_seconds,3),status,...['callback_count','bid_count','ask_count','insert_count','update_count','delete_count','usable_state_count','ofi_transitions'].map(k=>flowNumber(b[k],0)),flowNumber(b.ofi_sum,4)])tr.append(make('td',v));return tr;
+    }));
+    put('ob-flow-bin-note',`Showing bins ${shown.length?start+1:0}–${start+shown.length} of ${f.bins.length}. Full statistics and every bin are retained in Download result JSON. Partial end bins and unavailable intervals are excluded from the model.`);
+    $('ob-flow-more-bins').hidden=f.bins.length<=200;
+    put('ob-flow-more-bins',start+200<f.bins.length?'Show next 200 bins':'Back to first 200 bins');
+  }
+  function renderFlow(s) {
+    const f=s.flow,c=f.clock,blocked=['blocked_clock','no_observation_window'].includes(f.status),provisional=f.status==='provisional';
+    const heading=f.status==='blocked_clock'?'Time model blocked by receipt-clock audit':f.status==='no_observation_window'?'No observation window available':provisional?'PROVISIONAL — exploratory recorded-monotonic timing':'Receipt clocks passed the consistency audit';
+    put('ob-flow-clock',`${heading}. Maximum wall/monotonic disagreement: ${flowNumber(c.max_divergence_seconds,6)} seconds; wall regressions: ${c.wall_regressions}; monotonic regressions: ${c.monotonic_regressions}. ${f.status==='blocked_clock'?'No distribution over time has been estimated. In Recordings & models, choose Explore recorded monotonic time only if you accept a provisional timing assumption; clocks are never repaired or silently overridden.':provisional?'Intervals are treated as seconds by explicit assumption. Actual elapsed time and exchange event times are not certified.':'Clock agreement does not certify accuracy or exchange event times.'}`);
+    $('ob-flow-clock').classList.toggle('ob-recorder-warning',blocked||provisional);
+    put('ob-flow-coverage',`Session ${s.identity.session_id}: selected ${flowNumber(f.window.start_seconds,3)}–${flowNumber(f.window.end_seconds,3)} elapsed recorded seconds; bin width ${flowNumber(f.window.bin_seconds,3)} seconds. ${f.bins.filter(b=>b.eligible).length} eligible complete bins out of ${f.bins.length}. Each recording is modeled separately.`);
+    put('ob-flow-warnings',f.warnings.join(' '));$('ob-flow-content').hidden=blocked;
+    const model=$('ob-flow-model');model.replaceChildren();
+    for(const [title,keys] of [['Rate and variation',[['eligible_bins','Eligible complete bins'],['lambda_per_bin','Mean callbacks per bin'],['rate_per_recorded_second','Callbacks per recorded second'],['sample_variance','Sample count variance']]],['Clustering and zero counts',[['dispersion_index','Variance / mean'],['observed_zero_probability','Observed zero probability'],['poisson_zero_probability','Poisson zero probability']]]]) {
+      const card=make('div','','ob-count-card'),dl=make('dl','');card.append(make('h4',title));for(const [key,label] of keys)dl.append(make('dt',label),make('dd',flowNumber(f.model[key],key==='eligible_bins'?0:6)));card.append(dl);model.append(card);
+    }
+    const fields=['count','mean','std','min','p05','p25','median','p75','p95','max','skewness','excess_kurtosis'];
+    $('ob-flow-statistics').replaceChildren(...Object.entries(f.distributions).map(([key,stat])=>{const tr=make('tr',''),head=make('th',flowName(key));head.scope='row';head.title=result.flow.definitions?.[key]??'';tr.append(head);for(const k of fields)tr.append(make('td',flowNumber(stat[k],k==='count'?0:6)));return tr;}));
+    $('ob-flow-autocorrelation').replaceChildren(...(f.model.autocorrelation??[]).map(a=>{const tr=make('tr','');for(const k of ['lag','correlation','pairs'])tr.append(make('td',flowNumber(a[k],k==='correlation'?6:0)));return tr;}));
+    flowBinPage=0;flowBins();flowPlots();
+  }
+  $('ob-flow-series').addEventListener('change',flowPlots);
+  $('ob-flow-more-bins').addEventListener('click',()=>{const f=currentFlow();if(!f)return;flowBinPage=(flowBinPage+1)*200<f.bins.length?flowBinPage+1:0;flowBins();});
+  const regimeLabel=value=>({tight:'Tighter',normal:'Normal',loose:'Looser',calibration:'Calibration',unclassified:'Unclassified'})[value]??value;
+  const shapeMetric=key=>({tightness_bps:'Weighted distance / tightness (bps)',bid_mean_distance_bps:'Bid weighted mean distance (bps)',ask_mean_distance_bps:'Ask weighted mean distance (bps)',bid_std_distance_bps:'Bid weighted distance std dev (bps)',ask_std_distance_bps:'Ask weighted distance std dev (bps)',bid_skewness:'Bid spatial skewness',ask_skewness:'Ask spatial skewness',bid_excess_kurtosis:'Bid spatial excess kurtosis',ask_excess_kurtosis:'Ask spatial excess kurtosis',bid_hhi:'Bid concentration (HHI)',ask_hhi:'Ask concentration (HHI)',bid_entropy:'Bid spatial entropy',ask_entropy:'Ask spatial entropy',bid_near_share:'Bid near-midpoint liquidity share',ask_near_share:'Ask near-midpoint liquidity share'})[key]??metricName(key);
+  const currentShapeSession=()=>result?.request.mode==='shape'?result.sessions[Number($('ob-result-session').value)]:null;
+  function shapeProfilePlot(svg,profiles,kind) {
+    const available=['bid','ask'].filter(side=>profiles?.[side]?.samples>0);
+    if(!available.length){emptyPlot(svg,'No qualified curve distribution for this subset');return;}
+    svg.replaceChildren();const box=chartBox(svg),end=Math.max(...available.map(side=>profiles[side].distance_edges_bps.at(-1)),1e-9);
+    const maximum=kind==='cdf_mean'?1:Math.max(...available.flatMap(side=>profiles[side].mass_mean),1e-9);
+    const x=d=>box.left+(box.right-box.left)*d/end,y=v=>box.bottom-(box.bottom-box.top)*v/maximum;
+    axes(svg,box,[['0 bps',box.left,'start'],[flowNumber(end/2,4)+' bps',(box.left+box.right)/2,'middle'],[flowNumber(end,4)+' bps',box.right,'end']],[[flowNumber(maximum,4),box.top],[flowNumber(maximum/2,4),(box.top+box.bottom)/2],['0',box.bottom]]);
+    for(const side of available) {
+      const p=profiles[side],values=p[kind],edges=p.distance_edges_bps;
+      const points=values.map((v,i)=>`${x(kind==='cdf_mean'?(values.length===edges.length?edges[i]:edges[i+1]):(edges[i]+edges[i+1])/2)},${y(v)}`).join(' ');
+      svgNode(svg,'polyline',{points,class:`ob-${side}-series`});
+    }
+  }
+  function shapeSnapshot() {
+    const s=currentShapeSession(),f=s?.frames[Number($('ob-shape-scrub').value)];
+    if(!f){emptyPlot($('ob-shape-snapshot'),'No sampled book preview');put('ob-shape-snapshot-note','No recorded sample is available.');$('ob-shape-snapshot-properties').replaceChildren();return;}
+    put('ob-shape-snapshot-note',`${new Date(f.unix_us/1000).toISOString()} · ${regimeLabel(f.regime??'unclassified')} · ${f.partition??'unclassified'} · ${f.quality} · local sequence ${f.sequence}. Recorded state, not live.`);
+    const dl=$('ob-shape-snapshot-properties');dl.replaceChildren();
+    for(const [key,label] of [['tightness_bps','Weighted mean distance (bps)'],['spread_bps','Spread (bps)'],['depth_imbalance','Depth imbalance'],['bid_mean_distance_bps','Bid mean distance (bps)'],['ask_mean_distance_bps','Ask mean distance (bps)'],['bid_std_distance_bps','Bid distance std dev (bps)'],['ask_std_distance_bps','Ask distance std dev (bps)']])dl.append(make('dt',label),make('dd',flowNumber(f[key],6)));
+    const svg=$('ob-shape-snapshot');
+    if(!f.usable||!Number.isFinite(f.midpoint)){emptyPlot(svg,'Excluded sample — no distribution inferred');return;}
+    svg.replaceChildren();const box=chartBox(svg),sides={};
+    for(const side of ['bid','ask']) {
+      const rows=aggregate(f[side+'s'].map(([price,size])=>({price,size}))).slice(0,result.request.configuration.levels),total=rows.reduce((sum,r)=>sum+r.size,0);
+      sides[side]=rows.map(r=>({distance:Math.abs(r.price-f.midpoint)/f.midpoint*10000,share:r.cumulative/total}));
+    }
+    const end=Math.max(...Object.values(sides).flat().map(r=>r.distance),1e-9),x=d=>box.left+(box.right-box.left)*d/end,y=v=>box.bottom-(box.bottom-box.top)*v;
+    axes(svg,box,[['0 bps',box.left,'start'],[flowNumber(end,4)+' bps',box.right,'end']],[['1',box.top],['0.5',(box.top+box.bottom)/2],['0',box.bottom]]);
+    for(const side of ['bid','ask']) {
+      let last=0;const points=[`${x(0)},${y(0)}`];
+      for(const row of sides[side]){points.push(`${x(row.distance)},${y(last)}`,`${x(row.distance)},${y(row.share)}`);last=row.share;const dot=svgNode(svg,'circle',{cx:x(row.distance),cy:y(row.share),r:3,class:`ob-${side}-series`});svgNode(dot,'title',{},`${regimeLabel(side)}: ${flowNumber(row.distance,6)} bps, cumulative share ${flowNumber(row.share,6)}`);}
+      points.push(`${x(end)},${y(last)}`);svgNode(svg,'polyline',{points:points.join(' '),class:`ob-${side}-series`});
+    }
+  }
+  function shapePlots() {
+    if(!result||result.request.mode!=='shape'||$('ob-shape').hidden)return;
+    const h=result.shape,subset=$('ob-shape-profile').value,profiles=subset==='all'?h.side_profiles:h.regimes[subset]?.side_profiles;
+    shapeProfilePlot($('ob-shape-cdf'),profiles,'cdf_mean');shapeProfilePlot($('ob-shape-mass'),profiles,'mass_mean');
+    put('ob-shape-profile-note',`${subset==='all'?'All qualified samples':regimeLabel(subset)+' curves after calibration'} · ${flowNumber(profiles?.bid?.samples??0,0)} bid profiles and ${flowNumber(profiles?.ask?.samples??0,0)} ask profiles. Every included state has equal weight; sizes are normalized within each side.`);
+    const s=currentShapeSession(),svg=$('ob-shape-timeline'),frames=s?.frames??[],valid=frames.filter(f=>f.usable&&Number.isFinite(f.tightness_bps));
+    if(!valid.length)emptyPlot(svg,'No qualified timed curve samples');
+    else {
+      svg.replaceChildren();const box=chartBox(svg),start=frames[0].unix_us,end=frames.at(-1).unix_us,span=Math.max(1,end-start);
+      const thresholds=[h.calibration.threshold_tight_bps,h.calibration.threshold_loose_bps].filter(Number.isFinite),max=Math.max(...valid.map(f=>f.tightness_bps),...thresholds,1e-9)*1.08;
+      const x=t=>box.left+(box.right-box.left)*(t-start)/span,y=v=>box.bottom-(box.bottom-box.top)*v/max;
+      axes(svg,box,[['0 s',box.left,'start'],[flowNumber(span/2e6,1)+' s',(box.left+box.right)/2,'middle'],[flowNumber(span/1e6,1)+' s',box.right,'end']],[[flowNumber(max,4)+' bps',box.top],[flowNumber(max/2,4),(box.top+box.bottom)/2],['0',box.bottom]]);
+      for(const threshold of thresholds)svgNode(svg,'line',{x1:box.left,y1:y(threshold),x2:box.right,y2:y(threshold),class:'ob-threshold'});
+      for(const f of valid){const dot=svgNode(svg,'circle',{cx:x(f.unix_us),cy:y(f.tightness_bps),r:2.5,class:`ob-${f.partition==='calibration'?'calibration':f.regime??'calibration'}-series`});svgNode(dot,'title',{},`${new Date(f.unix_us/1000).toISOString()} · ${regimeLabel(f.regime??'unclassified')} · ${flowNumber(f.tightness_bps,6)} bps`);}
+    }
+    shapeSnapshot();
+  }
+  function renderShapeSession(s) {
+    $('ob-shape-scrub').max=String(Math.max(0,s.frames.length-1));$('ob-shape-scrub').value=String(Math.max(0,s.frames.findIndex(f=>f.usable)));
+    const total=s.coverage.grid_points;
+    put('ob-shape-timeline-note',`Session ${s.identity.session_id}: displaying ${flowNumber(s.frames.length,0)} preview states out of ${flowNumber(total,0)} grid points. All qualified states enter analysis; full measurements are in the CSV export. Grey = calibration, green = tighter, blue = normal, amber = looser. Dots show observed preview samples; gaps are not joined.`);
+    shapePlots();
+  }
+  function renderShapeSummary() {
+    const h=result.shape,c=h.calibration,cov=h.coverage;
+    put('ob-shape-status',`${h.status==='completed'?'Curve analysis saved':'Curve analysis status: '+h.status.replaceAll('_',' ')}. Calibration: ${c.status.replaceAll('_',' ')} · ${flowNumber(c.samples,0)} early samples / ${flowNumber(c.test_samples,0)} later samples. Frozen boundaries: tighter ≤ ${flowNumber(c.threshold_tight_bps,6)} bps; looser > ${flowNumber(c.threshold_loose_bps,6)} bps. Receipt clocks must pass before timed analysis; agreement does not certify exchange timestamps.`);
+    $('ob-shape-status').classList.toggle('ob-recorder-warning',h.status!=='completed'||c.status!=='calibrated');
+    put('ob-shape-coverage',`${flowNumber(cov.qualified_samples,0)} qualified uniform-grid samples out of ${flowNumber(cov.grid_points,0)}; ${flowNumber(cov.excluded_samples,0)} excluded. Each recording's boundaries and excluded intervals remain separate.`);
+    const cards=$('ob-shape-cards');cards.replaceChildren();
+    for(const [title,values] of [['Sampling',{'Qualified states':cov.qualified_samples,'Excluded states':cov.excluded_samples}],['Calibration',{'Early samples':c.samples,'Later samples':c.test_samples}],['Frozen thresholds',{'Tighter boundary (bps)':c.threshold_tight_bps,'Looser boundary (bps)':c.threshold_loose_bps}]]){const card=make('div','','ob-count-card'),dl=make('dl','');card.append(make('h4',title));for(const [label,v] of Object.entries(values))dl.append(make('dt',label),make('dd',flowNumber(v,6)));card.append(dl);cards.append(card);}
+    const fields=['count','mean','std','min','p05','p25','median','p75','p95','max','skewness','excess_kurtosis'];
+    $('ob-shape-statistics').replaceChildren(...Object.entries(h.distributions).map(([key,stat])=>{const tr=make('tr',''),th=make('th',shapeMetric(key));th.scope='row';th.title=h.definitions[key]??'';tr.append(th);for(const k of fields)tr.append(make('td',flowNumber(stat[k],k==='count'?0:6)));return tr;}));
+    if(!Object.keys(h.distributions).length)blank('ob-shape-statistics',13,'No qualified spatial distribution statistics. Review coverage exclusions.');
+    $('ob-shape-regimes').replaceChildren(...['tight','normal','loose'].map(key=>{const r=h.regimes[key],tr=make('tr','');for(const v of [regimeLabel(key),flowNumber(r?.samples??0,0),flowNumber(r?.share,6),...['tightness_bps','spread_bps','depth_imbalance'].map(k=>flowNumber(r?.feature_distributions[k]?.mean,6)),flowNumber(r?.forward_return_bps?.count??0,0),flowNumber(r?.forward_return_bps?.mean,6)])tr.append(make('td',v));return tr;}));
+    $('ob-shape-transitions').replaceChildren(...h.transitions.labels.map((key,i)=>{const tr=make('tr','');tr.append(make('th',regimeLabel(key)));for(const v of h.transitions.matrix[i])tr.append(make('td',flowNumber(v,0)));return tr;}));
+    $('ob-shape-dwell').replaceChildren(...Object.entries(h.dwell).map(([key,d])=>{const tr=make('tr','');for(const v of [regimeLabel(key),flowNumber(d.count,0),flowNumber(d.mean,4),flowNumber(d.median,4),flowNumber(d.p95,4)])tr.append(make('td',v));return tr;}));
+    const density=h.density_model;
+    put('ob-shape-density-note',`${density.status.replaceAll('_',' ')}${density.selected_components?' · '+density.selected_components+' selected component(s)':''}. ${density.warning??'Receipt clock failure blocks density estimation.'}`);
+    $('ob-shape-density-candidates').replaceChildren(...density.candidates.map(v=>{const tr=make('tr','',v.component_count===density.selected_components?'ob-selected-model':'');for(const x of [v.component_count,flowNumber(v.bic,6),flowNumber(v.log_likelihood,6)])tr.append(make('td',x));return tr;}));
+    $('ob-shape-density-components').replaceChildren(...density.components.map(v=>{const tr=make('tr','');for(const x of [v.label,flowNumber(v.weight,6),flowNumber(v.median_width_bps,6),flowNumber(v.std_log_width,6),flowNumber(v.test_samples,0)])tr.append(make('td',x));return tr;}));
+    if(!density.candidates.length)blank('ob-shape-density-candidates',3,'No density candidates were fitted.');if(!density.components.length)blank('ob-shape-density-components',5,'No fitted distribution components.');
+    renderShapeReplay(h.replay);
+    $('ob-shape-profile').value='all';put('ob-shape-definitions',JSON.stringify({definitions:h.definitions,weighting:h.weighting,calibration:c,exclusions:cov.exclusions,warnings:h.warnings??[],replay_assumptions:h.replay.assumptions??[]},null,2));
+    $('ob-shape-exports').replaceChildren(...(result.artifacts??[]).map(a=>{const card=make('div','','ob-count-card'),b=make('button',`Download ${a.file}`,'secondary');b.type='button';b.dataset.oversized=String(a.bytes>64*1024*1024);card.append(make('p',`${flowNumber(a.rows,0)} rows · ${flowNumber(a.bytes/1024/1024,3)} MiB`,'hint'),b);if(a.bytes>64*1024*1024)card.append(make('p','The saved file exceeds the 64 MiB browser download limit.','hint'));b.addEventListener('click',()=>work(async rev=>{const job=resultJob;if(!job)return;put('ob-shape-download-note',`Downloading and checking ${a.file}…`);const blob=await api.downloadResearchArtifact(job,a);if(rev!==revision||!unlocked||job!==resultJob)throw new Error('Research download superseded.');const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`shape-${job}-${a.file}`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);put('ob-shape-download-note',`${a.file} downloaded; size and saved integrity hash verified.`);}));return card;}));put('ob-shape-download-note','');
+  }
+  function renderShapeReplay(replay) {
+    const variants=replay.variants??(replay.variant?[replay]:[]);
+    put('ob-shape-replay-note',`Historical simulation only · ${replay.status.replaceAll('_',' ')}. ${replay.entry_rule} ${replay.exit_rule} A decision precedes a subsequent sampled ask entry or bid exit. One whole share, capital and the notional cap constrain the hypothetical crossing; displayed size is not a verified fill guarantee. Fees and configured slippage are charged. No broker orders are sent, and this replay does not establish future profitability.`);
+    const label=v=>({tight_bid_heavy:'Tighter + bid heavy',tight:'Tighter + bid heavy',normal:'Normal + bid heavy',loose:'Looser + bid heavy',compare_regimes:'Curve group comparison',none:'No trading test'})[v]??v;
+    $('ob-shape-replay').replaceChildren(...variants.map(v=>{const tr=make('tr','');for(const x of [label(v.variant),flowNumber(v.completed_trades,0),flowNumber(v.completed_trades?v.realized_pnl_usd+v.completed_trades*2*result.request.configuration.fee_per_side_usd:0,4),flowNumber(v.fees_paid_usd??0,4),flowNumber(v.realized_pnl_usd,4),flowNumber(v.cash_end,4),flowNumber(v.censored_positions,0),flowNumber(v.affordability_blocks,0)])tr.append(make('td',x));return tr;}));
+    if(!variants.length)blank('ob-shape-replay',8,'Replay unavailable or disabled; no simulated trades were inferred.');
+    const audited=replay.continuity_schema_version===1;
+    const breakCounts=result.shape.coverage.continuity_break_counts,breakNote=breakCounts?` Callback break reasons in the replayed prefix through final sampled time (including initialization): ${Object.entries(breakCounts).map(([reason,n])=>`${reason.replaceAll('_',' ')} ${flowNumber(n,0)}`).join('; ')||'none'}. These are callback reason counts, not missing grid states or independent interruption episodes.`:'';
+    put('ob-shape-continuity-note',(audited?'Temporary unavailable observations cancel pending entry and ordinary exit signals; recovery liquidation intent persists through later soft interruptions. An open holding is retained: after observations recover, a new exit decision waits for a later qualified quote. Recovery exits are counted separately. Structural resets, recording boundaries and the final unresolved holding still reserve cash and cannot supply invented fills.':'Legacy saved replay: interrupted holdings were left unresolved, which could stop later entries. Re-run the selected recording to use recovery exits and separate continuity cohorts.')+breakNote);
+    const continuity=$('ob-shape-continuity');continuity.replaceChildren();
+    if(audited)for(const [title,values] of [['Observation continuity',{'Interruptions':replay.interruptions,'Continuous completed trades':replay.continuous_completed_trades,'Recovery completed trades':replay.recovery_completed_trades}],['Canceled signals',{'Entry signals':replay.canceled_entry_signals,'Exit signals':replay.canceled_exit_signals,'Recovery exit decisions':replay.recovery_exit_decisions}],['Unresolved holdings',{'Positions still held':replay.censored_positions,'Reserved cost basis (USD)':replay.unresolved_cost_basis_usd??0}]]){const card=make('div','','ob-count-card'),dl=make('dl','');card.append(make('h4',title));for(const [name,value] of Object.entries(values))dl.append(make('dt',name),make('dd',flowNumber(value,title==='Unresolved holdings'?4:0)));card.append(dl);continuity.append(card);}
+    put('ob-shape-cohort-heading',audited?'Continuous completed trades by entry curve':'Legacy completed trades by entry curve');
+    put('ob-shape-replay-cohort-note',`${audited?'Only trades with uninterrupted observations enter this curve comparison. ':'This saved result has no clean/recovery separation. '}Groups use one sequential strategy and can have different opportunity counts and holding periods. Net P&L includes spread, configured slippage and round-trip fees. Fees in the overall summary also include entry fees on unresolved holdings; ending cash excludes their reserved cost basis ($${flowNumber(replay.unresolved_cost_basis_usd??0,4)}).`);
+    const counts=audited?replay.continuous_completed_trades_by_entry_regime:replay.completed_trades_by_entry_regime,pnl=audited?replay.continuous_realized_pnl_by_entry_regime:replay.realized_pnl_by_entry_regime;
+    $('ob-shape-replay-cohorts').replaceChildren(...['tight','normal','loose'].map(key=>{const tr=make('tr',''),n=counts?.[key]??0,total=pnl?.[key]??0;for(const x of [regimeLabel(key),flowNumber(replay.eligible_signal_states_by_regime?.[key],0),flowNumber(replay.entry_decisions_by_regime?.[key],0),flowNumber(n,0),flowNumber(total,4),flowNumber(n?total/n:null,4)])tr.append(make('td',x));return tr;}));
+    $('ob-shape-recovery-panel').hidden=!audited;
+    $('ob-shape-recovery-cohorts').replaceChildren(...(audited?['tight','normal','loose'].map(key=>{const tr=make('tr','');for(const x of [regimeLabel(key),flowNumber(replay.recovery_completed_trades_by_entry_regime[key],0),flowNumber(replay.recovery_realized_pnl_by_entry_regime[key],4)])tr.append(make('td',x));return tr;}):[]));
+    const trades=variants.flatMap(v=>(v.trades??[]).map(t=>({...t,variant:v.variant}))).slice(0,200);
+    $('ob-shape-trades').replaceChildren(...trades.map(t=>{const tr=make('tr','');for(const x of [label(t.variant),t.session_id,regimeLabel(t.entry_regime??'unclassified'),t.continuity_cohort==='recovery'?'Recovery exit':t.continuity_cohort==='continuous'?'Continuous':'Legacy / unclassified',flowNumber(t.interruption_count,0),t.entry_unix_us?new Date(t.entry_unix_us/1000).toISOString():'—',t.exit_unix_us?new Date(t.exit_unix_us/1000).toISOString():'—',flowNumber(t.quantity,0),flowNumber(t.entry_price,6),flowNumber(t.exit_price,6),flowNumber(t.gross_pnl_usd,4),flowNumber(t.fees_usd,4),flowNumber(t.net_pnl_usd,4),t.exit_reason??'—'])tr.append(make('td',x));return tr;}));
+    if(!trades.length)blank('ob-shape-trades',14,'No completed simulated trades.');
+    put('ob-shape-trade-note',`Displaying ${trades.length} completed simulated trade previews. All trades, recovery decisions and interruption metadata are retained in the complete trade CSV; unresolved holdings are disclosed separately in the replay summary.`);
+  }
+  $('ob-shape-profile').addEventListener('change',shapePlots);$('ob-shape-scrub').addEventListener('input',shapeSnapshot);
+  window.addEventListener('resize',()=>{if(unlocked&&result?.request.mode==='describe')descriptionPlots();if(unlocked&&result?.request.mode==='flow')flowPlots();if(unlocked&&result?.request.mode==='shape')shapePlots();});
+  const curveArm=name=>name==='baseline'?'Imbalance alone':'Tight curve + imbalance';
+  const curveModels=()=>result?.request.mode==='shape_comparison'?result.curve_experiment?.models:result?.request.mode==='shape'?result.shape?.curve_models:null;
+  const curveMetric=key=>({linear_slope_bps:'Linear slope',linear_r2:'Linear R²',linear_rmse_bps:'Linear residual RMSE',quadratic_slope_bps:'Quadratic slope at mean fraction',quadratic_curvature_bps:'Quadratic curvature',quadratic_min_derivative_bps:'Minimum quadratic derivative',quadratic_r2:'Quadratic R²',quadratic_rmse_bps:'Quadratic residual RMSE',near_secant_bps:'Near secant slope',far_secant_bps:'Far secant slope',secant_change_bps:'Far-minus-near slope'})[key]??key.replaceAll('_',' ');
+  function curveDaily() {
+    const h=result?.curve_experiment;if(!h)return;const cohort=$('ob-curve-cohort').value;
+    put('ob-curve-daily-note',cohort==='continuous'?'Primary comparison: uninterrupted completed trades only. Recovery exits stay separate because their holdings cross unavailable observations.':cohort==='recovery'?'Recovery exits include unobserved intervals. Use these to audit interruption effects; they are outside the primary uninterrupted comparison.':'All completed trades combines continuous and recovery cohorts. Review each separately before interpreting a curve effect.');
+    $('ob-curve-daily').replaceChildren(...h.daily.map(d=>{const prefix=cohort==='all'?'':cohort+'_',n=d[prefix+'completed_trades'],net=d[prefix+'realized_pnl_usd'],gross=d[prefix+'gross_pnl_usd'],hold=cohort==='all'?d.holding_seconds.mean:d[cohort+'_mean_holding_seconds'];const tr=make('tr','');for(const x of [d.session_date,curveArm(d.arm),flowNumber(n,0),flowNumber(gross,4),flowNumber(net,4),flowNumber(n?net/n:null,4),flowNumber(d.recovery_rate===null?null:d.recovery_rate*100,1)+'%',flowNumber(d.censored_positions,0),flowNumber(hold,3)])tr.append(make('td',x));return tr;}));
+    if(!h.daily.length)blank('ob-curve-daily',9,'No held-out comparison trades inferred; review readiness above.');
+  }
+  function renderCurveModels() {
+    const m=curveModels();$('ob-curve-models').hidden=!m;if(!m)return;
+    const intraday=result.request.mode==='shape';
+    put('ob-curve-model-note',`${m.status.replaceAll('_',' ')} · ${flowNumber(m.sample_counts.calibration,0)} training states and ${flowNumber(m.sample_counts.test,0)} held-out states. ${intraday?'Intraday prefix exploration: earlier samples fit the models, later samples assess their CDF error. This is not a multi-day validation.':'Training uses earlier whole trading dates; later dates assess the frozen CDFs.'} Errors are CDF probability units, not trading returns. Neither a parametric fit nor a threshold bucket establishes a market regime.`);
+    $('ob-curve-fits').replaceChildren(...['bid','ask'].flatMap(side=>(m.spatial_cdf_models[side]?.candidates??[]).map(f=>{const tr=make('tr','');for(const x of [side,f.family,f.status.replaceAll('_',' '),Object.entries(f.parameters??{}).map(([k,v])=>`${k}=${flowNumber(v,6)}`).join(', ')||'—',flowNumber(f.training_rmse,6),flowNumber(f.test_rmse,6),flowNumber(f.test_mae,6),flowNumber(f.model_tail_mass_above_range,6),f.bounds_hit.join(', ')||'none'])tr.append(make('td',x));return tr;})));
+    if(!$('ob-curve-fits').children.length)blank('ob-curve-fits',9,'No fitted spatial distribution is available.');
+    const metric=$('ob-curve-slope-metric').value;
+    $('ob-curve-slopes').replaceChildren(...['bid','ask','asymmetry'].flatMap(side=>['calibration','test'].map(part=>{const s=m.slope_models[side][part][metric],tr=make('tr','');for(const x of [side==='asymmetry'?'Bid minus ask':side,part==='calibration'?'Training':'Held out',curveMetric(metric),...['count','mean','std','p05','median','p95','skewness','excess_kurtosis'].map(k=>flowNumber(s?.[k],k==='count'?0:6))])tr.append(make('td',x));return tr;})));
+    curvePlots();
+  }
+  function curvePlots() {
+    const m=curveModels();if(m) {
+      const side=$('ob-curve-side').value,part=$('ob-curve-partition').value,spatial=m.spatial_cdf_models,s=spatial[side],p=s[part],svg=$('ob-curve-cdf'),edges=spatial.edges_bps;
+      if(!p.samples||!edges.length)emptyPlot(svg,'No qualified curve CDF for this partition');
+      else {
+        svg.replaceChildren();const b=chartBox(svg),end=edges.at(-1),x=d=>b.left+(b.right-b.left)*d/end,y=v=>b.bottom-(b.bottom-b.top)*v;
+        axes(svg,b,[['0 bps',b.left,'start'],[flowNumber(end/2,4)+' bps',(b.left+b.right)/2,'middle'],[flowNumber(end,4)+' bps',b.right,'end']],[['1',b.top],['0.5',(b.top+b.bottom)/2],['0',b.bottom]]);
+        svgNode(svg,'polyline',{points:p.cdf_mean.map((v,i)=>`${x(edges[i])},${y(v)}`).join(' '),class:'ob-bid-series'});
+        for(const f of s.candidates.filter(f=>f.converged))svgNode(svg,'polyline',{points:f.cdf.map((v,i)=>`${x(edges[i])},${y(v)}`).join(' '),class:f.family==='weibull'?'ob-weibull-series':'ob-ask-series'});
+      }
+      put('ob-curve-cdf-note',`${side} · ${part==='test'?'held-out':'training'} · ${flowNumber(p.samples,0)} equally weighted sampled books. Common plotted distance grid comes only from training data. Observed displayed-size mass above that grid: ${flowNumber(p.above_range_mass_mean===null?null:p.above_range_mass_mean*100,3)}%; below it: ${flowNumber(p.below_range_mass_mean===null?null:p.below_range_mass_mean*100,3)}%. Fitted distributions retain their tail probability; curves are not renormalized to force one at the final plotted distance.`);
+      const metric=$('ob-curve-slope-metric').value,slopeSide=$('ob-curve-slope-side').value,stat=m.slope_models[slopeSide][part][metric],hist=$('ob-curve-slope-hist');
+      put('ob-curve-slope-note',`${slopeSide==='asymmetry'?'Bid minus ask':slopeSide} · ${part==='test'?'held-out':'training'} · ${curveMetric(metric)} · ${flowNumber(stat?.count,0)} qualified fits. The histogram describes variation across time-grid states, not individual orders.`);
+      if(!stat?.count)emptyPlot(hist,'No identifiable fits for this property');
+      else {
+        hist.replaceChildren();const b=chartBox(hist),h=stat.histogram,max=Math.max(...h.counts),lo=h.edges[0],hi=h.edges.at(-1),constant=lo===hi;
+        const x=v=>constant?(b.left+b.right)/2:b.left+(b.right-b.left)*(v-lo)/(hi-lo),y=v=>b.bottom-(b.bottom-b.top)*v/max;
+        axes(hist,b,constant?[[flowNumber(lo,4)+' (constant)',x(lo),'middle']]:[[flowNumber(lo,4),b.left,'start'],[flowNumber((lo+hi)/2,4),(b.left+b.right)/2,'middle'],[flowNumber(hi,4),b.right,'end']],[[flowNumber(max,0),b.top],['0',b.bottom]]);
+        for(const [i,n] of h.counts.entries()){const bar=svgNode(hist,'rect',{x:constant?x(lo)-12:x(h.edges[i])+1,y:y(n),width:constant?24:Math.max(.5,x(h.edges[i+1])-x(h.edges[i])-2),height:b.bottom-y(n),class:'ob-histogram-bar'});svgNode(bar,'title',{},`${flowNumber(h.edges[i],6)} to ${flowNumber(h.edges[i+1],6)}: ${flowNumber(n,0)} fits`);}
+      }
+      const examples=m.examples?.[part]??[],selector=$('ob-curve-example'),options=examples.map((e,i)=>`${part}:${i}`);
+      if([...selector.options].map(o=>o.value).join('|')!==options.join('|'))selector.replaceChildren(...examples.map((e,i)=>{const o=make('option',`${e.session_date} · session ${e.session_id} · ${new Date(e.unix_us/1000).toISOString()} · ${regimeLabel(e.regime??'unclassified')}`);o.value=`${part}:${i}`;return o;}));
+      const example=examples[Number(selector.value.split(':')[1])],geometry=$('ob-curve-geometry');
+      if(!example){emptyPlot(geometry,'No identifiable recorded example');const diagnostic=m.example_diagnostics?.[part];put('ob-curve-geometry-note',`No curve geometry was inferred for this partition.${diagnostic?.omitted_collapsed_fraction_states?` ${diagnostic.omitted_collapsed_fraction_states} candidate previews omitted because their cumulative fractions collapse at machine precision. Their spatial CDFs and supported full-sample statistics remain in the report.`:''}`);}
+      else {
+        geometry.replaceChildren();const p=example[side],b=chartBox(geometry),values=[...p.distance_bps,...p.linear_distance_bps,...p.quadratic_distance_bps],lo=Math.min(0,...values),hi=Math.max(...values),pad=Math.max((hi-lo)*.07,1e-8);
+        const x=v=>b.left+(b.right-b.left)*v,y=v=>b.bottom-(b.bottom-b.top)*(v-lo+pad)/(hi-lo+2*pad);
+        axes(geometry,b,[['0%',b.left,'start'],['50%',(b.left+b.right)/2,'middle'],['100%',b.right,'end']],[[flowNumber(hi,4)+' bps',y(hi)],[flowNumber(lo,4)+' bps',y(lo)]]);
+        svgNode(geometry,'polyline',{points:p.distance_bps.map((v,i)=>`${x(p.cumulative_fraction[i])},${y(v)}`).join(' '),class:'ob-bid-series'});
+        for(const [i,d] of p.distance_bps.entries()){const dot=svgNode(geometry,'circle',{cx:x(p.cumulative_fraction[i]),cy:y(d),r:3,fill:'#7fc9b2'});svgNode(dot,'title',{},`Distance ${flowNumber(d,6)} bps; cumulative share ${flowNumber(p.cumulative_fraction[i],6)}`);}
+        for(const [key,cls] of [['linear_distance_bps','ob-ask-series'],['quadratic_distance_bps','ob-weibull-series']])if(p[key].length)svgNode(geometry,'polyline',{points:p[key].map((v,i)=>`${x(p.fit_cumulative_fraction[i])},${y(v)}`).join(' '),class:cls});
+        put('ob-curve-geometry-note',`${side} recorded state · ${example.session_date} · ${regimeLabel(example.regime??'unclassified')}. Linear slope ${flowNumber(p.geometry.linear_slope_bps,6)}, residual RMSE ${flowNumber(p.geometry.linear_rmse_bps,6)} bps; quadratic curvature ${flowNumber(p.geometry.quadratic_curvature_bps,6)}, residual RMSE ${flowNumber(p.geometry.quadratic_rmse_bps,6)} bps. ${p.fit_support_status==='numerically_unsupported_fraction_axis'?'The local cumulative-fraction axis does not numerically identify a regression; only delivered levels are shown. ':''}${p.geometry.quadratic_min_derivative_bps<0?'The unconstrained quadratic turns downward within the observed range; treat it as a local approximation, not a monotone liquidity distribution.':''}`);
+      }
+    }
+    if(result?.request.mode==='shape_comparison') {
+      const session=result.sessions[Number($('ob-result-session').value)];if(!session)return;
+      const svg=$('ob-curve-timeline'),valid=session.frames.filter(f=>f.usable&&Number.isFinite(f.tightness_bps));
+      if(!valid.length)emptyPlot(svg,'No qualified time-grid curve states');
+      else {
+        svg.replaceChildren();const b=chartBox(svg),begin=session.frames[0].unix_us,end=session.frames.at(-1).unix_us,lo=Math.min(...valid.map(f=>f.tightness_bps)),hi=Math.max(...valid.map(f=>f.tightness_bps)),pad=Math.max((hi-lo)*.08,1e-8);
+        const x=v=>b.left+(b.right-b.left)*(v-begin)/Math.max(1,end-begin),y=v=>b.bottom-(b.bottom-b.top)*(v-lo+pad)/(hi-lo+2*pad);
+        axes(svg,b,[['Start',b.left,'start'],[flowNumber((end-begin)/1e6,1)+' recorded seconds',b.right,'end']],[[flowNumber(hi,5)+' bps',y(hi)],[flowNumber(lo,5)+' bps',y(lo)]]);
+        let line=[],previous=null;const flush=()=>{if(line.length)svgNode(svg,'polyline',{points:line.join(' '),class:'ob-bid-series'});line=[];};
+        for(const f of session.frames){if(!f.usable||!Number.isFinite(f.tightness_bps)||previous&&f.segment!==previous.segment)flush();if(f.usable&&Number.isFinite(f.tightness_bps)){line.push(`${x(f.unix_us)},${y(f.tightness_bps)}`);const dot=svgNode(svg,'circle',{cx:x(f.unix_us),cy:y(f.tightness_bps),r:2,fill:f.partition==='calibration'?'#8b939a':f.regime==='loose'?'#dfac8a':f.regime==='normal'?'#93a9c8':'#7fc9b2'});svgNode(dot,'title',{},`${new Date(f.unix_us/1000).toISOString()}: ${flowNumber(f.tightness_bps,6)} bps; ${f.partition}; ${f.regime??'unclassified'}`);}previous=f;}flush();
+      }
+      put('ob-curve-timeline-note',`Recording ${session.identity.session_id}: ${session.frames.length} bounded display frames. Gaps break the curve; thresholds are frozen from whole training dates. The complete feature table retains the sampled states.`);
+    }
+  }
+  function renderCurveExperiment() {
+    const h=result.curve_experiment,ready=h.readiness,c=h.calibration,cov=h.coverage;
+    put('ob-curve-status',`${h.status.replaceAll('_',' ')} · ${c.status.replaceAll('_',' ')}. Training through ${ready.train_end_date}. ${h.status==='held_out_comparison'?'Later trading dates use the frozen thresholds and curve fits.':'No multi-day trading comparison was inferred from an unready selection.'}`);
+    $('ob-curve-status').classList.toggle('ob-recorder-warning',h.status!=='held_out_comparison');
+    put('ob-curve-readiness',`${ready.training_dates.length} training trading date(s), ${ready.test_dates.length} held-out date(s) · ${flowNumber(ready.training_samples,0)} training states, ${flowNumber(ready.test_samples,0)} held-out states. Minimum pilot: two training dates, one held-out date and 30 qualified states in each partition. ${ready.reasons.map(x=>x.replaceAll('_',' ')).join('; ')} Whole-date assignment does not imply full-day capture.`);
+    $('ob-curve-cards').replaceChildren(...[['Coverage',{'Sampled grid states':cov.grid_points,'Qualified book states':cov.qualified_samples,'Excluded states':cov.excluded_samples}],['Frozen width thresholds',{'Tight at or below (bps)':c.threshold_tight_bps,'Loose at or above (bps)':c.threshold_loose_bps}],['Trading design',{'Hypothetical shares':1,'Daily starting cash (USD)':result.request.configuration.paper_budget_usd,'Fee per side (USD)':result.request.configuration.fee_per_side_usd}]].map(([title,values])=>{const card=make('div','','ob-count-card'),dl=make('dl','');card.append(make('h4',title));for(const [k,v] of Object.entries(values))dl.append(make('dt',k),make('dd',flowNumber(v,4)));card.append(dl);return card;}));
+    $('ob-curve-dates').replaceChildren(...ready.date_coverage.map(d=>{const tr=make('tr','');for(const x of [d.session_date??d.date,d.partition==='calibration'?'Training':'Held out',flowNumber(d.grid_points,0),flowNumber(d.qualified_samples,0),flowNumber(d.excluded_samples,0),flowNumber(d.coverage_fraction*100,2)+'%'])tr.append(make('td',x));return tr;}));if(!ready.date_coverage.length)blank('ob-curve-dates',6,'No qualified regular-session date coverage.');
+    put('ob-curve-arm-note','The baseline enters on bid-heavy imbalance; the tight gate adds only the training-defined tight-curve condition. Both use the same imbalance/holding-time exit and recovery policy, with decisions before later quote crossings. One whole share, long-only, no broker orders. Daily capital resets are accounting boundaries; unresolved positions are disclosed rather than fabricated closed. Totals are raw dollars, not investment returns.');
+    $('ob-curve-arms').replaceChildren(...Object.entries(h.arms).map(([arm,p])=>{const tr=make('tr','');for(const x of [curveArm(arm),flowNumber(p.completed_trades,0),flowNumber(p.continuous_completed_trades,0),flowNumber(p.recovery_completed_trades,0),flowNumber(p.gross_pnl_usd,4),flowNumber(p.fees_paid_usd,4),flowNumber(p.realized_pnl_usd,4),flowNumber(p.average_net_pnl_usd,4),flowNumber(p.recovery_rate===null?null:p.recovery_rate*100,1)+'%',flowNumber(p.censored_positions,0),flowNumber(p.unresolved_cost_basis_usd,4),flowNumber(p.holding_seconds.mean,3)])tr.append(make('td',x));return tr;}));if(!Object.keys(h.arms).length)blank('ob-curve-arms',12,'Trading comparison awaits qualified earlier and later dates.');
+    $('ob-curve-costs').replaceChildren(...h.cost_scenarios.flatMap(s=>Object.entries(s.arms).map(([arm,p])=>{const tr=make('tr','');for(const x of [flowNumber(s.fee_per_side_usd,4),curveArm(arm),flowNumber(p.completed_trades,0),flowNumber(p.continuous_realized_pnl_usd,4),flowNumber(p.recovery_realized_pnl_usd,4),flowNumber(p.gross_pnl_usd,4),flowNumber(p.fees_paid_usd,4),flowNumber(p.realized_pnl_usd,4),flowNumber(p.censored_positions,0)])tr.append(make('td',x));return tr;})));if(!h.cost_scenarios.length)blank('ob-curve-costs',9,'No held-out cost scenarios have been simulated.');
+    const paired=h.paired_date_summary;
+    put('ob-curve-paired-note',`${paired?`${paired.dates} matched held-out date(s) · mean daily net difference $${flowNumber(paired.net_difference_usd.mean,4)} · continuous net difference $${flowNumber(paired.continuous_net_difference_usd.mean,4)} · ${paired.unresolved_dates} date(s) with unresolved exposure. `:''}Differences use the same trading date and base fee. These are descriptive comparisons; a few correlated trading days do not establish significance or profitability.`);
+    $('ob-curve-paired').replaceChildren(...(h.paired_date_differences??[]).map(d=>{const tr=make('tr','');for(const x of [d.session_date,flowNumber(d.completed_trades_difference,0),flowNumber(d.gross_pnl_usd_difference,4),flowNumber(d.realized_pnl_usd_difference,4),flowNumber(d.continuous_realized_pnl_usd_difference,4),flowNumber(d.recovery_realized_pnl_usd_difference,4),d.unresolved_exposure_present?'Present':'None'])tr.append(make('td',x));return tr;}));if(!$('ob-curve-paired').children.length)blank('ob-curve-paired',7,'No paired held-out dates available.');
+    curveDaily();renderCurveModels();
+    put('ob-curve-definitions',JSON.stringify({definitions:h.definitions,readiness:ready,calibration:c,exclusions:cov.exclusions,model_definitions:h.models?.definitions},null,2));
+    $('ob-curve-exports').replaceChildren(...result.artifacts.map(a=>{const card=make('div','','ob-count-card'),button=make('button',`Download ${a.file}`,'secondary');button.type='button';button.dataset.oversized=String(a.bytes>64*1024*1024);card.append(make('p',`${flowNumber(a.rows,0)} rows · ${flowNumber(a.bytes/1024/1024,3)} MiB`,'hint'),button);if(a.bytes>64*1024*1024)card.append(make('p','Saved file exceeds the 64 MiB browser download limit.','hint'));button.addEventListener('click',()=>work(async rev=>{const job=resultJob;if(!job)return;put('ob-curve-download-note',`Downloading and checking ${a.file}…`);const blob=await api.downloadResearchArtifact(job,a);if(rev!==revision||!unlocked||job!==resultJob)throw new Error('Research download superseded.');const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`curve-${job}-${a.file}`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);put('ob-curve-download-note',`${a.file} downloaded; size and saved integrity hash verified.`);}));return card;}));put('ob-curve-download-note','');
+  }
+  $('ob-curve-cohort').addEventListener('change',curveDaily);
+  for(const name of ['ob-curve-side','ob-curve-partition','ob-curve-slope-side'])$(name).addEventListener('change',curvePlots);
+  $('ob-curve-example').addEventListener('change',curvePlots);
+  $('ob-curve-slope-metric').addEventListener('change',renderCurveModels);
+  window.addEventListener('resize',()=>{if(unlocked&&curveModels())curvePlots();});
+  const datasetLabels={sessions:'Recordings',blocked_sessions:'Recordings blocked by clocks',trading_days:'Qualified trading days',grid_points:'One-second grid points',qualified_feature_rows:'Qualified book measurements',qualified_return_endpoints:'Qualified return endpoints',qualified_blocks:'Qualified 30-minute blocks',forecast_pairs:'Eligible next-block pairs'};
+  const datasetTime=stamp=>new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(stamp/1000));
+  const currentDataset=()=>['dataset','proposal_experiment'].includes(result?.request.mode)?result.sessions[Number($('ob-result-session').value)]?.dataset:null;
+  function datasetCard(title,values) {
+    const card=make('div','','ob-count-card'),dl=make('dl','');card.append(make('h4',title));
+    for(const [key,value] of Object.entries(values))dl.append(make('dt',datasetLabels[key]??key.replaceAll('_',' ')),make('dd',flowNumber(value,0)));
+    card.append(dl);return card;
+  }
+  function datasetTables() {
+    const d=currentDataset();if(!d)return;
+    const blocks=d.blocks.slice(datasetBlockPage*50,datasetBlockPage*50+50);
+    $('ob-dataset-blocks').replaceChildren(...blocks.map(b=>{const tr=make('tr','');
+      for(const v of [b.session_date,b.block_index+1,datasetTime(b.start_unix_us),datasetTime(b.end_unix_us),b.qualified?'Yes':'No',b.feature_rows,b.return_count,
+        ...['rv','bpv','positive_excess','depth_mean','proportional_spread_mean','near_depth_share_mean','slope_l5_mean','near_two_of_five_share_mean'].map(k=>flowNumber(b[k],6)),b.reasons.join(', ')||'—'])tr.append(make('td',v));return tr;
+    }));
+    if(!blocks.length)blank('ob-dataset-blocks',16,'No measurement blocks are available for this recording. Review its clock and coverage audit.');
+    put('ob-dataset-block-note',`Showing ${blocks.length?datasetBlockPage*50+1:0}–${datasetBlockPage*50+blocks.length} of ${flowNumber(d.blocks_count,0)} measured blocks (preview limited to 50). The complete blocks export includes every block and its qualification flags.`);
+    $('ob-dataset-block-more').hidden=d.blocks.length<=50;put('ob-dataset-block-more',(datasetBlockPage+1)*50<d.blocks.length?'Show next 50 blocks':'Back to first 50 blocks');
+    const pairs=d.pairs.slice(datasetPairPage*50,datasetPairPage*50+50);
+    $('ob-dataset-pairs').replaceChildren(...pairs.map(p=>{const tr=make('tr','');
+      for(const v of [p.session_date,p.origin_block_index+1,p.target_block_index+1,datasetTime(p.forecast_origin_unix_us)])tr.append(make('td',v));
+      const td=make('td',''),details=make('details','');details.append(make('summary','View measurements'));
+      const dl=make('dl','');for(const [k,v] of Object.entries(p).filter(([k])=>!['session_date','origin_block_index','target_block_index','forecast_origin_unix_us'].includes(k)))
+        dl.append(make('dt',k.replaceAll('_',' ')),make('dd',typeof v==='number'?flowNumber(v,6):v===null?'—':typeof v==='object'?JSON.stringify(v):v));
+      details.append(dl);td.append(details);tr.append(td);return tr;
+    }));
+    if(!pairs.length)blank('ob-dataset-pairs',5,'No eligible next-block pairs. No model-ready rows have been inferred from missing or rejected measurements.');
+    put('ob-dataset-pair-note',`Showing ${pairs.length?datasetPairPage*50+1:0}–${datasetPairPage*50+pairs.length} of ${flowNumber(d.pairs_count,0)} eligible pairs (preview limited to 50). Download the complete pairs table for all values.`);
+    $('ob-dataset-pair-more').hidden=d.pairs.length<=50;put('ob-dataset-pair-more',(datasetPairPage+1)*50<d.pairs.length?'Show next 50 pairs':'Back to first 50 pairs');
+  }
+  function renderDataset(s) {
+    const d=s.dataset,c=d.clock,blocked=d.status==='blocked_clock';
+    put('ob-dataset-clock',`${blocked?'Receipt clocks failed consistency checks':'Receipt-clock consistency audit'} · maximum wall/monotonic disagreement ${flowNumber(c.max_divergence_seconds,6)} seconds · wall regressions ${c.wall_regressions} · monotonic regressions ${c.monotonic_regressions}. ${blocked?'This recording supplies no qualified measurements or forecast pairs. Original data remain saved; no clock override is used.':'Clock agreement is required for this dataset; it does not certify exchange timing or local clock accuracy.'}`);
+    $('ob-dataset-clock').classList.toggle('ob-recorder-warning',blocked);
+    put('ob-dataset-reason',d.reason||(d.coverage.forecast_pairs?'Eligible pairs are available for subsequent research. No forecasting model was fitted.':'No eligible next-block pairs were produced. Review exclusions and collect continuous coverage for adjacent full blocks.'));
+    $('ob-dataset-coverage').replaceChildren(datasetCard('Recording coverage',d.coverage),datasetCard('Excluded measurements',d.exclusion_counts));
+    datasetBlockPage=datasetPairPage=0;datasetTables();
+  }
+  function renderDatasetSummary() {
+    const d=result.dataset,counts=d.summary,allBlocked=result.sessions.every(s=>s.dataset.status==='blocked_clock');
+    put('ob-dataset-readiness',counts.forecast_pairs?`${flowNumber(counts.forecast_pairs,0)} eligible next-block pairs prepared from ${flowNumber(counts.qualified_blocks,0)} qualifying measurement blocks. Review coverage before model development.`:allBlocked?'No eligible research pairs: every selected recording failed receipt-clock consistency checks. The audit and exports remain available; original recordings were preserved.':'No eligible research pairs yet. The report below shows clock checks, measured blocks and the coverage needed to qualify adjacent blocks.');
+    if(d.warnings?.length)$('ob-dataset-readiness').append(document.createTextNode(' '+d.warnings.join(' ')));
+    $('ob-dataset-readiness').classList.toggle('ob-recorder-warning',!counts.forecast_pairs||!!d.warnings?.length);
+    $('ob-dataset-totals').replaceChildren(datasetCard('Dataset totals',counts));
+    $('ob-dataset-exports').replaceChildren(...result.artifacts.map(a=>{
+      const card=make('div','','ob-count-card'),b=make('button',`Download ${a.file}`,'secondary');b.type='button';b.dataset.oversized=String(a.bytes>64*1024*1024);
+      card.append(make('h4',({features:'One-second book measurements',minutes:'Return endpoints',blocks:'30-minute measurement blocks',pairs:'Eligible next-block pairs',predictions:'Held-out predictions',daily_losses:'Paired losses by trading day'})[a.name]),make('p',`${flowNumber(a.rows,0)} rows · ${flowNumber(a.bytes/1024/1024,3)} MiB`,'hint'),b);
+      if(a.bytes>64*1024*1024)card.append(make('p','This export exceeds the 64 MiB browser limit; its saved file remains on the local server.','hint'));
+      b.addEventListener('click',()=>work(async rev=>{
+        const job=resultJob;if(!job)return;put('ob-dataset-download-note',`Downloading and checking ${a.file}…`);
+        const blob=await api.downloadResearchArtifact(job,a);if(rev!==revision||!unlocked||job!==resultJob)throw new Error('Dataset download superseded.');
+        const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`dataset-${job}-${a.file}`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+        put('ob-dataset-download-note',`${a.file} downloaded. File size and saved integrity hash verified.`);
+      }));return card;
+    }));
+    put('ob-dataset-download-note','');put('ob-dataset-definitions',JSON.stringify({definitions:d.definitions,conventions:d.conventions,pressure_status:d.pressure_status,overlapping_recording_windows:d.overlapping_recording_windows??0,warnings:d.warnings??[]},null,2));
+  }
+  $('ob-dataset-block-more').addEventListener('click',()=>{const d=currentDataset();if(!d)return;datasetBlockPage=(datasetBlockPage+1)*50<d.blocks.length?datasetBlockPage+1:0;datasetTables();});
+  $('ob-dataset-pair-more').addEventListener('click',()=>{const d=currentDataset();if(!d)return;datasetPairPage=(datasetPairPage+1)*50<d.pairs.length?datasetPairPage+1:0;datasetTables();});
+  function renderResult() {
+    $('ob-result').hidden=!result;if(!result)return;
+    const label=result.source==='synthetic'?'SYNTHETIC DEMONSTRATION — no empirical claim':'IBKR recorded data — offline analysis, not a live model';
+    put('ob-result-label',label);$('ob-result-label').className=result.source==='synthetic'?'ob-synthetic':'';
+    const describe=result.request.mode==='describe',flow=result.request.mode==='flow',multi=result.request.mode==='shape_comparison',shape=result.request.mode==='shape',dataset=['dataset','proposal_experiment'].includes(result.request.mode);$('ob-description').hidden=!describe;$('ob-flow').hidden=!flow;$('ob-shape').hidden=!shape;$('ob-curve-experiment').hidden=!multi;$('ob-curve-models').hidden=!curveModels();$('ob-dataset').hidden=!dataset;$('ob-result-replay').hidden=flow||shape||multi||dataset;
+    const c=result.request.configuration;put('ob-result-config',multi?`Multi-day curves · training through ${c.train_end_date} (New York trading date) · ${c.levels} distinct levels / side · ${c.step_seconds}s samples · maximum side age ${c.max_side_age_seconds}s · strict clocks · fee scenarios $${c.fee_scenarios_usd.join(', $')} / side · slippage ${flowNumber(c.slippage_bps,4)} bps / side · hypothetical daily capital $${flowNumber(c.paper_budget_usd,2)}.`:shape?`Book shape & regimes · ${c.levels} distinct levels per side · ${c.step_seconds}s uniform samples · maximum side age ${c.max_side_age_seconds}s · early calibration ${flowNumber(c.calibration_fraction*100,1)}% · strict receipt clocks · hypothetical capital $${flowNumber(c.paper_budget_usd,2)} · fee $${flowNumber(c.fee_per_side_usd,2)} / side · slippage ${flowNumber(c.slippage_bps,4)} bps / side.`:dataset?`${c.preset==='proposal_oct2026'?'October 6 proposal · duration-weighted block features in confirmed shares':'Earlier exploratory dataset · one-second measurements'} · ${c.levels} common levels per side · ${c.return_seconds/60}-minute returns · 30-minute regular-session blocks · maximum side age ${c.max_side_age_seconds}s · strict receipt-clock checks.`:flow?`Order flow over time · ${c.bin_seconds}s bins · start ${c.start_seconds}s · end ${c.end_seconds??'recording end'} · ${c.clock_policy==='recorded_monotonic'?'Explore recorded monotonic time — provisional':'Require consistent receipt clocks'}.`:describe?'Depth, slope & distributions · all captured levels · event-weighted book states · no time grid, freshness certification or prediction model.':`${result.request.mode} · quantity ${c.quantity} · target ${c.target} · horizon ${c.horizon_seconds}s · step ${c.step_seconds}s · ${c.levels} diagnostic levels. Model errors use basis points, not dollar fills.`);
+    put('ob-replay-note',describe?'Replay and line charts show a bounded selection of states in event order. Distribution statistics use all eligible states. Gaps are not filled; horizontal position is not elapsed time.':'Replay and charts are decimated for display, never for fitting. Missing/invalid intervals are not fills. The offline report does not receive new live ticks.');
+    $('ob-result-session').replaceChildren(...result.sessions.map((s,i)=>{const o=make('option',`Session ${s.identity.session_id} · ${s.identity.symbol} / ${s.identity.venue} · ${s.event_count} events`);o.value=String(i);return o;}));
+    const root=$('ob-comparison');root.replaceChildren();const m=result.liquidity;
+    if(m?.status==='evaluated') {
+      root.append(make('h3',`Validation-selected model: ${m.selected_on_validation}`),make('p','Equal-UTC-date errors on shared eligible observations. History includes current liquidity. The test partition is not used for fitting or selection.','hint'));
+      const wrap=make('div','','table-scroll'),table=make('table',''),head=make('tr','');
+      for(const v of ['Model','Validation RMSE (bps)','Test RMSE (bps)','Test MAE (bps)'])head.append(make('th',v));table.append(head);
+      for(const model of m.models){const tr=make('tr','',model.name===m.selected_on_validation?'ob-selected-model':'');
+        for(const v of [model.name,numberText(model.validation.session_equal_rmse,6),numberText(model.test.session_equal_rmse,6),numberText(model.test.session_equal_mae,6)])tr.append(make('td',v));table.append(tr);}
+      wrap.append(table);root.append(wrap);
+    } else if(result.experiment)root.append(make('h3',result.experiment.status==='complete_exploratory'?'Proposal M0–M2 experiment saved':'Proposal experiment blocked by research readiness'));
+    else if(dataset)root.append(make('h3','Dataset preparation complete — no forecasting model fitted'));
+    else if(flow)root.append(make('h3','Order-flow distribution — descriptive baseline, not predictive validation'));
+    else if(shape)root.append(make('h3','Curve groups and historical trading replay — research hypothesis, not live execution'));
+    else if(multi)root.append(make('h3','Earlier-day curve calibration and held-out strategy comparison'));
+    else if(describe)root.append(make('h3','Descriptive report — no predictive performance claim'));
+    else root.append(make('h3','Diagnostics only — no model fitted'),make('p','Select separate chronological dates and run Compare prediction models to estimate and evaluate the baselines.','hint'));
+    put('ob-result-evaluation',JSON.stringify({impact_diagnostic:result.impact,evaluation:result.evaluation??null},null,2));
+    $('ob-result-evaluation').closest('details').hidden=describe||flow||shape||multi||dataset;
+    $('ob-result-coverage').previousElementSibling.textContent=shape||multi?'Selected recording coverage and receipt-clock audit':dataset?'Dataset coverage, exclusions and receipt-clock audit':flow?'Time window, coverage and receipt-clock audit':describe?'Event coverage, quality and receipt-clock audit':'Coverage, exclusions and partial-session variance';
+    put('ob-result-provenance',JSON.stringify({request:result.request,source_hashes:result.source_hashes,code_hashes:result.code_hashes,worker_sha256:result.worker_sha256,result_sha256:result.sha256,boundaries:result.boundaries},null,2));
+    if(shape){renderShapeSummary();renderCurveModels();}if(multi)renderCurveExperiment();if(dataset)renderDatasetSummary();explorer.result(result);resultSession();controls();
+  }
+  $('ob-result-session').addEventListener('change',resultSession);$('ob-result-scrub').addEventListener('input',frame);
+  $('ob-download').addEventListener('click',()=>{if(!unlocked||!result)return;
+    const u=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'})),a=document.createElement('a');
+    a.href=u;a.download='orderbook-workspace-result.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+  });
+  function clear() {
+    expandGraphs(false);
+    revision++;clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);clearTimeout(collectionTimer);liveTimer=jobTimer=readinessTimer=collectionTimer=null;collectionPoll=null;busy=false;live=null;liveHistory=[];loaded=false;needsReconcile=false;previousEvidence=null;verified=false;
+    explorer.clear();
+    collectionLab?.clear();
+    selected=null;pending=null;sessions=[];cursor='0';hasMore=false;selectedIds.clear();jobs=[];capability=null;result=null;resultJob=null;submittedJob=null;$('ob-watch').checked=false;
+    archive=null;$('ob-archive').hidden=true;$('ob-archive-scrub').value='0';
+    for(const name of ['ob-archive-title','ob-archive-summary','ob-archive-clock','ob-archive-frame','ob-archive-event','ob-archive-depth','ob-archive-bids','ob-archive-asks'])$(name).replaceChildren();
+    $('ob-candidates').replaceChildren();$('ob-jobs').replaceChildren();$('ob-result').hidden=true;$('ob-result-session').replaceChildren();
+    for(const el of ['ob-selected','ob-resolution','ob-catalog-note','ob-worker-note','ob-job-note','ob-result-label','ob-result-frame','ob-result-config','ob-result-coverage','ob-result-evaluation','ob-result-provenance'])put(el,'');
+    for(const el of ['ob-result-bids','ob-result-asks','ob-result-price','ob-result-imb','ob-comparison'])$(el).replaceChildren();
+    $('ob-description').hidden=true;
+    for(const el of ['ob-description-clock','ob-description-coverage','ob-description-warnings','ob-description-metric','ob-description-definition','ob-description-histogram','ob-description-profile','ob-description-statistics','ob-description-levels','ob-description-counts','ob-description-exclusions'])$(el).replaceChildren();
+    $('ob-flow').hidden=true;flowBinPage=0;
+    for(const el of ['ob-flow-clock','ob-flow-coverage','ob-flow-warnings','ob-flow-model','ob-flow-timeline','ob-flow-series-note','ob-flow-pmf','ob-flow-interarrival','ob-flow-statistics','ob-flow-autocorrelation','ob-flow-bins','ob-flow-bin-note'])$(el).replaceChildren();
+    $('ob-shape').hidden=true;
+    for(const el of ['ob-shape-status','ob-shape-coverage','ob-shape-cards','ob-shape-cdf','ob-shape-mass','ob-shape-profile-note','ob-shape-timeline','ob-shape-timeline-note','ob-shape-snapshot','ob-shape-snapshot-note','ob-shape-snapshot-properties','ob-shape-statistics','ob-shape-regimes','ob-shape-transitions','ob-shape-dwell','ob-shape-density-note','ob-shape-density-candidates','ob-shape-density-components','ob-shape-replay-note','ob-shape-replay','ob-shape-continuity-note','ob-shape-continuity','ob-shape-replay-cohort-note','ob-shape-replay-cohorts','ob-shape-recovery-cohorts','ob-shape-trades','ob-shape-trade-note','ob-shape-exports','ob-shape-download-note','ob-shape-definitions'])$(el).replaceChildren();
+    $('ob-shape-recovery-panel').hidden=true;
+    $('ob-curve-experiment').hidden=true;$('ob-curve-models').hidden=true;
+    for(const name of ['ob-curve-status','ob-curve-readiness','ob-curve-cards','ob-curve-dates','ob-curve-arm-note','ob-curve-arms','ob-curve-daily-note','ob-curve-daily','ob-curve-costs','ob-curve-paired-note','ob-curve-paired','ob-curve-model-note','ob-curve-cdf','ob-curve-cdf-note','ob-curve-fits','ob-curve-slope-hist','ob-curve-slope-note','ob-curve-slopes','ob-curve-example','ob-curve-geometry','ob-curve-geometry-note','ob-curve-timeline','ob-curve-timeline-note','ob-curve-exports','ob-curve-download-note','ob-curve-definitions'])$(name).replaceChildren();
+    $('ob-dataset').hidden=true;datasetBlockPage=datasetPairPage=0;
+    for(const el of ['ob-dataset-readiness','ob-dataset-totals','ob-dataset-exports','ob-dataset-download-note','ob-dataset-clock','ob-dataset-reason','ob-dataset-coverage','ob-dataset-block-note','ob-dataset-blocks','ob-dataset-pair-note','ob-dataset-pairs','ob-dataset-definitions'])$(el).replaceChildren();
+    renderSessions();renderLive();modeControls();
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){clearTimeout(liveTimer);clearTimeout(jobTimer);liveTimer=jobTimer=null;live=null;liveHistory=[];verified=false;previousEvidence=null;renderLive();}
+    else schedule();
+  });
+  setInterval(()=>{if(unlocked){collectionLab?.tick();if(!document.hidden)renderLive();}},1000);
+  collectionLab=mountCollection({read,work,notify,isCurrent:rev=>unlocked&&rev===revision,afterMutation:async(rev,watch)=>{if(watch)$('ob-watch').checked=true;await current(rev);await catalog(rev);}});
+  clear();
+  return {
+    setAccess(value){if(unlocked===value)return;unlocked=value;if(!value){context=null;generation=null;clear();notify('Dashboard locked. Capture and any research job were not stopped.');}else notify('');controls();schedule();},
+    update(value){
+      if(!unlocked)return;
+      if(value&&generation!==null&&value.session_id!==generation){clear();notify('Broker/server generation changed. Refresh the workspace before recording or selecting archived data.');}
+      context=value;if(value)generation=value.session_id;
+      if(!value||value.broker.state!=='ready'){selected=null;pending=null;live=null;liveHistory=[];verified=false;previousEvidence=null;$('ob-candidates').replaceChildren();put('ob-selected','Resolve a contract after the broker becomes ready.');renderLive();}
+      controls();
+    }
+  };
+}

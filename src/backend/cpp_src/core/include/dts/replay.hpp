@@ -1,12 +1,14 @@
 #pragma once
 #include "historical.hpp"
+#include <array>
 #include <cstddef>
 #include <string>
 #include <vector>
 
 namespace dts::research {
-inline constexpr const char* engine_version = "retrospective-replay-1";
-inline constexpr std::size_t maximum_bars = 2000;
+inline constexpr const char* engine_version = "retrospective-replay-2";
+inline constexpr std::size_t maximum_bars = history_view_limit;
+inline constexpr std::size_t maximum_result_bytes = 64*1024*1024;
 struct Observation {
     std::int64_t version_id = 0, request_id = 0, coordinate_s = 0;
     std::int64_t observed_ms = 0, response_finished_ms = 0;
@@ -25,6 +27,11 @@ struct Snapshot {
 struct Quality {
     std::size_t bars = 0, nonpositive_closes = 0, discontinuities = 0;
     std::size_t large_return_candidates = 0;
+    std::size_t nonpositive_price_bars = 0, missing_volume = 0, zero_volume = 0;
+    std::size_t missing_weekday_candidates = 0, weekend_observations = 0;
+    bool volume_expected = false;
+    struct Issue { std::int64_t coordinate_s; std::string kind; };
+    std::vector<Issue> issues; // First 100 in scan order; counters cover the whole snapshot.
     bool response_coverage_complete = false;
     std::vector<std::string> warnings;
 };
@@ -45,6 +52,7 @@ struct ReplayPoint {
     std::optional<std::int64_t> available_s, return_span_seconds;
     double close = 0;
     std::optional<double> log_return;
+    std::optional<double> cumulative_price_return, drawdown;
     std::string status;
     std::vector<RollingPoint> rolling;
 };
@@ -54,6 +62,17 @@ struct ReplayResult {
     std::size_t processed = 0, total = 0;
 };
 // Content integrity only, not an authentication/signature primitive.
+class Sha256 {
+    std::array<std::uint32_t, 8> state_{0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    std::array<std::uint8_t, 64> pending_{};
+    std::uint64_t bytes_ = 0;
+    std::size_t pending_size_ = 0;
+    void block(const std::uint8_t* bytes);
+public:
+    void update(const char* bytes, std::size_t count);
+    void update(const std::string& text) { update(text.data(), text.size()); }
+    std::string finish() const;
+};
 std::string sha256(const std::string& text);
 std::string snapshot_fingerprint(const Snapshot& snapshot);
 std::string config_key(const ReplayConfig& config);

@@ -66,7 +66,7 @@ public:
     std::int64_t historical_dataset(const HistorySpec& spec);
     HistorySpec historical_spec(std::int64_t dataset_id) const;
     std::vector<Row> historical_catalog() const;
-    std::vector<HistoryWindow> historical_gaps(std::int64_t dataset_id, HistoryWindow window, bool include_pending=false) const;
+    std::vector<HistoryWindow> historical_gaps(std::int64_t dataset_id, HistoryWindow window, bool include_pending=false, bool include_completed=true) const;
     std::vector<std::int64_t> queue_history(std::int64_t dataset_id, const std::vector<HistoryWindow>& windows);
     void bind_history(std::int64_t request_id, RequestId native_id);
     void finish_history(std::int64_t request_id, const std::string& state, int code=0);
@@ -75,6 +75,8 @@ public:
     void interrupt_history();
     void record_history_events(const std::vector<BrokerEvent>& events);
     std::vector<Row> historical_requests(std::int64_t dataset_id, HistoryWindow window) const;
+    Row historical_progress(std::int64_t dataset_id, HistoryWindow window) const;
+    std::vector<Row> historical_queue() const;
     std::vector<Row> historical_bars(std::int64_t dataset_id, HistoryWindow window) const;
     research::Snapshot create_snapshot(std::int64_t dataset_id, HistoryWindow window, const std::string& name);
     research::Snapshot snapshot(std::int64_t snapshot_id) const;
@@ -92,6 +94,10 @@ public:
     Page depth_sessions(std::int64_t after_id=0, int limit=100) const;
     Page depth_events(std::int64_t session_id, std::int64_t after_id=0, std::int64_t through_id=0, int limit=1000) const;
     Row depth_session(std::int64_t session_id) const;
+    // Committed session metadata for this recorder run; request 0 selects its
+    // newest session. Never scan event rows merely to refresh live progress.
+    Row depth_recording(const std::string& source, RequestId request_id=0) const;
+    Row depth_raw_metadata(std::int64_t session_id) const;
     Status status() const;
     Page catalog(std::int64_t after_id = 0, int limit = 100) const;
     Page history(std::int64_t series_id, std::int64_t after_id = 0,
