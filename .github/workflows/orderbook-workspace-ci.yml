@@ -17,6 +17,9 @@ jobs:
       - name: Broker-free Windows collection runtime checks
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/collection/windows_runtime_tests.ps1
+      - name: Broker-free nightly restart wake checks
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/collection/nightly_wake_tests.ps1
   source-review:
     runs-on: ubuntu-24.04
     timeout-minutes: 3

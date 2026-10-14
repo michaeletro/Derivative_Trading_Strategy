@@ -31,14 +31,40 @@ Assert-Throws { Test-DerivativeWindow $invalid } 'A boolean collection timestamp
 Assert-Throws { Test-DerivativeWindow ([pscustomobject]@{in_runtime_window=$true}) } 'Missing session times were accepted.'
 
 $spec = Get-DerivativeDailyTaskSpec
+Assert-True ($spec.Root -ceq (Join-Path $env:USERPROFILE '.derivative-lab\daily-collection')) 'The task runtime is in virtualized application data.'
+$weeklyTrigger = New-DerivativeDailyWeeklyTrigger
+Assert-True ($weeklyTrigger.StartBoundary -match '^\d{4}-\d{2}-\d{2}T08:50:00$') 'The weekly trigger freezes a UTC offset instead of following Eastern DST.'
 Assert-True ($spec.RestartCount -eq 999 -and $spec.RestartIntervalMinutes -eq 5) 'An unattended preflight failure cannot retry after TWS login.'
 Assert-True (Test-DerivativeSourceAddress '172.26.122.234') 'A private WSL source address was rejected.'
 Assert-True (-not (Test-DerivativeSourceAddress '8.8.8.8')) 'A public address was accepted for TWS trust.'
 Assert-True (-not (Test-DerivativeSourceAddress '127.0.0.1')) 'Loopback was accepted as the WSL source.'
 Assert-True (-not (Test-DerivativeSourceAddress '172.26.122.234 --extra')) 'Unvalidated data was accepted as a process argument.'
 $owned = [pscustomobject]@{TaskName=$spec.Name; TaskPath=$spec.Path; Description=$spec.Marker;
-    Actions=@([pscustomobject]@{Execute=$spec.Execute; Arguments=$spec.Arguments})}
+    Principal=[pscustomobject]@{UserId=$spec.User;LogonType=3;RunLevel=0};
+    Actions=@([pscustomobject]@{Execute=$spec.Execute; Arguments=$spec.Arguments;WorkingDirectory=$spec.WorkingDirectory})}
 Assert-True (Test-DerivativeDailyTaskOwnership $owned $spec) 'The intended task was not recognized.'
+$owned.Actions[0].WorkingDirectory = 'C:\Unrelated'
+Assert-True (-not (Test-DerivativeDailyTaskOwnership $owned $spec)) 'An unrelated task working directory was accepted.'
+$owned.Actions[0].WorkingDirectory = $spec.WorkingDirectory
+$owned.Principal.UserId = 'S-1-5-18'
+Assert-True (-not (Test-DerivativeDailyTaskOwnership $owned $spec)) 'A different task principal was accepted.'
+$owned.Principal.UserId = $spec.User
+$legacy = [pscustomobject]@{TaskName=$spec.Name;TaskPath=$spec.Path;Description=$spec.Marker;Principal=$owned.Principal;
+    Actions=@([pscustomobject]@{Execute=$spec.Execute;Arguments=$spec.LegacyArguments;WorkingDirectory=$null})}
+Assert-True (Test-DerivativeLegacyTaskOwnership $legacy $spec) 'The exact original owned task cannot be migrated.'
+$legacy.Actions[0].Arguments += ' -Unrelated'
+Assert-True (-not (Test-DerivativeLegacyTaskOwnership $legacy $spec)) 'A modified legacy action was accepted for migration.'
+$legacy.Actions[0].Arguments = $spec.LegacyArguments
+$legacy.Principal = [pscustomobject]@{UserId='S-1-5-18';LogonType=3;RunLevel=0}
+Assert-True (-not (Test-DerivativeLegacyTaskOwnership $legacy $spec)) 'A different legacy task principal was accepted for migration.'
+$virtualizedSpec = Get-DerivativeDailyTaskSpec -LegacyVirtualized
+$old = [pscustomobject]@{TaskName=$spec.Name;TaskPath=$spec.Path;Description=$spec.Marker;Principal=$owned.Principal;
+    Actions=@([pscustomobject]@{Execute=$spec.Execute;Arguments=$virtualizedSpec.Arguments;WorkingDirectory=$virtualizedSpec.WorkingDirectory})}
+Assert-True (Test-DerivativeRegisteredTaskOwnership $old $spec $virtualizedSpec) 'The exact virtualized command action cannot be migrated.'
+$old.Actions[0].Arguments = $virtualizedSpec.LegacyArguments; $old.Actions[0].WorkingDirectory = $null
+Assert-True (Test-DerivativeRegisteredTaskOwnership $old $spec $virtualizedSpec) 'The exact virtualized file action cannot be migrated.'
+$old.Actions[0].Arguments += ' -Unrelated'
+Assert-True (-not (Test-DerivativeRegisteredTaskOwnership $old $spec $virtualizedSpec)) 'An unrelated virtualized action was accepted for migration.'
 $owned.Description = 'Someone else''s task'
 Assert-True (-not (Test-DerivativeDailyTaskOwnership $owned $spec)) 'An unrelated task description was accepted.'
 $owned.Description = $spec.Marker

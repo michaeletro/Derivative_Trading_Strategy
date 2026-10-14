@@ -5,21 +5,40 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Get-DerivativeDailyTaskSpec {
-    $runtimeRoot = Join-Path $env:LOCALAPPDATA 'DerivativeLab\daily-collection'
+    param([switch]$LegacyVirtualized)
+    $runtimeRoot = if ($LegacyVirtualized) {
+        Join-Path $env:LOCALAPPDATA 'DerivativeLab\daily-collection'
+    } else { Join-Path $env:USERPROFILE '.derivative-lab\daily-collection' }
     $wrapper = Join-Path $runtimeRoot 'start_daily_collection.ps1'
+    $launcherLog = Join-Path $runtimeRoot 'launcher.log'
+    $invoke = "& '" + $wrapper.Replace("'", "''") + "' *>> '" + $launcherLog.Replace("'", "''") + "'"
     [pscustomobject]@{
         Name = 'DerivativeLab-SPY-BATS-Collection'
         Path = '\'
         Marker = 'DerivativeLab SPY/BATS local paper read-only collection v1'
         User = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        UserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         Root = $runtimeRoot
         Wrapper = $wrapper
         Execute = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $wrapper + '"'
+        Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "' + $invoke + '"'
+        LegacyArguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $wrapper + '"'
+        WorkingDirectory = $runtimeRoot
         Repository = '\\wsl.localhost\Ubuntu\home\michperez\projects\Derivative_Trading_Strategy'
         RestartCount = 999
         RestartIntervalMinutes = 5
+        WeeklyStartBoundary = [DateTime]::Today.AddHours(8).AddMinutes(50).ToString('yyyy-MM-ddTHH:mm:ss')
     }
+}
+
+function New-DerivativeDailyWeeklyTrigger {
+    $spec = Get-DerivativeDailyTaskSpec
+    $trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 `
+        -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At '08:50'
+    # An explicit UTC offset fixes the trigger to that offset across DST changes.
+    # An offset-free boundary uses this host's checked Eastern time zone instead.
+    $trigger.StartBoundary = $spec.WeeklyStartBoundary
+    return $trigger
 }
 
 function Test-DerivativeDailyTaskOwnership {
@@ -29,8 +48,44 @@ function Test-DerivativeDailyTaskOwnership {
         $Task.Description -ne $Spec.Marker -or $actions.Count -ne 1) { return $false }
     $action = $actions[0]
     if ($null -eq $action -or $action.Execute -ine $Spec.Execute -or
-        $action.Arguments -cne $Spec.Arguments) { return $false }
-    return $true
+        $action.Arguments -cne $Spec.Arguments -or $action.WorkingDirectory -cne $Spec.WorkingDirectory) { return $false }
+    return Test-DerivativeTaskPrincipal $Task $Spec
+}
+
+function Test-DerivativeTaskPrincipal {
+    param([Parameter(Mandatory)]$Task, [Parameter(Mandatory)]$Spec)
+    try {
+        $principal = $Task.Principal
+        if ($principal.LogonType -ne 3 -and $principal.LogonType -ne 'Interactive') { return $false }
+        if ($principal.RunLevel -ne 0 -and $principal.RunLevel -ne 'Limited') { return $false }
+        if ($principal.UserId.StartsWith('S-1-')) {
+            $sid = [Security.Principal.SecurityIdentifier]::new($principal.UserId).Value
+        } else {
+            $sid = [Security.Principal.NTAccount]::new($principal.UserId).Translate([Security.Principal.SecurityIdentifier]).Value
+        }
+        return $sid -ceq $Spec.UserSid
+    } catch { return $false }
+}
+
+function Test-DerivativeLegacyTaskOwnership {
+    param([Parameter(Mandatory)]$Task, [Parameter(Mandatory)]$Spec)
+    $actions = @($Task.Actions)
+    if ($Task.TaskName -ne $Spec.Name -or $Task.TaskPath -ne $Spec.Path -or
+        $Task.Description -ne $Spec.Marker -or $actions.Count -ne 1) { return $false }
+    $action = $actions[0]
+    if ($null -eq $action -or $action.Execute -ine $Spec.Execute -or
+        $action.Arguments -cne $Spec.LegacyArguments -or -not [string]::IsNullOrEmpty($action.WorkingDirectory)) { return $false }
+    return Test-DerivativeTaskPrincipal $Task $Spec
+}
+
+function Test-DerivativeRegisteredTaskOwnership {
+    param([Parameter(Mandatory)]$Task, [Parameter(Mandatory)]$CurrentSpec,
+          [Parameter(Mandatory)]$VirtualizedSpec)
+    # These exact actions are the only previous deployments we migrate. Never
+    # accept arbitrary arguments merely because the task has our name/description.
+    return ((Test-DerivativeDailyTaskOwnership $Task $CurrentSpec) -or
+        (Test-DerivativeDailyTaskOwnership $Task $VirtualizedSpec) -or
+        (Test-DerivativeLegacyTaskOwnership $Task $VirtualizedSpec))
 }
 
 function Install-DerivativeDailyTask {
@@ -52,13 +107,13 @@ function Install-DerivativeDailyTask {
         }
     }
     $existing = Get-ScheduledTask -TaskName $spec.Name -TaskPath $spec.Path -ErrorAction SilentlyContinue
-    if ($null -ne $existing -and -not (Test-DerivativeDailyTaskOwnership $existing $spec)) {
+    $virtualizedSpec = Get-DerivativeDailyTaskSpec -LegacyVirtualized
+    if ($null -ne $existing -and -not (Test-DerivativeRegisteredTaskOwnership $existing $spec $virtualizedSpec)) {
         throw 'A task with this name has unrelated actions or ownership metadata; it was not changed.'
     }
-    $weekly = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 `
-        -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At '08:50'
+    $weekly = New-DerivativeDailyWeeklyTrigger
     $logon = New-ScheduledTaskTrigger -AtLogOn -User $spec.User
-    $action = New-ScheduledTaskAction -Execute $spec.Execute -Argument $spec.Arguments
+    $action = New-ScheduledTaskAction -Execute $spec.Execute -Argument $spec.Arguments -WorkingDirectory $spec.WorkingDirectory
     $principal = New-ScheduledTaskPrincipal -UserId $spec.User -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable -MultipleInstances IgnoreNew `
         -ExecutionTimeLimit (New-TimeSpan -Hours 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

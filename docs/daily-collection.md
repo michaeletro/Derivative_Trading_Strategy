@@ -50,7 +50,11 @@ and refuses unattended collection until the new address is trusted. The helper
 does not click prompts, update TWS settings or send orders.
 
 Set **Global Configuration → Lock and Exit → Auto Restart** outside the collection
-window. The verified setting is **11:45 PM, America/New_York**. IBKR's periodic
+window. The verified setting is **11:45 PM, America/New_York**. A second local task,
+`DerivativeLab-TWS-Restart-Wake`, wakes at **23:40 daily** and holds a scoped system
+wake request until **23:55**, so the desktop's normal idle sleep does not prevent
+that restart. It never starts or controls TWS, connects to its API, or changes a
+power policy. Outside that short window it exits immediately. IBKR's periodic
 manual reauthentication and two-factor authentication still apply. Login/session
 expiration, TWS updates, connectivity and machine shutdown can prevent collection;
 this system does not store an IBKR password or bypass authentication.
@@ -114,9 +118,20 @@ move intact to `depth-collection-history/`. No recordings or journals are delete
 Preserve these sibling directories and private config as well as SQLite backups.
 
 Windows task scripts, operational logs and the query-only SDK runtime live under
-the current user's private `%LOCALAPPDATA%\DerivativeLab\` directory. Installation
+the current user's private `%USERPROFILE%\.derivative-lab\` directory, outside
+packaged-app AppData redirection so Windows Task Scheduler can access them. Installation
 backs up an existing matching task/script and refuses to overwrite an unrelated
 task. The Windows wrapper receives no dashboard token or IBKR credential.
+Both clock triggers omit a fixed UTC offset so Windows applies Eastern daylight
+saving changes. The former virtualized AppData files are preserved as originals.
+
+After validating and enrolling the native artifact, install both tasks from
+PowerShell in the existing checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\install_daily_collection_task.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\install_nightly_tws_wake_task.ps1
+```
 
 ## Deployment while recording
 

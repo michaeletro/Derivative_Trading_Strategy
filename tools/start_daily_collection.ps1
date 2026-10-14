@@ -10,7 +10,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Get-DerivativeDailyRuntime {
-    $root = Join-Path $env:LOCALAPPDATA 'DerivativeLab\daily-collection'
+    # Codex's packaged children can virtualize LocalAppData. Task Scheduler runs
+    # outside that package, so keep its private files in a real per-user directory.
+    $root = Join-Path $env:USERPROFILE '.derivative-lab\daily-collection'
     [pscustomobject]@{
         Root = $root
         Wsl = Join-Path $env:SystemRoot 'System32\wsl.exe'
@@ -21,7 +23,7 @@ function Get-DerivativeDailyRuntime {
         WindowsPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
         PreflightHelper = '\\wsl.localhost\Ubuntu\home\michperez\projects\Derivative_Trading_Strategy\tools\check_tws_daily.py'
         Sdk = '\\wsl.localhost\Ubuntu\home\michperez\.local\share\ibkr-api-10.45.01\IBJts\source\pythonclient'
-        PreflightDependencies = Join-Path $env:LOCALAPPDATA 'DerivativeLab\ibkr-preflight-runtime'
+        PreflightDependencies = Join-Path $env:USERPROFILE '.derivative-lab\ibkr-preflight-runtime'
     }
 }
 
@@ -36,13 +38,13 @@ function Initialize-DerivativePrivateDirectory {
         [void][IO.Directory]::CreateDirectory($Path)
     }
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    $owner = (Get-Acl -LiteralPath $Path).GetOwner([Security.Principal.SecurityIdentifier])
+    $directory = [IO.DirectoryInfo]::new($Path)
+    $owner = $directory.GetAccessControl([Security.AccessControl.AccessControlSections]::Owner).GetOwner([Security.Principal.SecurityIdentifier])
     if ($owner.Value -ne $sid.Value) {
         throw 'The collection runtime directory must belong to the current Windows user.'
     }
     # Work with only the discretionary ACL. Reading/reapplying an audit ACL can
     # require SeSecurityPrivilege, which an ordinary interactive task does not have.
-    $directory = [IO.DirectoryInfo]::new($Path)
     $acl = $directory.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($rule in @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))) {

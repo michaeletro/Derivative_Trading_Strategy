@@ -227,7 +227,14 @@ def powershell(script, env=None):
 
 
 def private_directory(path):
-    root = (Path(os.environ["LOCALAPPDATA"]) / "DerivativeLab").resolve()
+    # AppData writes inside packaged Codex may be virtualized away from Task
+    # Scheduler. This explicit current-user folder is shared with that process.
+    root = (Path(os.environ["USERPROFILE"]) / ".derivative-lab").resolve()
+    for current in (path.absolute(), *path.absolute().parents):
+        if current == root.parent:
+            break
+        if current.is_symlink() or current.is_junction():
+            raise ValueError("private_directory_link_rejected")
     resolved = path.resolve(strict=True)
     resolved.relative_to(root)
     if not resolved.is_dir():
@@ -244,7 +251,7 @@ $acl=Get-Acl -LiteralPath $env:DTS_PREFLIGHT_ACL_PATH
 $current=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $allowed=@($current,'S-1-5-18','S-1-5-32-544')
 $owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-$valid=$acl.AreAccessRulesProtected -and ($owner -in $allowed)
+$valid=$acl.AreAccessRulesProtected -and ($owner -eq $current)
 foreach($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
   if($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin $allowed) {$valid=$false}
 }
@@ -261,8 +268,11 @@ def load_sdk(sdk_path, dependency_path):
     dependency = private_directory(dependency_path)
     sdk = sdk_path.resolve(strict=True)
     for relative in ("ibapi/client.py", "ibapi/wrapper.py", "ibapi/protobuf/ConfigRequest_pb2.py"):
-        if not (sdk / relative).is_file():
+        if not (sdk / relative).is_file() or (sdk / relative).is_symlink():
             raise ValueError("official_sdk_unavailable")
+    protobuf_init = dependency / "google/protobuf/__init__.py"
+    if not protobuf_init.is_file() or protobuf_init.is_symlink():
+        raise ValueError("private_protobuf_runtime_unavailable")
     sys.path[:0] = [str(dependency), str(sdk)]
     import google.protobuf
     if google.protobuf.__version__ != "5.29.5":
@@ -296,7 +306,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-ip", required=True)
     parser.add_argument("--sdk-path", type=Path, default=Path(DEFAULT_SDK))
-    local = Path(os.environ.get("LOCALAPPDATA", ".")) / "DerivativeLab/ibkr-preflight-runtime"
+    local = Path(os.environ.get("USERPROFILE", ".")) / ".derivative-lab/ibkr-preflight-runtime"
     parser.add_argument("--dependency-path", type=Path, default=local)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout", type=float, default=20)
