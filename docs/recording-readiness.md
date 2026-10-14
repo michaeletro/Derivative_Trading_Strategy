@@ -14,6 +14,15 @@ A stop names the current generated collection ID, so a delayed stop from an old
 segment cannot affect another plan. See [timed collections](orderbook-workspace.md#timed-collections).
 No route connects to TWS automatically or changes brokerage settings.
 
+The separately authorized [daily SPY/BATS controller](daily-collection.md) can
+connect automatically within its standing window. It requires a fresh query-only
+TWS settings proof and the exact enrolled paper-account identity, then uses
+`POST /api/depth/collection/scheduled-start` with an idempotent daily key and an
+immutable collection-close deadline. Native `manual_required` setting labels
+still describe what the native depth API itself can verify; the external daily
+preflight supplies its additional checked settings and saved user attestation.
+`GET /api/depth/collection/schedule` is read-only and exposes no account binding.
+
 ## What the status means
 
 - `collection_checks_passed` requires the native IBKR source, a ready broker,

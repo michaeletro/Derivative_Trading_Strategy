@@ -135,7 +135,10 @@ export function replayEventPage(page, previous=null) {
           ||typeof e.market_maker!=='string'||e.market_maker.length>64||e.market_maker.includes('\0'))invalidate('invalid_depth_update');
         else {
           const side=e.side===1?state.bids:state.asks;
-          if(e.position>side.length||e.operation!==0&&e.position===side.length)invalidate('missing_row_position');
+          // Official IBKR sample DeepModel.DELETE permits bounded empty-tail
+          // deletes. Keep callback/sequence counts; do not invent a removed row.
+          if(e.operation===2&&e.position>=side.length)state.emptyTailDeleteCount=(state.emptyTailDeleteCount||0)+1;
+          else if(e.position>side.length||e.operation!==0&&e.position===side.length)invalidate('missing_row_position');
           else if(e.operation===2)side.splice(e.position,1);
           else if(!finite(e.price)||e.price<=0||e.price>=1e12||!size(e.size))invalidate('invalid_depth_price_or_size');
           else {

@@ -7,6 +7,16 @@ concurrency:
   group: orderbook-workspace-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  windows-collection-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Broker-free Windows collection runtime checks
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/collection/windows_runtime_tests.ps1
   source-review:
     runs-on: ubuntu-24.04
     timeout-minutes: 3
@@ -56,6 +66,7 @@ jobs:
           node --test tests/workspace/*.test.mjs tests/dashboard/*.test.mjs
           node --test tests/ticks/model_tests.mjs tests/variation/model.test.mjs
           python -m unittest discover -s tests/workspace -p 'test_*.py' -v
+          python -m unittest discover -s tests/collection -p 'test_*.py' -v
           python -m unittest discover -s tests/liquidity -p 'test_*.py' -v
           python -m unittest discover -s tests/orderbook -p 'test_*.py' -v
           python -m unittest discover -s tests/variation -p 'test_*.py' -v

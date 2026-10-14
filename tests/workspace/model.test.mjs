@@ -150,6 +150,14 @@ test('archive missing position invalidates until explicit reset',()=>{
   const out=replayEventPage(eventPage(rows));assert.equal(out.frames[2].reason,'missing_row_position');
   assert.equal(out.frames[2].bids.length,0);assert.equal(out.frames[5].usable,true);
 });
+test('archive bounded empty tail delete retains arrival count and subsequent book updates',()=>{
+  const rows=[event(1),event(2),event(3),event(4,{operation:2,side:1,position:2,price:0,size:'999'}),
+    event(5,{operation:1,side:1,position:0,size:'23'}),event(6,{kind:'stop'})];
+  const out=replayEventPage(eventPage(rows));
+  assert.equal(out.frames[3].usable,true);assert.deepEqual(out.frames[3].bids,out.frames[2].bids);
+  assert.equal(out.frames[4].bids[0].size,'23');assert.equal(out.state.emptyTailDeleteCount,1);
+  assert.equal(out.state.count,6);assert.deepEqual(out.page.rows,rows);
+});
 test('archive refuses changed identity, missing tails, active sessions, stalled pages',()=>{
   const p=eventPage([event(1),event(2),event(3)],true),first=replayEventPage(p);
   assert.throws(()=>replayEventPage({...p,session:{...p.session,state:'recording'}}));

@@ -103,6 +103,25 @@ int main(int argc,char** argv) {
         test("unexpected start",[]{dts::DepthBook b;b.apply(event(1,"start"));b.apply(event(2,"start"));check(b.quality()=="unexpected_start");});
         test("terminal cannot reset",[]{dts::DepthBook b;b.apply(event(1,"start"));b.apply(event(2,"stop"));b.apply(event(3,"reset"));check(!b.active()&&b.quality()=="unexpected_reset");});
         test("invalid row latches",[]{dts::DepthBook b;b.apply(event(1,"start"));b.apply(event(2,"update",0,2,1));check(b.quality()=="missing_row_position");b.apply(event(3));check(b.asks().empty());});
+        test("empty tail delete follows official SDK without losing callback sequence",[]{
+            dts::DepthBook b(50);b.apply(event(1,"start"));std::uint64_t seq=1;
+            for(int pos=0;pos<10;++pos)b.apply(event(++seq,"update",1,pos,0,99.-pos));
+            b.apply(event(++seq,"update",0,0,0,101));
+            while(seq<266)b.apply(event(++seq,"update",1,0,1,99));
+            b.apply(event(267,"update",1,8,2));check(b.bids().size()==9);
+            b.apply(event(268,"update",1,9,2));
+            check(b.structural_valid()&&b.sequence()==268&&b.bids().size()==9&&b.empty_tail_delete_count()==1);
+            b.apply(event(269,"update",1,0,1,99,"123"));
+            check(b.bids()[0].size=="123"&&b.quality()=="two_sided_unverified");
+            b.apply(event(270,"update",1,49,2));check(b.structural_valid()&&b.empty_tail_delete_count()==2);
+            b.apply(event(271,"update",1,50,2));check(!b.structural_valid()&&b.quality()=="invalid_depth_update");
+        });
+        test("missing insert update and malformed deletes remain structural failures",[]{
+            for(int op:{0,1}) {dts::DepthBook b(50);b.apply(event(1,"start"));b.apply(event(2,"update",1,9,op));check(b.quality()=="missing_row_position");}
+            for(const auto& e:{event(2,"update",1,-1,2),event(2,"update",2,9,2),event(2,"update",1,9,3)}) {
+                dts::DepthBook b(50);b.apply(event(1,"start"));b.apply(e);check(b.quality()=="invalid_depth_update");
+            }
+        });
         test("invalid prices",[]{for(double p:{0.0,-1.0,std::numeric_limits<double>::quiet_NaN(),1e99}){dts::DepthBook b;b.apply(event(1,"start"));b.apply(event(2,"update",0,0,0,p));check(b.quality()=="invalid_depth_price");}});
         test("crossed and locked",[]{dts::DepthBook b;b.apply(event(1,"start"));b.apply(event(2,"update",0,0,0,100));b.apply(event(3,"update",1,0,0,101));check(b.quality()=="crossed");b.apply(event(4,"update",1,0,1,100));check(b.quality()=="locked");});
         test("unordered rows and zero sizes",[]{dts::DepthBook b;b.apply(event(1,"start"));b.apply(event(2,"update",0,0,0,101));b.apply(event(3,"update",1,0,0,99));b.apply(event(4,"update",0,1,0,100));check(b.quality()=="unordered_rows");b.apply(event(5,"update",0,1,1,102,"0"));check(b.quality()=="zero_size_row");});

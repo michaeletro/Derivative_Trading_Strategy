@@ -217,6 +217,13 @@ remain private and persist across restart. These operations have no order router
 
 ### Timed collections
 
+For standing **SPY/BATS 09:00–16:30 Eastern trading-day collection**, see
+[automatic daily collection](daily-collection.md). Its separate authorized path
+supports up to thirty 15-minute segments and a native absolute close deadline.
+The manual form below retains its four-hour limit. The daily status card shows
+the collector's most recent status; inspect its timestamp before assuming it is
+currently running.
+
 After explicitly connecting to the intended paper session and resolving/selecting
 the direct USD contract, use **Timed collection** beside the manual recording
 controls. Confirm the current Paper Trading and TWS Read-Only API settings, choose
@@ -231,6 +238,18 @@ subscription boundaries can leave gaps; they are not a continuous exchange feed.
 Timer completion and successful storage do not certify depth delivery, clock
 quality over the whole recording, complete exchange depth or research eligibility.
 Requested rows remain independent of the actual delivered levels.
+
+Bounded delete callbacks for an empty row past the delivered tail leave the book
+unchanged. This follows the official SDK 10.45 sample,
+`IBJts/samples/Java/apidemo/MarketDataPanel.java`, `DeepModel.updateMktDepth`,
+`case DELETE`. Every callback remains recorded and counted as an arrival; an
+absent row supplies no inferred cancellation quantity or order-flow change.
+Side freshness retains its callback-receipt convention, including these received
+delete callbacks; it does not measure time since a displayed quote changed.
+Live diagnostics count these callbacks and timed collection shows an explicit
+warning. Missing insert/update positions, invalid sides/operations and positions
+outside the requested row limit still invalidate reconstruction. Existing
+interrupted recordings and their saved gap labels are preserved.
 
 **Stop collection** cancels the entire remaining plan, not just the current
 segment. Closing a tab or signing out does not stop the server timer or disk
@@ -251,8 +270,9 @@ collection identifier through its dedicated controls.
 
 Plan journals live privately in `depth-collections/<generated-id>/` beside the
 SQLite archive (directories 0700, files 0600). At most 100 plans are kept in the
-active journal catalog; the newest 20 are displayed. Nothing is deleted
-automatically. On restart, a previously active plan is marked interrupted and
+active journal catalog; the newest 20 are displayed. Older terminal journals move
+intact into the private sibling `depth-collection-history/` directory when the
+catalog reaches its limit. Nothing is deleted automatically. On restart, a previously active plan is marked interrupted and
 its actual committed counts are refreshed from its original archived session.
 It never resumes. Elapsed time and observed update counters not checkpointed
 before a crash remain explicitly incomplete; they are not reconstructed from

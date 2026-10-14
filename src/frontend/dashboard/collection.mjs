@@ -8,7 +8,7 @@ export function mountCollection({read,work,afterMutation,notify,isCurrent}) {
   const label=value=>String(value??'unknown').replaceAll('_',' ');
   const when=value=>new Date(value).toLocaleString(undefined,{timeZone:'America/New_York',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})+' ET';
   let access={unlocked:false,busy:false,ready:false,loaded:false,reconcile:false,selected:null,live:null};
-  let status=null,lastSuccess=0,readiness=null,inspected=null,warning=null,mutationEpoch=0;
+  let status=null,lastSuccess=0,readiness=null,inspected=null,warning=null,mutationEpoch=0,daily=null,dailyReadAt=0;
   const acknowledged=new Set(),interruptions=new Map();
   const active=()=>status?.active===true;
   const fresh=()=>lastSuccess>0&&Date.now()-lastSuccess<5000;
@@ -19,6 +19,9 @@ export function mountCollection({read,work,afterMutation,notify,isCurrent}) {
   }
   function render() {
     const p=status?.current,unlocked=access.unlocked;
+    const scheduleText=!unlocked?'Unlock to inspect the automatic daily schedule.':!daily?'Daily schedule status not loaded.':!daily.configured?'Daily collection is not configured on this server.':daily.available===false?'Daily schedule status unavailable; inspect the local collector.':
+      `${daily.enabled?'Enabled':'Paused'} · 9:00 AM–4:30 PM Eastern · ${label(daily.phase)}${daily.reason?' · '+label(daily.reason):''}${daily.next_collection_open_ms?` · Next collection window: ${when(daily.next_collection_open_ms)}`:''}${daily.updated_ms?` · Last checked: ${when(daily.updated_ms)}`:''}. TWS must be logged into the authorized paper account.`;
+    put('ob-daily-schedule',scheduleText);
     const setupAllowed=unlocked&&access.ready&&access.loaded&&!access.reconcile&&!active()&&!access.live?.available&&!!access.selected&&fresh();
     const startAllowed=setupAllowed&&!access.busy;
     $('ob-collection-fields').disabled=!setupAllowed;
@@ -29,7 +32,7 @@ export function mountCollection({read,work,afterMutation,notify,isCurrent}) {
     $('ob-collection-progress').hidden=!p;
     if(p){$('ob-collection-progress').max=p.requested_seconds;$('ob-collection-progress').value=Math.min(p.requested_seconds,p.elapsed_seconds);}
     put('ob-collection-status',!unlocked?'Unlock to inspect timed collections.':!status?'Timed collection status not loaded.':!p?'No timed collection has been started.':
-      `${p.source==='mock'?'SYNTHETIC · ':''}${p.symbol} / ${p.venue} · ${label(p.state)} · ${p.segments_completed}/${p.segments_requested} finalized segments · ${p.checkpoint_metrics_incomplete?'at least ':''}${durationText(p.elapsed_seconds)} ${p.checkpoint_metrics_incomplete?'at last durable checkpoint':'elapsed'}${active()?` · ${durationText(p.remaining_seconds)} remaining`:''}${p.reason?` · ${label(p.reason)}`:''}.`);
+      `${p.source==='mock'?'SYNTHETIC · ':''}${p.symbol} / ${p.venue} · ${label(p.state)} · ${p.segments_completed}/${p.segments_requested} finalized segments · ${p.checkpoint_metrics_incomplete?'at least ':''}${durationText(p.elapsed_seconds)} ${p.checkpoint_metrics_incomplete?'at last durable checkpoint':'elapsed'}${active()?` · ${durationText(p.remaining_seconds)} remaining`:''}${p.schedule_id?` · Scheduled stop: ${when(p.collection_close_ms)}`:''}${p.reason?` · ${label(p.reason)}`:''}.`);
     const health=[];
     if(unlocked&&status)health.push(fresh()?'Status refreshed within 5 seconds':`Status is stale${lastSuccess?` (${durationText((Date.now()-lastSuccess)/1000)} since refresh)`:''}; collection outcome is not confirmed`);
     if(warning)health.push(warning);
@@ -72,7 +75,17 @@ export function mountCollection({read,work,afterMutation,notify,isCurrent}) {
   }
   async function refresh(rev) {
     const epoch=mutationEpoch;
-    try{const value=await read('/api/depth/collection','GET',undefined,rev);return epoch===mutationEpoch&&isCurrent(rev)?accept(value):status;}
+    try{
+      const value=await read('/api/depth/collection','GET',undefined,rev);
+      if(epoch!==mutationEpoch||!isCurrent(rev))return status;
+      accept(value);
+      if(Date.now()-dailyReadAt>=10000){
+        dailyReadAt=Date.now();
+        try{const schedule=await read('/api/depth/collection/schedule','GET',undefined,rev);if(epoch===mutationEpoch&&isCurrent(rev)){daily=schedule;render();}}
+        catch{if(epoch===mutationEpoch&&isCurrent(rev)){daily={configured:true,available:false};render();}}
+      }
+      return status;
+    }
     catch(error){if(epoch===mutationEpoch&&isCurrent(rev)){warning='Collection status unavailable. Refresh before changing capture.';lastSuccess=0;render();}throw error;}
   }
   function requestStop() {
@@ -106,5 +119,5 @@ export function mountCollection({read,work,afterMutation,notify,isCurrent}) {
   $('collection-acknowledge').addEventListener('click',()=>{if(!fresh()||access.busy)return;for(const id of interruptions.keys())acknowledged.add(id);render();});
   duration();render();
   return {refresh,active,requestStop,readiness(value){readiness=value;render();},update(value){access=value;render();},
-    clear(){mutationEpoch++;status=null;lastSuccess=0;readiness=null;inspected=null;warning=null;acknowledged.clear();interruptions.clear();$('ob-collection-paper').checked=false;render();},tick:render};
+    clear(){mutationEpoch++;status=null;lastSuccess=0;readiness=null;inspected=null;warning=null;daily=null;dailyReadAt=0;acknowledged.clear();interruptions.clear();$('ob-collection-paper').checked=false;render();},tick:render};
 }

@@ -58,6 +58,19 @@ class TimeFlowTests(unittest.TestCase):
         self.assertAlmostEqual(sum(row['poisson_probability'] for row in f['model']['pmf']), 1.)
         self.assertAlmostEqual(sum(row['empirical_probability'] for row in f['model']['pmf']), 1.)
 
+    def test_empty_tail_delete_is_received_arrival_with_zero_inferred_flow(self):
+        p=initialized([(1.1,dict(operation=2,position=2,price=0.,size='999')),
+                       (1.2,dict(operation=1,size='20'))])
+        original=copy.deepcopy(p);f=self.flow(p)
+        self.assertEqual(p,original)
+        self.assertEqual(f['selected_callback_count'],4)
+        self.assertEqual(f['bins'][1]['callback_count'],2)
+        self.assertEqual(f['bins'][1]['delete_count'],1)
+        self.assertEqual(f['bins'][1]['ofi_sum'],0.)
+        self.assertEqual(f['bins'][1]['ofi_transitions'],2)
+        self.assertEqual(f['bins'][1]['means']['bid_depth'],20.)
+        self.assertEqual(f['distributions']['interarrival_seconds']['count'],3)
+
     def test_right_open_boundaries_and_partial_bin_excluded(self):
         p = initialized([(1., dict()), (2., dict()), (2.25, dict())], duration=2.5)
         f = self.flow(p)

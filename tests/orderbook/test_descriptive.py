@@ -102,6 +102,19 @@ class ReplayDescriptionTests(unittest.TestCase):
         self.assertEqual(f['bids'], [[99., '50.0'], [98., '40.0']])
         self.assertEqual(len(s['descriptive']['depth_profile']['bid']), 2)
 
+    def test_empty_tail_delete_keeps_callback_and_zero_flow_without_invented_quantity(self):
+        p=fixture([dict(side=0,price=101.,size='10'),dict(size='20'),
+                   dict(operation=2,position=2,price=0.,size='999')])
+        original=copy.deepcopy(p);report=describe_session(p);d=report['descriptive']
+        self.assertEqual(p,original)
+        self.assertEqual(d['total_events'],5)
+        self.assertEqual(d['event_counts']['by_side']['bid']['delete'],1)
+        self.assertEqual(d['eligible_events'],2)
+        self.assertEqual(d['distributions']['ofi_event']['count'],1)
+        self.assertEqual(d['distributions']['ofi_event']['mean'],0.)
+        frames=[f for f in report['frames'] if f['usable']]
+        self.assertEqual(frames[0]['bids'],frames[1]['bids'])
+
     def test_clock_drift_and_regression_described_without_timestamp_mutation(self):
         p = synthetic_fixture()
         for e in p['events'][15:]:

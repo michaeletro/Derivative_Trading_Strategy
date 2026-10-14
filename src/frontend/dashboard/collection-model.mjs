@@ -28,12 +28,15 @@ const nullableId=v=>v===null||id(v);
 const stamp=v=>integer(v,1,Number.MAX_SAFE_INTEGER);
 export const activeCollectionStates=new Set(['starting','recording','stopping']);
 function plan(value) {
+  const scheduled=typeof value?.schedule_id==='string'&&/^[a-f0-9]{32}$/.test(value.schedule_id);
+  if(value?.schedule_id!==undefined&&value.schedule_id!==null&&!scheduled)fail('Invalid daily collection identity.');
+  if(scheduled&&(!/^\d{4}-\d{2}-\d{2}$/.test(value.session_date??'')||!stamp(value.collection_open_ms)||!stamp(value.collection_close_ms)||value.collection_close_ms<=value.collection_open_ms||value.collection_close_ms-value.collection_open_ms>27000000||value.source!=='ibkr_tws'||value.symbol!=='SPY'||value.contract_id!=='756733'||value.venue!=='BATS'||value.rows!==50||value.segment_seconds!==900))fail('Invalid daily collection window.');
   if(!object(value)||typeof value.collection_id!=='string'||!/^[a-f0-9]{32}$/.test(value.collection_id)
     ||!['starting','recording','stopping','completed','stopped','interrupted'].includes(value.state)
     ||!text(value.reason)||!['ibkr_tws','mock'].includes(value.source)||!id(value.contract_id)||!text(value.symbol,64)||!value.symbol.length||value.currency!=='USD'||!['BATS','IEX'].includes(value.venue)
-    ||!integer(value.rows,1,50)||!integer(value.segment_seconds,60,3600)||!integer(value.segments_requested,1,16)
+    ||!integer(value.rows,1,50)||!integer(value.segment_seconds,60,3600)||!integer(value.segments_requested,1,scheduled?30:16)
     ||!integer(value.segments_completed,0,value.segments_requested)||value.paper_read_only_confirmed!==true
-    ||value.requested_seconds!==value.segment_seconds*value.segments_requested||value.requested_seconds>14400
+    ||value.requested_seconds!==value.segment_seconds*value.segments_requested||value.requested_seconds>(scheduled?27000:14400)
     ||!stamp(value.created_ms)||!stamp(value.updated_ms)||(value.finished_ms!==null&&!stamp(value.finished_ms))
     ||!finite(value.elapsed_seconds)||!finite(value.remaining_seconds,0,value.requested_seconds)
     ||(value.current_segment!==null&&!integer(value.current_segment,1,value.segments_requested))

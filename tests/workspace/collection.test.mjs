@@ -47,6 +47,14 @@ test('status rejects fabricated finalization, duplicate plans and broken ownersh
     r=>r.current.segments[0].finalized=true,r=>{r.current.state='completed';r.active=false;},r=>r.plans.push(r.current)];
   for(const mutate of mutations){const r=status();mutate(r);assert.throws(()=>parseCollection(r));}
 });
+test('daily plans accept thirty fixed SPY/BATS segments without expanding manual limits',()=>{
+  const r=status();Object.assign(r.current,{source:'ibkr_tws',symbol:'SPY',contract_id:'756733',rows:50,schedule_id:'b'.repeat(32),session_date:'2026-10-15',collection_open_ms:1792071000000,collection_close_ms:1792098000000,segments_requested:30,requested_seconds:27000,remaining_seconds:26970});
+  assert.equal(parseCollection(r).current.segments_requested,30);
+  for(const mutate of [p=>p.schedule_id=null,p=>p.schedule_id='../unsafe',p=>p.symbol='QQQ',p=>p.rows=10,p=>p.segment_seconds=600,p=>p.collection_close_ms+=1,p=>p.session_date='today']){
+    const bad=structuredClone(r);mutate(bad.current);assert.throws(()=>parseCollection(bad));
+  }
+  assert.throws(()=>collectionRequest({...form(),segments:30},selected()));
+});
 
 // Minimal DOM for testing async ownership, not the rendered layout (covered by
 // Playwright). In particular, reads here can fail after a new access generation.

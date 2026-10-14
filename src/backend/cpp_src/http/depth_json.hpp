@@ -71,6 +71,7 @@ inline Json current(const ReadOnlyService& service, storage::TimeSeriesStore* st
     j["venue"]=view.spec.venue;j["requested_rows"]=view.spec.rows;
     j["active"]=b.active();j["structural_valid"]=b.structural_valid();j["quality"]=b.quality();
     j["sequence"]=std::to_string(b.sequence());j["epoch"]=std::to_string(b.epoch());
+    j["empty_tail_delete_count"]=std::to_string(b.empty_tail_delete_count());
     j["last_receipt_unix_us"]=std::to_string(b.received().unix_us);
     // Last EVENT age is not proof that both sides or all levels are fresh.
     const auto now=DepthStamp::now();

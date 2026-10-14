@@ -132,7 +132,7 @@ def main(exe):
             page.locator('#token').fill(helper.TOKEN);page.locator('#unlock').click()
             expect(page.locator('#http-status')).to_have_text('Available')
             expect(page.locator('#ob-refresh')).to_be_enabled()
-            ck(not any(path.startswith('/api/depth') and not (method=='GET' and path=='/api/depth/collection')
+            ck(not any(path.startswith('/api/depth') and not (method=='GET' and path in ('/api/depth/collection','/api/depth/collection/schedule'))
                        for method,path,body in calls))
             page.locator('#ob-refresh').click()
             expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')

@@ -50,12 +50,60 @@ def main(executable):
     with tempfile.TemporaryDirectory(prefix='dts-collection-http-') as tmp:
         root=Path(tmp)
         with fixture_server(executable,root) as server:
-            for path,body in ((BASE,None),(BASE+'/start',{}),(BASE+'/stop',{})):
+            for path,body in ((BASE,None),(BASE+'/start',{}),(BASE+'/stop',{}),(BASE+'/schedule',None),(BASE+'/scheduled-start',{})):
                 ck(server.call(path,body,auth=False)[0]==401)
                 ck(server.call(path,body,Origin='https://untrusted.invalid')[0]==403)
                 ck(server.call(path,body,Host='untrusted.invalid')[0]==403)
             status=server.call(BASE)[1]
             ck(not status['active'] and status['current'] is None and status['plans']==[])
+            # This endpoint reads only the controller's PUBLIC status sidecar.
+            # It must never expose its private account/config/day-journal data.
+            ck(server.call(BASE+'/schedule')==(200,{'schema_version':1,'configured':False}))
+            runtime=root/'data/daily-collection';runtime.mkdir(mode=0o700)
+            public_path=runtime/'status.json'
+            public=dict(schema_version=1,enabled=True,symbol='SPY',venue='BATS',rows=50,segment_minutes=15,
+                timezone='America/New_York',phase='waiting_for_open',reason='Waiting for the regular session',
+                updated_ms=1792071000000,session_date='2026-10-15',is_trading_day=True,
+                market_open_ms=1792071000000,market_close_ms=1792094400000,collection_open_ms=1792069200000,collection_close_ms=1792096200000,
+                next_open_ms=1792071000000,next_close_ms=1792094400000,
+                next_collection_open_ms=1792069200000,next_collection_close_ms=1792096200000,
+                in_runtime_window=True,in_collection_window=False,collection_id=None,segments_completed=0,segments_requested=30,
+                delivery_observed=False,warnings=['Awaiting the opening bell'])
+            def write_public(value):
+                public_path.write_text(json.dumps(value));public_path.chmod(0o600)
+            write_public(dict(public,expected_account='DU1234567',private_token=helper.TOKEN,
+                              config={'expected_account':'DU1234567'}))
+            code,schedule=server.call(BASE+'/schedule')
+            ck(code==200 and schedule['configured'] is True and schedule['available'] is True)
+            ck(all(schedule[key]==value for key,value in public.items()))
+            ck('expected_account' not in schedule and 'private_token' not in schedule and 'config' not in schedule)
+            ck('DU1234567' not in json.dumps(schedule) and helper.TOKEN not in json.dumps(schedule))
+            def unavailable():
+                code,body=server.call(BASE+'/schedule')
+                ck(code==200 and body.get('configured') is True and body.get('available') is False and body.get('phase')=='unavailable')
+                ck('DU1234567' not in json.dumps(body) and helper.TOKEN not in json.dumps(body))
+            for key,value in (('schema_version',2),('enabled',1),('rows',49),('segment_minutes',1),('venue','IEX'),
+                              ('timezone','UTC'),('updated_ms',None),('market_open_ms',True),('collection_open_ms',True),
+                              ('collection_close_ms','private'),('segments_requested',31),('collection_id','../private'),
+                              ('warnings',['private']*21),('warnings',['x'*161]),('warnings',[{'expected_account':'DU1234567'}]),
+                              ('reason','x'*201),('phase','bad\nphase')):
+                write_public(dict(public,**{key:value}));unavailable()
+            write_public(public);public_path.chmod(0o644);unavailable();public_path.chmod(0o600)
+            runtime.chmod(0o755);unavailable();runtime.chmod(0o700)
+            public_path.write_text('{broken private JSON');unavailable()
+            public_path.write_text('x'*262145);unavailable()
+            public_path.unlink()
+            private_target=root/'private-schedule-test.json';private_target.write_text(json.dumps(dict(public,expected_account='DU1234567')));private_target.chmod(0o600)
+            public_path.symlink_to(private_target);unavailable();public_path.unlink()
+            ck(server.call(BASE+'/schedule')==(200,{'schema_version':1,'configured':False}))
+            # Even a correctly shaped request cannot make a mock process claim
+            # native scheduled data. No clock warm-up bypass is necessary.
+            scheduled=dict(schema_version=1,schedule_id='a'*32,collection_id='b'*32,session_date='2026-10-15',
+                open_ms=1792069200000,close_ms=1792096200000,contract_id='756733',venue='BATS',rows=50,
+                paper_read_only_confirmed=True,expected_account='DU1234567')
+            code,rejected=server.call(BASE+'/scheduled-start',scheduled)
+            ck(code==400 and 'paper SPY/BATS scope' in rejected['error'])
+            status=server.call(BASE)[1];ck(not status['active'] and status['current'] is None and status['plans']==[])
             for key,value in (('rows',True),('rows',51),('segment_seconds',59),('segment_seconds',3601),('segments',17),
                               ('paper_read_only_confirmed',False),('paper_read_only_confirmed',1),('venue','SMART'),('contract_id','../25')):
                 bad=payload('9001');bad[key]=value
@@ -137,6 +185,6 @@ def main(executable):
                 row=db.execute('SELECT state,event_count FROM depth_sessions WHERE session_id=?',(sid,)).fetchone()
                 ck(row[0]=='stop' and row[1]>0)
             ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
-    print(f'{checks} collection HTTP checks passed: real steady deadline, durable rotation, stop ownership, interruption, crash recovery and privacy (synthetic peer only).')
+    print(f'{checks} collection HTTP checks passed: real steady deadline, durable rotation, stop ownership, interruption, crash recovery, public schedule privacy and native-source gating (synthetic peer only).')
 
 if __name__=='__main__':main(sys.argv[1])

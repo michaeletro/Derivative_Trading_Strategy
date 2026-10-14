@@ -49,6 +49,9 @@ def main(exe):
                     data = {'request_id': 17}
                 elif path == '/api/contracts/requests/17':
                     data = dict(status='complete', contracts=[dict(contract_id=9001, symbol='SYNTHETIC', security_type='STK', currency='USD', exchange='BATS', multiplier=1)])
+                elif path == '/api/depth/collection/schedule':
+                    data = dict(schema_version=1,configured=True,available=True,enabled=True,symbol='SPY',venue='BATS',rows=50,
+                        timezone='America/New_York',phase='waiting_for_open',reason='',next_collection_open_ms=1792069200000,updated_ms=int(time.time()*1000))
                 elif path.startswith('/api/depth/collection'):
                     if state['unavailable']:
                         route.fulfill(status=503, content_type='application/json', body=json.dumps({'error': 'Synthetic service interruption'}))
@@ -93,6 +96,8 @@ def main(exe):
             expect(page.locator('#ob-refresh')).to_be_enabled()
             page.locator('#ob-refresh').click()
             expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')
+            expect(page.locator('#ob-daily-schedule')).to_contain_text('Enabled · 9:00 AM–4:30 PM Eastern')
+            expect(page.locator('#ob-daily-schedule')).to_contain_text('waiting for open')
             expect(page.locator('#ob-collection-status')).to_contain_text('No timed collection')
             expect(page.locator('#ob-collection-paper')).to_be_disabled()
             page.locator('#ob-symbol').fill('SYNTHETIC')

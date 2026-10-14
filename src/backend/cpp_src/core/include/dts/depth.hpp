@@ -90,6 +90,12 @@ public:
         }
         auto& levels = sides_[static_cast<std::size_t>(e.side)];
         const auto position = static_cast<std::size_t>(e.position);
+        // Official IBKR 10.45 sample: IBJts/samples/Java/apidemo/
+        // MarketDataPanel.java, DeepModel.updateMktDepth, case DELETE ignores
+        // deletion past the populated tail ("this happens but seems to be harmless").
+        // Bounds/sequence/side checks above still apply. Keep this received
+        // callback; an absent row supplies no inferred cancellation quantity.
+        if (e.operation == 2 && position >= levels.size()) { ++empty_tail_deletes_; return; }
         if (position > levels.size() || (e.operation != 0 && position == levels.size())) {
             invalidate("missing_row_position"); return;
         }
@@ -109,6 +115,7 @@ public:
     bool active() const noexcept { return active_; }
     std::uint64_t sequence() const noexcept { return sequence_; }
     std::uint64_t epoch() const noexcept { return epoch_; }
+    std::uint64_t empty_tail_delete_count() const noexcept { return empty_tail_deletes_; }
     DepthStamp received() const noexcept { return received_; }
     const std::vector<DepthLevel>& asks() const noexcept { return sides_[0]; }
     const std::vector<DepthLevel>& bids() const noexcept { return sides_[1]; }
@@ -128,7 +135,7 @@ public:
 private:
     int rows_;
     std::array<std::vector<DepthLevel>, 2> sides_;
-    std::uint64_t sequence_ = 0, epoch_ = 0;
+    std::uint64_t sequence_ = 0, epoch_ = 0, empty_tail_deletes_ = 0;
     DepthStamp received_;
     bool valid_ = false, active_ = false, started_ = false, terminal_ = false;
     std::string reason_ = "not_started";

@@ -637,12 +637,80 @@ private:
         CROW_ROUTE(app_, "/api/depth/collection")([this](const crow::request& req) {
             return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);return depth_collection_.status();});
         });
+        CROW_ROUTE(app_, "/api/depth/collection/schedule")([this](const crow::request& req) {
+            return guarded(req,[&] {
+                Json out; out["schema_version"]=1; out["configured"]=false;
+                const auto directory=std::filesystem::path(store_.status().database).parent_path()/"daily-collection";
+                const auto path=directory/"status.json";
+                try {
+                    if(!std::filesystem::exists(std::filesystem::symlink_status(path)))return out;
+                    out["configured"]=true;
+                    dts::orderbook_jobs::private_dir(directory,false);
+                    const auto saved=dts::orderbook_jobs::read_json(path,262144);
+                    dts::orderbook_jobs::bounded(saved,"schema_version",1,1);
+                    const std::set<std::string> booleans{"enabled","is_trading_day","in_runtime_window","in_collection_window","delivery_observed"};
+                    const std::set<std::string> times{"updated_ms","market_open_ms","market_close_ms","collection_open_ms","collection_close_ms",
+                        "next_open_ms","next_close_ms","next_collection_open_ms","next_collection_close_ms"};
+                    const std::set<std::string> labels{"symbol","venue","timezone","phase","reason","session_date","collection_id"};
+                    const std::set<std::string> integers{"rows","segment_minutes","segments_completed","segments_requested"};
+                    for(const auto& key:saved.keys()) {
+                        const auto& value=saved[key];
+                        if(booleans.count(key)) {
+                            if(value.t()!=crow::json::type::True&&value.t()!=crow::json::type::False)throw std::runtime_error("Invalid public schedule boolean");
+                            out[key]=value.b();
+                        } else if(times.count(key)) {
+                            if(value.t()==crow::json::type::Null&&key!="updated_ms") {out[key]=nullptr;continue;}
+                            if(value.t()!=crow::json::type::Number||!std::isfinite(value.d())||value.d()<1||value.d()>253402300799999.||std::floor(value.d())!=value.d())
+                                throw std::runtime_error("Invalid public schedule timestamp");
+                            out[key]=value.i();
+                        } else if(labels.count(key)) {
+                            if(value.t()==crow::json::type::Null&&(key=="session_date"||key=="collection_id")) {out[key]=nullptr;continue;}
+                            const auto text=dts::orderbook_jobs::field(saved,key.c_str());
+                            const std::size_t limit=key=="reason"?200:64;
+                            if(text.size()>limit||std::any_of(text.begin(),text.end(),[](unsigned char c){return c<32||c==127;}))throw std::runtime_error("Invalid public schedule label");
+                            if((key=="symbol"&&text!="SPY")||(key=="venue"&&text!="BATS")||(key=="timezone"&&text!="America/New_York")||
+                               (key=="collection_id"&&!dts::orderbook_jobs::job_id(text))||
+                               (key=="session_date"&&(text.size()!=10||text[4]!='-'||text[7]!='-'||text.find_first_not_of("0123456789-")!=std::string::npos)))
+                                throw std::runtime_error("Invalid public schedule scope");
+                            out[key]=text;
+                        } else if(integers.count(key)) {
+                            const int number=dts::orderbook_jobs::bounded(saved,key.c_str(),0,50);
+                            if((key=="rows"&&number!=50)||(key=="segment_minutes"&&number!=15)||
+                               ((key=="segments_completed"||key=="segments_requested")&&number>30))throw std::runtime_error("Invalid public schedule count");
+                            out[key]=number;
+                        } else if(key=="warnings") {
+                            if(value.t()!=crow::json::type::List||value.size()>20)throw std::runtime_error("Invalid public schedule warnings");
+                            std::vector<std::string> warnings;
+                            for(const auto& warning:value) {
+                                if(warning.t()!=crow::json::type::String)throw std::runtime_error("Invalid public schedule warning");
+                                const std::string text=warning.s();
+                                if(text.size()>160||std::any_of(text.begin(),text.end(),[](unsigned char c){return c<32||c==127;}))throw std::runtime_error("Invalid public schedule warning");
+                                warnings.push_back(text);
+                            }
+                            out[key]=std::move(warnings);
+                        }
+                    }
+                    out["available"]=true; return out;
+                } catch(const std::exception&) {
+                    Json unavailable; unavailable["schema_version"]=1;unavailable["configured"]=true;unavailable["available"]=false;
+                    unavailable["phase"]="unavailable";unavailable["reason"]="Local schedule status unavailable; inspect the collector log.";
+                    return unavailable;
+                }
+            });
+        });
         CROW_ROUTE(app_, "/api/depth/collection/start").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto j=object(req);std::lock_guard<std::mutex> lock(broker_mutex_);
                 const auto check=collection_preflight();
                 collection_checks_passed_=check.first;collection_check_reason_=check.second;
                 collection_next_check_=dts::Clock::now()+std::chrono::seconds(1);
                 return depth_collection_.start(broker_,depth_source(),j,check.first,check.second);});
+        });
+        CROW_ROUTE(app_, "/api/depth/collection/scheduled-start").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);std::lock_guard<std::mutex> lock(broker_mutex_);
+                const auto check=collection_preflight();
+                collection_checks_passed_=check.first;collection_check_reason_=check.second;
+                collection_next_check_=dts::Clock::now()+std::chrono::seconds(1);
+                return depth_collection_.scheduled_start(broker_,depth_source(),j,check.first,check.second);});
         });
         CROW_ROUTE(app_, "/api/depth/collection/stop").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"collection_id"});

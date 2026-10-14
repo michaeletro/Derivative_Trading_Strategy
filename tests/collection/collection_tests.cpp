@@ -26,23 +26,29 @@ Contract instrument() { Contract c; c.id = 9001; c.symbol = "SYNTHETIC"; c.curre
 class Peer final : public IBroker {
 public:
     TwsState state_;
+    bool spy = false;
+    std::string symbol_override;
     int subscriptions = 0, cancellations = 0, disconnections = 0;
     bool unknown_cancel = false, unknown_subscribe = false;
     RequestId last = 0;
     std::vector<DepthSpec> requested;
     std::function<void(const char*)> before;
-    void connect() override { state_.start(Clock::now()); state_.ready(); }
+    std::function<Clock::time_point()> request_clock = [] { return Clock::now(); };
+    void connect() override { state_.start(Clock::now()); state_.ready(); state_.managed_accounts({true,{"DU1234567"}}); }
     void disconnect() noexcept override { ++disconnections; state_.disconnect(); }
     ConnectionState state() const noexcept override { return state_.state(); }
     RequestId resolve(const ContractQuery& q) override {
-        auto id = state_.resolve(q, Clock::now()); state_.contract(id, instrument()); state_.contract_end(id); return id;
+        auto id = state_.resolve(q, Clock::now()); auto contract = instrument();
+        if (spy) { contract.id = 756733; contract.symbol = "SPY"; }
+        if (!symbol_override.empty()) contract.symbol = symbol_override;
+        state_.contract(id, contract); state_.contract_end(id); return id;
     }
     RequestId subscribe(const Contract&) override { return 0; }
     bool unsubscribe(RequestId) override { return false; }
     void request_positions(RequestId) override {}
     RequestId subscribe_depth(const DepthSpec& spec) override {
         if (before) before("subscribe");
-        ++subscriptions; requested.push_back(spec); last = state_.depth(spec, Clock::now());
+        ++subscriptions; requested.push_back(spec); last = state_.depth(spec, request_clock());
         if (unknown_subscribe) throw std::runtime_error("Synthetic unknown subscribe result");
         return last;
     }
@@ -59,14 +65,15 @@ public:
 };
 struct Fixture {
     fs::path root = fs::temp_directory_path() / ("dts-collection-" + std::to_string(getpid()) + "-" + std::to_string(++serial));
-    storage::TimeSeriesStore store{storage::Config{root, root / "backups"}, "mock"};
+    storage::TimeSeriesStore store;
     Peer* peer = nullptr;
     std::unique_ptr<ReadOnlyService> service;
     bool expected_store_failure = false;
-    Fixture() {
+    Fixture(const std::string& source = "mock", bool spy = false, const std::string& symbol_override = "") : store(storage::Config{root, root / "backups"}, source) {
         auto inner = std::make_unique<Peer>(); peer = inner.get();
-        service = std::make_unique<ReadOnlyService>(std::make_unique<storage::RecordingBroker>(std::move(inner), store, "mock"));
-        service->connect(); service->poll(); ContractQuery q; q.symbol = "SYNTHETIC"; service->resolve(q); service->poll();
+        peer->spy = spy; peer->symbol_override = symbol_override;
+        service = std::make_unique<ReadOnlyService>(std::make_unique<storage::RecordingBroker>(std::move(inner), store, source));
+        service->connect(); service->poll(); ContractQuery q; q.symbol = spy ? "SPY" : "SYNTHETIC"; service->resolve(q); service->poll();
     }
     ~Fixture() {
         service->disconnect();
@@ -76,6 +83,16 @@ struct Fixture {
     }
     void delivered() { peer->update(0, 0, 0, 101); peer->update(1, 0, 0, 99); service->poll(); }
 };
+constexpr std::int64_t collection_open = 1792069200000;
+Read scheduled_request(std::int64_t open = collection_open, std::int64_t close = collection_open + 27000000,
+                       const std::string& id = "11111111111111111111111111111111") {
+    Json out;
+    out["schema_version"] = 1; out["schedule_id"] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; out["collection_id"] = id;
+    out["session_date"] = "2026-10-15"; out["open_ms"] = open; out["close_ms"] = close;
+    out["contract_id"] = "756733"; out["venue"] = "BATS"; out["rows"] = 50;
+    out["paper_read_only_confirmed"] = true; out["expected_account"] = "DU1234567";
+    return parsed(std::move(out));
+}
 template<class F> void test(const char* name, F f) {
     f(); check(!unexpected_store_failures, "Unexpected recorder failure during fixture teardown");
     ++passed; std::cout << "PASS " << name << '\n';
@@ -243,6 +260,21 @@ int main() {
             check(!m.active() && field(result["current"], "reason") == "clock_drift", "Technical guard reason preserved");
             check(result["current"]["segments"][0]["gap"].b() && f.peer->subscriptions == 1, "Failure is terminal and conservative");
         });
+        test("received empty tail cleanup cannot abort a timed collection", [] {
+            Fixture f;Manager m(f.store);const auto start=Clock::now()+std::chrono::seconds(100);
+            m.start(*f.service,"mock",request(),true,"",start);
+            for(int pos=0;pos<10;++pos)f.peer->update(1,pos,0,99.-pos);
+            f.peer->update(0,0,0,101);
+            for(int n=0;n<254;++n)f.peer->update(1,0,1,99); // Start+11 inserts+254 updates: sequence 266.
+            f.peer->update(1,8,2,0);f.peer->update(1,9,2,0);f.peer->update(1,0,1,99);
+            f.service->poll();m.tick(*f.service,"mock",true,"",start+std::chrono::seconds(1));
+            const auto observed=parsed(m.status());
+            check(m.active()&&f.service->depth()->book.sequence()==269&&f.service->depth()->book.empty_tail_delete_count()==1,"Actual ascending tail cleanup pattern remains structurally usable");
+            bool warned=false;for(const auto& warning:observed["current"]["warnings"])if(std::string(warning.s())=="empty_tail_delete_callback")warned=true;
+            check(warned,"Ignored empty-tail callback remains explicit in collection warnings");
+            m.stop(*f.service);const auto stopped=parsed(m.status())["current"]["segments"][0];
+            check(stopped["finalized"].b()&&field(stopped,"committed_sequence")=="270"&&field(stopped,"raw_committed_sequence")=="270", "All received callbacks and final stop retained in archive and raw metadata");
+        });
         test("steady regression interrupts before the next throttled health slot", [] {
             Fixture f; Manager m(f.store); const auto start = Clock::now() + std::chrono::seconds(100);
             m.start(*f.service, "mock", request(), true, "", start); f.delivered();
@@ -304,6 +336,163 @@ int main() {
             check(!::lstat(file.parent_path().c_str(), &st) && (st.st_mode & 0777) == 0700, "Private plan directory mode 0700");
             const auto raw = orderbook_jobs::read_file(file, 131072);
             check(raw.find("token") == std::string::npos && raw.find("account") == std::string::npos && raw.find("password") == std::string::npos, "Journal has no account or credential fields");
+        });
+        test("scheduled fixed scope paper account and native source fail closed", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; const auto start = Clock::now();
+            Manager m(f.store, [&] { return start; }, [&] { return wall; });
+            rejects([&] { m.scheduled_start(*f.service, "mock", scheduled_request(), true, "", start); });
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), false, "clock_checking", start); });
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(collection_open, collection_open + 27000001), true, "", start); });
+            for (const auto* key : {"contract_id", "venue", "expected_account", "session_date"}) {
+                auto bad = Json(scheduled_request()); bad[key] = "invalid";
+                rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", parsed(std::move(bad)), true, "", start); });
+            }
+            auto bad = Json(scheduled_request()); bad["paper_read_only_confirmed"] = false;
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", parsed(std::move(bad)), true, "", start); });
+            for (const auto* key : {"rows", "open_ms", "close_ms"}) {
+                bad = Json(scheduled_request()); bad[key] = true;
+                rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", parsed(std::move(bad)), true, "", start); });
+            }
+            bad = Json(scheduled_request()); bad["session_date"] = "2026-02-30";
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", parsed(std::move(bad)), true, "", start); });
+            f.peer->state_.managed_accounts({true,{"DU1234567", "DU7654321"}}); f.service->poll();
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start); });
+            f.peer->state_.managed_accounts({true,{"DU7654321"}}); f.service->poll();
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start); });
+            f.peer->state_.managed_accounts({true,{"DU1234567"}}); f.service->poll();
+            wall = collection_open - 1; rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start); });
+            wall = collection_open + 27000000; rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start); });
+            check(f.peer->subscriptions == 0, "Invalid scope cannot subscribe");
+            wall = collection_open; auto result = parsed(m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start));
+            check(result["requested_plan"]["segments_requested"].i() == 30, "Full session requests 30 fifteen-minute segments");
+            check(result["requested_plan"]["requested_seconds"].i() == 27000 && result["requested_plan"]["rows"].i() == 50, "Scheduled settings fixed independently of manual bounds");
+            m.stop(*f.service);
+            const auto journal = orderbook_jobs::read_file(f.root / "depth-collections" / m.current_id() / "state.json", 131072);
+            check(journal.find("DU1234567") == std::string::npos && journal.find("expected_account") == std::string::npos, "Account binding never saved or published");
+            Fixture wrong("ibkr_tws", true, "QQQ"); Manager guarded(wrong.store, [&] { return start; }, [&] { return collection_open; });
+            rejects([&] { guarded.scheduled_start(*wrong.service, "ibkr_tws", scheduled_request(), true, "", start); });
+            check(wrong.peer->subscriptions == 0, "ConId alone cannot impersonate the fixed SPY stock identity");
+        });
+        test("scheduled identity is idempotent even after stop and restart", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; auto steady = Clock::now();
+            Manager m(f.store, [&] { return steady; }, [&] { return wall; });
+            auto first = parsed(m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", steady));
+            auto repeated = parsed(m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), false, "clock_checking", steady));
+            check(field(first["requested_plan"], "collection_id") == field(repeated["requested_plan"], "collection_id") && f.peer->subscriptions == 1, "Uncertain start retries reconcile exact original intent");
+            auto conflicting = Json(scheduled_request()); conflicting["close_ms"] = collection_open + 1800000;
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", parsed(std::move(conflicting)), true, "", steady); });
+            f.delivered(); m.stop(*f.service);
+            wall = collection_open + 86400000;
+            auto done = parsed(m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", steady));
+            check(field(done["requested_plan"], "state") == "stopped" && f.peer->subscriptions == 1, "Finished same-day key never starts again even outside window");
+            Manager reopened(f.store, [&] { return steady; }, [&] { return wall; });
+            done = parsed(reopened.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), false, "broker_not_ready", steady));
+            check(!reopened.active() && f.peer->subscriptions == 1 && field(done["requested_plan"], "state") == "stopped", "Restart retains idempotency without account or broker mutation");
+        });
+        test("market close cuts a late final segment with committed stop evidence", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open + 27000000 - 30000; const auto start = Clock::now(); auto steady = start;
+            Manager m(f.store, [&] { return steady; }, [&] { return wall; });
+            m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", steady); f.delivered();
+            check(parsed(m.status())["current"]["segments_requested"].i() == 1, "Late start records only remaining partial segment");
+            steady += std::chrono::seconds(29); wall += 29000; m.tick(*f.service, "ibkr_tws", true, "", steady);
+            check(m.active(), "Capture remains active strictly before close");
+            steady += std::chrono::seconds(1); wall += 1000; m.tick(*f.service, "ibkr_tws", true, "", steady);
+            const auto result = parsed(m.status());
+            check(!m.active() && field(result["current"], "reason") == "collection_window_closed" && field(result["current"], "state") == "stopped", "Market close is explicit, not a complete 15-minute timer claim");
+            check(result["current"]["segments"][0]["finalized"].b() && field(result["current"]["segments"][0], "raw_committed_sequence") == field(result["current"]["segments"][0], "committed_sequence"), "Short final segment has actual durable tail");
+            check(f.peer->subscriptions == 1 && f.peer->cancellations == 1, "Close cannot replace the request");
+        });
+        test("wall clock regression cannot extend native market close deadline", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; const auto start = Clock::now(); auto steady = start;
+            Manager m(f.store, [&] { return steady; }, [&] { return wall; });
+            m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(collection_open, collection_open + 60000), true, "", steady); f.delivered();
+            wall -= 3600000; steady += std::chrono::seconds(60); m.tick(*f.service, "ibkr_tws", true, "", steady);
+            check(!m.active() && field(parsed(m.status())["current"], "reason") == "collection_window_closed" && f.peer->subscriptions == 1, "Anchored steady deadline survives backwards UTC clock");
+        });
+        test("all thirty full-session segments close before market boundary", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; auto steady = Clock::now();
+            f.peer->request_clock = [&] { return steady; };
+            Manager m(f.store, [&] { return steady; }, [&] { return wall; });
+            m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", steady);
+            for (int segment = 1; segment <= 30; ++segment) {
+                f.delivered(); steady += std::chrono::seconds(900); wall += 900000;
+                m.tick(*f.service, "ibkr_tws", true, "", steady);
+                check(m.active() == (segment < 30), "Only the regular-hours window may rotate");
+            }
+            const auto result = parsed(m.status());
+            check(f.peer->subscriptions == 30 && f.peer->cancellations == 30 && result["current"]["segments_completed"].i() == 30,
+                "All native subscriptions have durable paired stops");
+            check(field(result["current"], "reason") == "collection_window_closed" && result["current"]["elapsed_seconds"].d() == 27000,
+                "Full schedule closes at exact session endpoint");
+            Manager reopened(f.store); check(parsed(reopened.status())["current"]["segments"].size() == 30, "Extended scheduled journal reloads intact");
+        });
+        test("slow segment drain crossing close cannot open another subscription", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; const auto start = Clock::now(); auto steady = start;
+            Manager m(f.store, [&] { return steady; }, [&] { return wall; });
+            m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(collection_open, collection_open + 905000), true, "", steady); f.delivered();
+            f.peer->before = [&](const char* action) { if (std::string(action) == "cancel") { steady = start + std::chrono::seconds(910); wall = collection_open + 910000; } };
+            m.tick(*f.service, "ibkr_tws", true, "", start + std::chrono::seconds(900));
+            check(!m.active() && field(parsed(m.status())["current"], "reason") == "collection_window_closed", "Fresh clock checked after durable close");
+            check(f.peer->subscriptions == 1 && f.peer->cancellations == 1, "Close during drain has no post-close subscription");
+        });
+        test("paper binding changes interrupt without reconnect or replacement", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; const auto start = Clock::now();
+            Manager m(f.store, [&] { return start; }, [&] { return wall; });
+            m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start); f.delivered();
+            f.peer->state_.managed_accounts({true,{"DU7654321"}}); f.service->poll();
+            m.tick(*f.service, "ibkr_tws", true, "", start + std::chrono::seconds(1));
+            check(!m.active() && field(parsed(m.status())["current"], "reason") == "paper_account_binding_changed", "Fresh account binding is continuously enforced");
+            check(f.peer->subscriptions == 1, "No replacement after account change");
+        });
+        test("scheduled restart remains interrupted and manual ownership cannot be adopted", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; const auto start = Clock::now();
+            Manager m(f.store, [&] { return start; }, [&] { return wall; });
+            m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start); f.delivered();
+            Manager reopened(f.store, [&] { return start; }, [&] { return wall; });
+            const auto recovered = parsed(reopened.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", start));
+            check(field(recovered["requested_plan"], "reason") == "server_restart" && !reopened.active() && f.peer->subscriptions == 1, "Recovery does not resume authorized prior intent");
+            m.stop(*f.service);
+            auto manual = Json(request()); manual["contract_id"] = "756733";
+            m.start(*f.service, "ibkr_tws", parsed(std::move(manual)), true, "", start);
+            rejects([&] { m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(collection_open, collection_open + 27000000, "22222222222222222222222222222222"), true, "", start); });
+            check(f.peer->subscriptions == 2 && m.active(), "Manual request retained unchanged"); m.stop(*f.service);
+        });
+        test("catalog archives oldest terminal journals without deleting bytes", [] {
+            Fixture f; Manager m(f.store);
+            std::string oldest, original;
+            for (int i = 0; i < 101; ++i) {
+                if (i) {
+                    // Separate real collection days would not hit ten requests
+                    // per second. Reset the synthetic peer's pacing generation.
+                    f.service->disconnect(); f.service->connect(); f.service->poll();
+                    ContractQuery q; q.symbol = "SYNTHETIC"; f.service->resolve(q); f.service->poll();
+                }
+                m.start(*f.service, "mock", request(60, 1), true); m.stop(*f.service);
+                if (i == 0) { oldest = m.current_id(); original = orderbook_jobs::read_file(f.root / "depth-collections" / oldest / "state.json", 131072); }
+            }
+            check(fs::exists(f.root / "depth-collection-history" / oldest / "state.json"), "Oldest terminal plan moved into private history");
+            check(orderbook_jobs::read_file(f.root / "depth-collection-history" / oldest / "state.json", 131072) == original, "Original journal bytes retained");
+            check(std::distance(fs::directory_iterator(f.root / "depth-collections"), fs::directory_iterator{}) == 100, "Active catalog remains bounded");
+            check(parsed(m.status())["plans"].size() == 20, "Public catalog remains newest twenty");
+            Manager reopened(f.store); check(!reopened.active() && parsed(reopened.status())["invalid_records"].i() == 0, "History does not overflow restart catalog");
+        });
+        test("archived scheduled idempotency survives newer manual plans", [] {
+            Fixture f("ibkr_tws", true); auto wall = collection_open; auto steady = Clock::now();
+            Manager m(f.store, [&] { return steady; }, [&] { return wall; });
+            m.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), true, "", steady); m.stop(*f.service);
+            auto manual = Json(request(60, 1)); manual["contract_id"] = "756733"; const auto plain = parsed(std::move(manual));
+            for (int i = 0; i < 100; ++i) {
+                f.service->disconnect(); f.service->connect(); f.service->poll();
+                ContractQuery q; q.symbol = "SPY"; f.service->resolve(q); f.service->poll();
+                m.start(*f.service, "ibkr_tws", plain, true); m.stop(*f.service);
+            }
+            check(fs::exists(f.root / "depth-collection-history" / "11111111111111111111111111111111" / "state.json"), "Scheduled original remains available in history");
+            const auto before = f.peer->subscriptions;
+            Manager reopened(f.store, [&] { return steady; }, [&] { return wall; });
+            const auto result = parsed(reopened.scheduled_start(*f.service, "ibkr_tws", scheduled_request(), false, "clock_checking", steady));
+            check(f.peer->subscriptions == before && !reopened.active() && field(result["requested_plan"], "schedule_id") == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "An archived idempotent intent is returned without adopting or replacing current plan");
+            check(result["current"]["schedule_id"].t() == crow::json::type::Null, "Newest manual plan identity remains current");
         });
         std::cout << passed << " collection lifecycle tests passed\n"; return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

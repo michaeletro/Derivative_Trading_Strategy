@@ -46,6 +46,7 @@ class Book:
         self.sequence = self.epoch = 0
         self.active = self.valid = self.started = self.terminal = False
         self.reason = 'not_started'
+        self.empty_tail_delete_count = 0
 
     def clear(self):
         self.asks.clear()
@@ -98,6 +99,12 @@ class Book:
             self.invalidate('invalid_depth_update')
             return
         levels = self.asks if side == 0 else self.bids
+        # Match official IBKR 10.45 IBJts/samples/Java/apidemo/MarketDataPanel.java
+        # DeepModel.DELETE: a bounded delete beyond the populated tail is a no-op.
+        # It remains a received callback, with no invented cancellation quantity.
+        if op == 2 and pos >= len(levels):
+            self.empty_tail_delete_count += 1
+            return
         if pos > len(levels) or (op != 0 and pos == len(levels)):
             self.invalidate('missing_row_position')
             return
