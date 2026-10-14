@@ -75,8 +75,17 @@ public:
         clear(); state_ = ConnectionState::Disconnected;
     }
     void fail(int code, const std::string& message) {
+        if (state_ == ConnectionState::Failed) return;
         const auto old_depth = depth_id_, old_sequence = depth_sequence_;
+        // Preserve callbacks already accepted and sequenced before the failure.
+        // clear() invalidates subscriptions, but discarding these events would
+        // turn a fully received tail into an artificial archive sequence gap.
+        auto pending = std::move(events_);
         clear(); state_ = ConnectionState::Failed;
+        events_ = std::move(pending);
+        // At most 2048 accepted events plus these three terminal events. A
+        // rejected overflow callback remains missing and is exposed by the gap;
+        // repeated failures cannot grow this terminal queue.
         if (old_depth) {
             DepthEvent gap; gap.request_id = old_depth; gap.sequence = old_sequence + 1;
             gap.kind = "gap"; gap.code = code; gap.received = DepthStamp::now(); events_.emplace_back(gap);

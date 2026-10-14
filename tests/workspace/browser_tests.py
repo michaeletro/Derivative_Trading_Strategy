@@ -132,7 +132,8 @@ def main(exe):
             page.locator('#token').fill(helper.TOKEN);page.locator('#unlock').click()
             expect(page.locator('#http-status')).to_have_text('Available')
             expect(page.locator('#ob-refresh')).to_be_enabled()
-            ck(not any(path.startswith('/api/depth') for method,path,body in calls))
+            ck(not any(path.startswith('/api/depth') and not (method=='GET' and path=='/api/depth/collection')
+                       for method,path,body in calls))
             page.locator('#ob-refresh').click()
             expect(page.locator('#ob-notice')).to_contain_text('Workspace refreshed')
             # Assert actual controls: Playwright does not classify the fieldset itself as a disabled control.

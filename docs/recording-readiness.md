@@ -5,6 +5,15 @@ checks. The same object is included in `GET /api/depth/current` as `readiness`.
 Reading either endpoint does not connect, subscribe, start/stop recording,
 modify timestamps, change OS settings, or create synthetic observations.
 
+The optional timed collection manager uses these same readiness checks before
+starting and while running. Its authenticated routes are `GET /api/depth/collection`,
+`POST /api/depth/collection/start` and `POST /api/depth/collection/stop`. A start
+contains only the explicitly resolved contract ID, direct BATS/IEX venue, row
+count, bounded segment duration/count and the user's paper/read-only confirmation.
+A stop names the current generated collection ID, so a delayed stop from an old
+segment cannot affect another plan. See [timed collections](orderbook-workspace.md#timed-collections).
+No route connects to TWS automatically or changes brokerage settings.
+
 ## What the status means
 
 - `collection_checks_passed` requires the native IBKR source, a ready broker,

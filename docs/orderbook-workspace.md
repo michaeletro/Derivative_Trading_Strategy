@@ -3,8 +3,9 @@
 This increment puts explicit live-depth controls, recording selection and offline
 model comparisons inside the existing Crow dashboard at `/#orderbook`. It reuses
 the native recorder and the analytical modules from the model-lab increment. It
-adds no order submission, new market-data purchase, automatic capture, or continuous
-inference. The current archive is schema 8, supporting 1..50 requested depth rows
+Capture starts only after an explicit manual request or timed collection plan.
+There is no order submission, new market-data purchase, or continuous inference.
+The current archive is schema 8, supporting 1..50 requested depth rows
 per side.
 
 Existing schema-6 and known schema-7 archives are upgraded only after a verified
@@ -213,6 +214,57 @@ scenarios. Display previews are bounded; complete exports and saved JSON/HTML
 remain private and persist across restart. These operations have no order router.
 
 ## Live book
+
+### Timed collections
+
+After explicitly connecting to the intended paper session and resolving/selecting
+the direct USD contract, use **Timed collection** beside the manual recording
+controls. Confirm the current Paper Trading and TWS Read-Only API settings, choose
+1..60 minutes per segment and 1..16 segments, then start the plan explicitly.
+The default is one 15-minute segment; a plan is limited to four hours. A symbol
+is not resolved or selected automatically, and the manager has no order interface.
+
+The server uses its steady clock to stop each recording, drain received callbacks,
+and verify the committed stop and raw-metadata watermark before starting the next
+subscription. Each segment receives its own existing archive session ID. These
+subscription boundaries can leave gaps; they are not a continuous exchange feed.
+Timer completion and successful storage do not certify depth delivery, clock
+quality over the whole recording, complete exchange depth or research eligibility.
+Requested rows remain independent of the actual delivered levels.
+
+**Stop collection** cancels the entire remaining plan, not just the current
+segment. Closing a tab or signing out does not stop the server timer or disk
+growth. The native controller runs without browser polling. Plan status, start/end
+times, elapsed/remaining time, committed event counts and raw watermarks are
+visible while unlocked. The interruption alert remains visible across workspaces
+until acknowledged after a fresh status read. Acknowledgement changes only that
+browser's display; it does not repair, reconnect or resume a recording.
+
+Broker loss, a permanent reconstruction failure, clock failure, unhealthy storage,
+unknown stop outcome or free space below the existing 2 GiB reserve interrupts
+the plan. Temporary crossed/locked/unordered books and absent/recent delivery
+remain explicit warnings. There is no automatic reconnect, restart or retry.
+Refresh, inspect the saved evidence, verify the paper session again as needed,
+and explicitly resolve/select/start a fresh collection. Old depth-request stop
+messages cannot cancel a timed plan across segment boundaries; stop by the current
+collection identifier through its dedicated controls.
+
+Plan journals live privately in `depth-collections/<generated-id>/` beside the
+SQLite archive (directories 0700, files 0600). At most 100 plans are kept in the
+active journal catalog; the newest 20 are displayed. Nothing is deleted
+automatically. On restart, a previously active plan is marked interrupted and
+its actual committed counts are refreshed from its original archived session.
+It never resumes. Elapsed time and observed update counters not checkpointed
+before a crash remain explicitly incomplete; they are not reconstructed from
+wall-clock timestamps. Original recording states and gap markers are preserved.
+SQLite backups do not include this sibling journal, raw sidecars or research
+reports; preserve those directories separately with the server stopped.
+
+Long/high-activity segments can still exceed research-job input limits. Collection
+does not silently truncate the archive to those analysis bounds. Use short,
+consistent regular-hours windows and explicitly completed segments for multi-day
+comparisons. Interrupted captures remain available for forensic audit, not
+automatically promoted to completed test days.
 
 1. Unlock using the existing local sign-in flow, connect the broker explicitly,
    then click **Load / refresh workspace**.

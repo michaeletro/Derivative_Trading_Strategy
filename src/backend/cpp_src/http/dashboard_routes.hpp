@@ -38,6 +38,8 @@ inline void mount(crow::SimpleApp& app, int port) {
         if (name == "orderbook-explorer-model.mjs") return serve(req, assets::orderbook_explorer_model_mjs, "text/javascript; charset=utf-8");
         if (name == "orderbook.mjs") return serve(req, assets::orderbook_mjs, "text/javascript; charset=utf-8");
         if (name == "orderbook-model.mjs") return serve(req, assets::orderbook_model_mjs, "text/javascript; charset=utf-8");
+        if (name == "collection.mjs") return serve(req, assets::collection_mjs, "text/javascript; charset=utf-8");
+        if (name == "collection-model.mjs") return serve(req, assets::collection_model_mjs, "text/javascript; charset=utf-8");
         if (name == "orderbook.css") return serve(req, assets::orderbook_css, "text/css; charset=utf-8");
         if (name == "index.html") return serve(req, assets::index_html, "text/html; charset=utf-8");
         if (name == "dashboard.css") return serve(req, assets::dashboard_css, "text/css; charset=utf-8");

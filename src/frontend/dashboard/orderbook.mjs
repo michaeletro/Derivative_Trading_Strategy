@@ -1,6 +1,7 @@
 import {parseDepth,depthView,maxDepthRows,appendLiveSample,liveSegments,sessionPage,researchRequest,parseJobs,parseResult,aggregate,id,jobId,terminal,replayEventPage,flowNumber} from './orderbook-model.mjs';
 import {numberText} from './model.mjs';
 import {mountBookExplorer} from './orderbook-explorer.mjs';
+import {mountCollection} from './collection.mjs';
 
 export function mountOrderbook(api,onAccessError) {
   const $=name=>document.getElementById(name), put=(name,value)=>{$(name).textContent=value;};
@@ -11,7 +12,7 @@ export function mountOrderbook(api,onAccessError) {
   let unlocked=false,busy=false,revision=0,context=null,generation=null;
   let live=null,liveAt=0,loaded=false,needsReconcile=false,selected=null,pending=null;
   let sessions=[],cursor='0',hasMore=false,selectedIds=new Set(),jobs=[],capability=null,result=null;
-  let liveTimer=null,jobTimer=null,readinessTimer=null,verified=false,previousEvidence=null,liveHistory=[];
+  let liveTimer=null,jobTimer=null,readinessTimer=null,collectionTimer=null,collectionPoll=null,collectionLab=null,verified=false,previousEvidence=null,liveHistory=[];
   let graphExpanded=false;
   let archive=null,submittedJob=null,flowBinPage=0,resultJob=null,datasetBlockPage=0,datasetPairPage=0;
   const modeLabel=mode=>mode==='shape_comparison'?'Multi-day curves & strategy comparison':mode==='shape'?'Book shape & regimes — historical replay':mode==='proposal_experiment'?'Proposal M0–M2 experiment':mode==='describe'?'Depth, slope & distributions':mode==='flow'?'Order flow over time':mode==='dataset'?'Build research dataset':mode==='compare'?'Model comparison':'Timed book diagnostics';
@@ -65,9 +66,9 @@ export function mountOrderbook(api,onAccessError) {
     $('ob-watch').disabled=!unlocked;
     $('ob-contract-fields').disabled=!ready()||busy;
     $('ob-resolve').disabled=!!pending;
-    $('ob-start').disabled=!ready()||busy||!loaded||needsReconcile||!selected||!!live?.available;
-    $('ob-rows').disabled=!ready()||busy||!!live?.available;
-    $('ob-stop').disabled=!unlocked||busy||!live?.available||needsReconcile;
+    $('ob-start').disabled=!ready()||busy||!loaded||needsReconcile||!selected||!!live?.available||!!collectionLab?.active();
+    $('ob-rows').disabled=!ready()||busy||!!live?.available||!!collectionLab?.active();
+    $('ob-stop').disabled=!unlocked||busy||(!live?.available&&!collectionLab?.active())||needsReconcile;
     if($('collection-stop'))$('collection-stop').disabled=$('ob-stop').disabled;
     if($('collection-refresh'))$('collection-refresh').disabled=!unlocked||busy;
     $('ob-more').disabled=!unlocked||busy||!hasMore;
@@ -84,14 +85,24 @@ export function mountOrderbook(api,onAccessError) {
     for(const button of $('ob-dataset-exports').querySelectorAll('button'))button.disabled=!unlocked||busy||!resultJob||button.dataset.oversized==='true';
     for(const button of $('ob-shape-exports').querySelectorAll('button'))button.disabled=!unlocked||busy||!resultJob||button.dataset.oversized==='true';
     for(const button of $('ob-curve-exports').querySelectorAll('button'))button.disabled=!unlocked||busy||!resultJob||button.dataset.oversized==='true';
+    collectionLab?.update({unlocked,busy,ready:ready(),loaded,reconcile:needsReconcile,selected,live});
   }
   async function read(path,method='GET',body,rev=revision) {
     const value=await api.request(path,method,body);
     if(rev!==revision||!unlocked) throw new Error('Superseded workspace request.');
     return value;
   }
+  async function pollCollection() {
+    if(!unlocked||busy||collectionPoll){schedule();return;}
+    const rev=revision,token={};collectionPoll=token;
+    try{await collectionLab.refresh(rev);}
+    catch(error){if(rev===revision&&unlocked){if([401,403].includes(error.status))onAccessError(error);else notify(error.message||'Collection status unavailable.');}}
+    finally{if(collectionPoll===token){collectionPoll=null;if(rev===revision){controls();schedule();}}}
+  }
   function schedule() {
-    if(!unlocked||document.hidden) {clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);liveTimer=jobTimer=readinessTimer=null;return;}
+    if(!unlocked) {clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);clearTimeout(collectionTimer);liveTimer=jobTimer=readinessTimer=collectionTimer=null;return;}
+    if(collectionTimer===null)collectionTimer=setTimeout(()=>{collectionTimer=null;void pollCollection();},1000);
+    if(document.hidden){clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);liveTimer=jobTimer=readinessTimer=null;return;}
     if(readinessTimer===null)readinessTimer=setTimeout(()=>{readinessTimer=null;work(readinessStatus);},5000);
     if($('ob-watch').checked||pending) {
       if(liveTimer===null) liveTimer=setTimeout(()=>{liveTimer=null;work(async rev=>{await current(rev);await resolution(rev);});},1000);
@@ -233,7 +244,7 @@ export function mountOrderbook(api,onAccessError) {
         previousEvidence={...e,verified};
       } else {verified=false;previousEvidence=null;}
       liveHistory=appendLiveSample(liveHistory,p,Date.now(),performance.now()-started);
-      live=p;liveAt=started;explorer.observe(p,view,Date.now());if(p.readiness)explorer.readiness(p.readiness);renderLive();
+      live=p;liveAt=started;explorer.observe(p,view,Date.now());if(p.readiness){explorer.readiness(p.readiness);collectionLab?.readiness(p.readiness);}renderLive();
     } catch(e) {if(rev===revision){live=null;liveHistory=[];verified=false;previousEvidence=null;renderLive();}throw e;}
   }
   function renderSessions() {
@@ -254,12 +265,12 @@ export function mountOrderbook(api,onAccessError) {
   }
   $('ob-session-filter').addEventListener('input',renderSessions);
   async function readinessStatus(rev){
-    try{explorer.readiness(await read('/api/readiness','GET',undefined,rev));}
+    try{const value=await read('/api/readiness','GET',undefined,rev);explorer.readiness(value);collectionLab?.readiness(value);}
     catch(error){if(rev===revision)explorer.readiness(null);if([401,403].includes(error.status))throw error;}
     await current(rev);
   }
   $('collection-refresh')?.addEventListener('click',()=>work(readinessStatus));
-  $('collection-stop')?.addEventListener('click',()=>{if(!$('ob-stop').disabled)$('ob-stop').click();});
+  $('collection-stop')?.addEventListener('click',()=>{if(collectionLab?.active())collectionLab.requestStop();else if(!$('ob-stop').disabled)$('ob-stop').click();});
   async function openArchive(rev,sid,more=false) {
     const prior=more?archive?.state:null;
     if(!more){archive=null;$('ob-archive').hidden=true;}
@@ -344,7 +355,7 @@ export function mountOrderbook(api,onAccessError) {
     }
   }
   async function load(rev) {
-    await readinessStatus(rev);await catalog(rev);await loadJobs(rev);loaded=true;needsReconcile=false;notify('Workspace refreshed. Broker connection and capture remain explicit.');
+    await readinessStatus(rev);await collectionLab.refresh(rev);await catalog(rev);await loadJobs(rev);loaded=true;needsReconcile=false;notify('Workspace refreshed. Broker connection and capture remain explicit.');
   }
   $('ob-refresh').addEventListener('click',()=>work(load));
   $('ob-more').addEventListener('click',()=>work(rev=>catalog(rev,true)));
@@ -377,7 +388,7 @@ export function mountOrderbook(api,onAccessError) {
     put('ob-resolution',`${candidates.length} supported candidates. Confirm the instrument and direct venue before recording.`);
   }
   $('ob-start').addEventListener('click',()=>{
-    if(!selected||!ready()||!loaded||needsReconcile||live?.available)return;
+    if(!selected||!ready()||!loaded||needsReconcile||live?.available||collectionLab?.active())return;
     const rows=Number($('ob-rows').value);if(!Number.isInteger(rows)||rows<1||rows>maxDepthRows){notify(`Request 1..${maxDepthRows} rows per side. Received rows depend on the feed.`);return;}
     const c={...selected};
     if(!window.confirm(`Record displayed depth for ${c.symbol} / ${c.contract_id} on ${c.venue}, up to ${rows} rows per side? This writes market observations to the existing local archive. Closing the page does not stop it. No orders will be submitted.`))return;
@@ -389,6 +400,7 @@ export function mountOrderbook(api,onAccessError) {
     },true);
   });
   $('ob-stop').addEventListener('click',()=>{
+    if(collectionLab?.active()){collectionLab.requestStop();return;}
     if(!live?.available||needsReconcile)return;const request=live.request_id;
     if(!window.confirm(`Stop / clear depth request ${request}? Archived events will remain available for research.`))return;
     work(async rev=>{const value=await read('/api/depth/unsubscribe','POST',{request_id:request},rev);
@@ -893,8 +905,9 @@ export function mountOrderbook(api,onAccessError) {
   });
   function clear() {
     expandGraphs(false);
-    revision++;clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);liveTimer=jobTimer=readinessTimer=null;busy=false;live=null;liveHistory=[];loaded=false;needsReconcile=false;previousEvidence=null;verified=false;
+    revision++;clearTimeout(liveTimer);clearTimeout(jobTimer);clearTimeout(readinessTimer);clearTimeout(collectionTimer);liveTimer=jobTimer=readinessTimer=collectionTimer=null;collectionPoll=null;busy=false;live=null;liveHistory=[];loaded=false;needsReconcile=false;previousEvidence=null;verified=false;
     explorer.clear();
+    collectionLab?.clear();
     selected=null;pending=null;sessions=[];cursor='0';hasMore=false;selectedIds.clear();jobs=[];capability=null;result=null;resultJob=null;submittedJob=null;$('ob-watch').checked=false;
     archive=null;$('ob-archive').hidden=true;$('ob-archive-scrub').value='0';
     for(const name of ['ob-archive-title','ob-archive-summary','ob-archive-clock','ob-archive-frame','ob-archive-event','ob-archive-depth','ob-archive-bids','ob-archive-asks'])$(name).replaceChildren();
@@ -918,7 +931,8 @@ export function mountOrderbook(api,onAccessError) {
     if(document.hidden){clearTimeout(liveTimer);clearTimeout(jobTimer);liveTimer=jobTimer=null;live=null;liveHistory=[];verified=false;previousEvidence=null;renderLive();}
     else schedule();
   });
-  setInterval(()=>{if(unlocked&&!document.hidden)renderLive();},1000);
+  setInterval(()=>{if(unlocked){collectionLab?.tick();if(!document.hidden)renderLive();}},1000);
+  collectionLab=mountCollection({read,work,notify,isCurrent:rev=>unlocked&&rev===revision,afterMutation:async(rev,watch)=>{if(watch)$('ob-watch').checked=true;await current(rev);await catalog(rev);}});
   clear();
   return {
     setAccess(value){if(unlocked===value)return;unlocked=value;if(!value){context=null;generation=null;clear();notify('Dashboard locked. Capture and any research job were not stopped.');}else notify('');controls();schedule();},

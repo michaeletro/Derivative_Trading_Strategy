@@ -14,6 +14,7 @@ namespace asio = boost::asio;
 #include "experiments_json.hpp"
 #include "depth_json.hpp"
 #include "readiness_json.hpp"
+#include "depth_collection.hpp"
 #include "trading_json.hpp"
 #include "execution_rules_json.hpp"
 #include "orderbook_jobs.hpp"
@@ -203,10 +204,11 @@ public:
 
 class Application {
 public:
-    Application() : mode_(env("DTS_BROKER", "none")), token_(env("DTS_API_TOKEN")),
+    explicit Application(std::unique_ptr<dts::IBroker> broker_override = {}) : mode_(env("DTS_BROKER", "none")), token_(env("DTS_API_TOKEN")),
         port_(integer(env("HTTP_PORT", "8080"), 1024, 65535)),
         store_(dts::storage::Config::from_environment(), mode_),
-        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(make_broker()), history_(store_),ticks_(store_.status().database),
+        assets_(env("DB_PATH", "quant_data.db"), store_), broker_(broker_override?recording_override(std::move(broker_override)):make_broker()), history_(store_),ticks_(store_.status().database),
+        depth_collection_(store_),
         orderbook_jobs_(store_, env("DTS_RESEARCH_PYTHON"), DTS_ORDERBOOK_WORKER_PATH,
             integer(env("DTS_RESEARCH_TIMEOUT_SECONDS", "180"), 1, 300)),
         variation_jobs_(store_, env("DTS_RESEARCH_PYTHON"), DTS_VARIATION_WORKER_PATH,
@@ -234,13 +236,26 @@ public:
         worker_ = std::thread([this] {
             std::unique_lock<std::mutex> lock(broker_mutex_);
             while (!stopping_) {
-                recording_clock_.observe(dts::RecordingClockSample::now());
+                const auto clock_sample=dts::RecordingClockSample::now();
+                recording_clock_.observe(clock_sample);
                 try {
                     broker_.poll();
+                    if (depth_collection_.active()) {
+                        const auto clock_state=recording_clock_.status(clock_sample.monotonic_ns).state;
+                        if(clock_state!="consistent_during_check")depth_collection_.interrupt(broker_,"clock_"+clock_state);
+                        const auto now = dts::Clock::now();
+                        if (now >= collection_next_check_) {
+                            const auto check = collection_preflight();
+                            collection_checks_passed_ = check.first;
+                            collection_check_reason_ = check.second;
+                            collection_next_check_ = now + std::chrono::seconds(1);
+                        }
+                        depth_collection_.tick(broker_, depth_source(), collection_checks_passed_, collection_check_reason_, now);
+                    }
                     if(!ticks_.busy() && dts::Clock::now()>=ticks_.next_dispatch())history_.tick(broker_);
                     if(!history_.busy() && dts::Clock::now()>=history_.next_dispatch())ticks_.tick(broker_);
                 }
-                catch (...) { broker_.disconnect(); worker_failed_ = true; }
+                catch (...) { depth_collection_.interrupt(broker_, "acquisition_worker_failure"); broker_.disconnect(); worker_failed_ = true; }
                 wake_.wait_for(lock, std::chrono::milliseconds(10), [this] { return stopping_; });
             }
             // Stop has a finite acquisition cutoff. Persist all delivered events
@@ -248,6 +263,7 @@ public:
             // to save observations that were received earlier in the session.
             try { broker_.poll(); } catch (...) { worker_failed_ = true; }
             try { ticks_.shutdown(broker_); } catch (...) { worker_failed_=true; }
+            depth_collection_.interrupt(broker_, "server_shutdown");
             broker_.disconnect();
         });
         try {
@@ -272,6 +288,7 @@ private:
     dts::ReadOnlyService broker_;
     dts::storage::HistoricalManager history_;
     dts::tick_jobs::Manager ticks_;
+    dts::collection_http::Manager depth_collection_;
     dts::orderbook_jobs::Manager orderbook_jobs_;
     dts::orderbook_jobs::Manager variation_jobs_;
     // Non-secret instance identifier prevents charts joining observations across restarts.
@@ -281,6 +298,30 @@ private:
     std::thread worker_;
     bool stopping_ = false, worker_failed_ = false;
     dts::RecordingClockMonitor recording_clock_;
+    dts::Clock::time_point collection_next_check_{};
+    bool collection_checks_passed_ = false;
+    std::string collection_check_reason_;
+    std::string depth_source() const { return mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws"; }
+    std::pair<bool,std::string> collection_preflight() {
+        // The production clock/disk/recorder checks are shared with the live
+        // readiness strip. Mock source is explicitly synthetic, so only the
+        // native-source requirement is omitted for its disposable tests.
+        const auto snapshot = dts::readiness_http::current(broker_,store_,recording_clock_,depth_source(),worker_failed_);
+        const auto parsed = crow::json::load(snapshot.dump());
+        for (const auto& value : parsed["blocking_reasons"]) {
+            const std::string reason=value.s();
+            if (mode_=="mock" && reason=="native_source_unavailable") continue;
+            return {false,reason};
+        }
+        return {true,""};
+    }
+    std::unique_ptr<dts::IBroker> recording_override(std::unique_ptr<dts::IBroker> adapter) {
+        // Compile-time test fixtures can inject a broker into this translation
+        // unit. The public executable never supplies one, and an override can
+        // only be labeled mock; it cannot impersonate a native market source.
+        if(mode_!="mock")throw std::invalid_argument("An injected broker requires the explicit mock source");
+        return std::make_unique<dts::storage::RecordingBroker>(std::move(adapter),store_,"mock");
+    }
     std::unique_ptr<dts::IBroker> make_broker() {
         if (mode_ == "none") return {};
         if (mode_ == "mock") return std::make_unique<dts::storage::RecordingBroker>(std::make_unique<dts::MockBroker>(), store_, "mock");
@@ -581,19 +622,43 @@ private:
                 const auto id=dts::history_http::id(j,"contract_id");
                 const auto rows=dts::research_http::bounded_integer(j,"rows",1,dts::max_depth_rows);
                 const auto venue=text(j,"venue");std::lock_guard<std::mutex> lock(broker_mutex_);
+                if(depth_collection_.active())throw std::logic_error("Stop the timed collection before starting another depth request");
                 Json out=dts::depth_http::conventions();out["request_id"]=std::to_string(broker_.subscribe_depth(id,venue,rows));
                 out["source"]=mode_=="mock"?"mock":"ibkr_tws";out["synthetic"]=mode_=="mock";return out;});
         });
         CROW_ROUTE(app_, "/api/depth/unsubscribe").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"request_id"});
-                const auto id=dts::history_http::id(j,"request_id");std::lock_guard<std::mutex> lock(broker_mutex_);
-                Json out;out["schema_version"]=1;out["cancelled"]=broker_.unsubscribe_depth(id);return out;});
+                const auto id=static_cast<dts::RequestId>(dts::history_http::id(j,"request_id"));std::lock_guard<std::mutex> lock(broker_mutex_);
+                Json out;out["schema_version"]=1;
+                if(depth_collection_.active())throw std::logic_error("A timed collection owns this request; stop it using its collection identifier");
+                out["cancelled"]=broker_.unsubscribe_depth(id);
+                return out;});
+        });
+        CROW_ROUTE(app_, "/api/depth/collection")([this](const crow::request& req) {
+            return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);return depth_collection_.status();});
+        });
+        CROW_ROUTE(app_, "/api/depth/collection/start").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);std::lock_guard<std::mutex> lock(broker_mutex_);
+                const auto check=collection_preflight();
+                collection_checks_passed_=check.first;collection_check_reason_=check.second;
+                collection_next_check_=dts::Clock::now()+std::chrono::seconds(1);
+                return depth_collection_.start(broker_,depth_source(),j,check.first,check.second);});
+        });
+        CROW_ROUTE(app_, "/api/depth/collection/stop").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
+            return guarded(req,[&]{const auto j=object(req);dts::history_http::fields(j,{"collection_id"});
+                const auto id=text(j,"collection_id");
+                if(id.size()!=32 || id.find_first_not_of("0123456789abcdef")!=std::string::npos)
+                    throw std::invalid_argument("Invalid collection identifier");
+                std::lock_guard<std::mutex> lock(broker_mutex_);
+                if(id!=depth_collection_.current_id())throw std::logic_error("Collection changed; refresh its status before stopping");
+                return depth_collection_.stop(broker_);});
         });
         CROW_ROUTE(app_, "/api/depth/current")([this](const crow::request& req) {
             return guarded(req,[&]{std::lock_guard<std::mutex> lock(broker_mutex_);
                 auto j=dts::depth_http::current(broker_, &store_, mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws");j["source"]=mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws";
                 j["synthetic"]=mode_=="mock";
                 j["readiness"]=dts::readiness_http::current(broker_,store_,recording_clock_,mode_=="none"?"disabled":mode_=="mock"?"mock":"ibkr_tws",worker_failed_);
+                j["collection"]=depth_collection_.status();
                 return j;});
         });
         CROW_ROUTE(app_, "/api/readiness")([this](const crow::request& req) {
@@ -759,10 +824,13 @@ private:
             return guarded(req, [&] { std::lock_guard<std::mutex> lock(broker_mutex_); return status(); });
         });
         CROW_ROUTE(app_, "/api/broker/connect").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
-            return guarded(req, [&] { std::lock_guard<std::mutex> lock(broker_mutex_); broker_.connect(); worker_failed_ = false; return status(); });
+            return guarded(req, [&] { std::lock_guard<std::mutex> lock(broker_mutex_);
+                if(depth_collection_.active())throw std::logic_error("Stop the timed collection before reconnecting the broker");
+                broker_.connect(); worker_failed_ = false; return status(); });
         });
         CROW_ROUTE(app_, "/api/broker/disconnect").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
-            return guarded(req, [&] { std::lock_guard<std::mutex> lock(broker_mutex_); broker_.disconnect(); return status(); });
+            return guarded(req, [&] { std::lock_guard<std::mutex> lock(broker_mutex_);
+                depth_collection_.interrupt(broker_,"manual_broker_disconnect");broker_.disconnect(); return status(); });
         });
         CROW_ROUTE(app_, "/api/contracts/resolve").methods(crow::HTTPMethod::POST)([this](const crow::request& req) {
             return guarded(req, [&] {
