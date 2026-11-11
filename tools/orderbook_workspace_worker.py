@@ -68,14 +68,19 @@ def validate_request(r):
     allowed = {'schema_version', 'mode', 'session_ids', 'source', 'configuration', 'split'}
     if not isinstance(r, dict) or set(r) != allowed or type(r['schema_version']) is not int or r['schema_version'] != 1:
         raise JobError('Invalid research request schema.')
-    if r['mode'] not in ('shape_comparison', 'shape', 'dataset', 'proposal_experiment', 'flow', 'describe', 'inspect', 'compare') or r['source'] not in ('ibkr_tws', 'mock'):
+    if r['mode'] not in ('python_export', 'shape_comparison', 'shape', 'dataset', 'proposal_experiment', 'flow', 'describe', 'inspect', 'compare') or r['source'] not in ('ibkr_tws', 'mock'):
         raise JobError('Choose time-flow research, description, inspection or comparison and acknowledge the actual source.')
     ids = r['session_ids']
-    if (not isinstance(ids, list) or not 1 <= len(ids) <= MAX_SESSIONS
+    session_limit = 100 if r['mode'] == 'python_export' else MAX_SESSIONS
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= session_limit
             or any(not isinstance(x, str) or not re.fullmatch(r'[1-9][0-9]{0,17}', x) for x in ids)
             or len(set(ids)) != len(ids)):
-        raise JobError('Select 1..24 distinct recorded session IDs.')
+        raise JobError('Select 1..100 distinct recorded session IDs for Python export; other research accepts 1..24.')
     c = r['configuration']
+    if r['mode'] == 'python_export':
+        if not isinstance(c, dict) or c or r['split'] is not None or r['source'] != 'ibkr_tws':
+            raise JobError('Python export requires native ibkr_tws recordings, empty configuration and no model partitions.')
+        return None, None, None
     if r['mode'] == 'shape_comparison':
         from dataclasses import fields
         from orderbook.curve_experiment import CurveExperimentConfig
@@ -165,11 +170,11 @@ def validate_request(r):
 
 def load_snapshots(job: Path, request: dict):
     from depth_replay import digest, validate_export
-    manifest = read_json(job / 'inputs.json', 16384)
+    manifest = read_json(job / 'inputs.json', 262144 if request['mode'] == 'python_export' else 16384)
     if (manifest.get('schema_version') != 1 or not isinstance(manifest.get('exports'), list)
             or len(manifest['exports']) != len(request['session_ids'])):
         raise JobError('Invalid frozen input manifest.')
-    if request['mode'] in ('shape_comparison', 'shape', 'dataset', 'proposal_experiment'):
+    if request['mode'] in ('python_export', 'shape_comparison', 'shape', 'dataset', 'proposal_experiment'):
         from orderbook.research_dataset import FrozenStream, MAX_BYTES, MAX_EVENTS as DATASET_EVENTS, MAX_SESSION_EVENTS as DATASET_SESSION_EVENTS
         sources, total_bytes, total_events = [], 0, 0
         for sid, entry in zip(request['session_ids'], manifest['exports']):
@@ -218,6 +223,16 @@ def load_snapshots(job: Path, request: dict):
 
 def summarize(report: dict, request: dict):
     from depth_replay import digest
+    if request['mode'] == 'python_export':
+        result = {k: report[k] for k in ('version', 'source', 'config', 'code_hashes', 'source_hashes',
+                                         'boundaries', 'python_export', 'sessions', 'artifacts')}
+        result.update(schema_version=1, kind='orderbook_workspace_result', workspace_version=VERSION,
+                      request=request, request_sha256=digest(request),
+                      worker_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                      impact=dict(status='unavailable', reason='Callback export does not identify price impact.'),
+                      liquidity=dict(status='export_only', reason='Frozen callbacks and audit evidence; no models or orders.'))
+        result['sha256'] = digest(result)
+        return result
     if request['mode'] == 'shape_comparison':
         result = {k: report[k] for k in ('version', 'source', 'config', 'code_hashes', 'source_hashes', 'boundaries')}
         result.update(schema_version=1, kind='orderbook_workspace_result', workspace_version=VERSION,
@@ -283,7 +298,10 @@ def execute(job: Path):
     payloads = load_snapshots(job, request)
     from orderbook import LabError
     try:
-        if request['mode'] == 'shape_comparison':
+        if request['mode'] == 'python_export':
+            from orderbook.python_export import package, write_report
+            report = package(payloads, job / 'output')
+        elif request['mode'] == 'shape_comparison':
             from orderbook.curve_experiment import analyze_curve_experiment
             from orderbook.research_dataset import write_report
             report = analyze_curve_experiment(payloads, cfg, job / 'output')
@@ -318,7 +336,7 @@ def execute(job: Path):
     # The bounded persisted description and HTTP result share provenance and
     # exact statistics; no second replay or clock-derived resampling occurs.
     result = summarize(report, request)
-    write_report(job / 'output', result if request['mode'] in ('shape_comparison', 'shape', 'dataset', 'proposal_experiment', 'describe', 'flow') else report)
+    write_report(job / 'output', result if request['mode'] in ('python_export', 'shape_comparison', 'shape', 'dataset', 'proposal_experiment', 'describe', 'flow') else report)
     write_json(job / 'result.json', result)
 
 
@@ -339,9 +357,10 @@ def main(argv=None, execute_job=None):
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
             return 2
         os.umask(0o077)
-        dataset_mode = read_json(job / 'request.json', 8192).get('mode') in ('shape_comparison', 'shape', 'dataset', 'proposal_experiment')
+        mode = read_json(job / 'request.json', 8192).get('mode')
+        dataset_mode = mode in ('python_export', 'shape_comparison', 'shape', 'dataset', 'proposal_experiment')
         cpu_limit = 1500 if dataset_mode else 150
-        file_limit = 256_000_000 if dataset_mode else 120_000_000
+        file_limit = 8_100_000_000 if mode == 'python_export' else 256_000_000 if dataset_mode else 120_000_000
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
         resource.setrlimit(resource.RLIMIT_AS, (2_000_000_000, 2_000_000_000))
         resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))

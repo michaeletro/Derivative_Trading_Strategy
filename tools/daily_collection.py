@@ -154,6 +154,7 @@ class Controller:
         self.runtime=self.data/'daily-collection';private_dir(self.runtime,True)
         self.client=client or Client(self.saved.get('port',8081),token)
         self.config=None;self.last_attempt=0.;self.connect_started=None;self.resolution=None;self.owned_server=None;self.artifact_identity=None;self.broker_generation=None
+        self.report_watcher_attempted=False
     def configured(self):
         value=read_json(self.config_path)
         self.config=validate_config(value,self.profile) if value is not None else None
@@ -309,13 +310,40 @@ class Controller:
         else:phase='completed' if requested['state']=='completed' or requested.get('reason') in ('market_close','collection_window_closed') else 'interrupted'
         self.save_day(path,day,phase,requested.get('reason',''))
         return self.status(day['phase'],window,day['reason'],day)
+    def launch_report_watcher(self):
+        # Analysis has its own date/schedule lock and hard post-close deadline.
+        # Start its waiter before tick: tick deliberately exits outside runtime
+        # without reconciling plans that may have finished draining after close.
+        if self.report_watcher_attempted:return
+        self.report_watcher_attempted=True
+        window=calendar_window(self.clock())
+        if not self.config or not self.config['enabled'] or not window['in_runtime_window']:return
+        date=window['session_date']
+        result={'schema_version':1,'session_date':date,'updated_ms':milliseconds(self.clock()),
+            'phase':'launch_failed','reason':'report_tool_unavailable'}
+        script=ROOT/'tools/daily_research_report.py';python=ROOT/'.venv/bin/python'
+        try:
+            if script.is_file() and not script.is_symlink() and python.is_file():
+                result['reason']='report_process_launch_failed'
+                process=subprocess.Popen([str(python),str(script),'--profile',self.profile,
+                    '--session-date',date,'--watch'],cwd=ROOT,stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,close_fds=True,start_new_session=True)
+                result.update(phase='launch_requested',reason='',pid=process.pid)
+        except OSError:pass
+        # Keep a bounded private launch record. No child output, token, account,
+        # private exception or environment is copied into collector status/logs.
+        try:atomic_json(self.runtime/('report-watcher-'+date+'.json'),result)
+        except (OSError,CollectionError,ValueError):pass
     def run(self):
         fd=os.open(self.runtime/'controller.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
         try:
             try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:return 0
             while True:
-                try:result=self.tick()
+                try:
+                    if not self.report_watcher_attempted:
+                        self.configured();self.launch_report_watcher()
+                    result=self.tick()
                 except CollectionError as error:
                     window=calendar_window(self.clock());result=self.status('needs_attention',window,str(error))
                     if isinstance(error,PreflightUnavailable):return 2

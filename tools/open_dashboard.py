@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 from pathlib import Path
@@ -98,7 +99,14 @@ def open_browser(port: int, code: str) -> None:
                             '$u=[Console]::In.ReadToEnd(); Start-Process -FilePath $u'],
                            input=url, text=True, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, timeout=10, check=True)
-        except (OSError, subprocess.SubprocessError):
+        except OSError as error:
+            if error.errno == errno.ENOEXEC:
+                # A missing WSLInterop binfmt registration prevents Windows
+                # executables from starting even when their paths exist. Do not
+                # suggest restarting the recording server or expose launch URLs.
+                raise LocalSigninError('WSL cannot launch Windows applications. Restore WSL interoperability and reopen the dashboard; do not restart an active recording server. No saved token was displayed.') from None
+            raise LocalSigninError('Windows could not open its browser. No saved token was displayed.') from None
+        except subprocess.SubprocessError:
             raise LocalSigninError('Windows could not open its browser. No saved token was displayed.') from None
     else:
         try:

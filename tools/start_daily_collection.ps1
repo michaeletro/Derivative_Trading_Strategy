@@ -192,6 +192,94 @@ function Invoke-DerivativeTwsPreflight {
     }
 }
 
+function Get-DerivativeReportHoldTime { [DateTimeOffset]::UtcNow }
+function Get-DerivativeReportHoldElapsedSeconds {
+    param([Parameter(Mandatory)]$Timer)
+    return $Timer.Elapsed.TotalSeconds
+}
+function Wait-DerivativeReportHold {
+    param([Parameter(Mandatory)][int]$Milliseconds)
+    Start-Sleep -Milliseconds $Milliseconds
+}
+function Set-DerivativeReportHoldPower {
+    param([Parameter(Mandatory)][uint32]$State)
+    return [DerivativeLab.NativePower]::SetThreadExecutionState($State)
+}
+function Get-DerivativeReportHoldContext {
+    param([Parameter(Mandatory)]$Snapshot,[Parameter(Mandatory)][DateTimeOffset]$At)
+    try {
+        if ((Get-TimeZone).Id -cne 'Eastern Standard Time' -or $Snapshot.is_trading_day -isnot [bool] -or
+            -not $Snapshot.is_trading_day -or $Snapshot.timezone -cne 'America/New_York' -or
+            $Snapshot.session_date -isnot [string] -or $Snapshot.session_date -cnotmatch '^\d{4}-\d{2}-\d{2}$') { return $null }
+        foreach ($name in @('collection_open_ms','collection_close_ms')) {
+            $value=$Snapshot.$name
+            if ($value -isnot [ValueType] -or $value -is [bool] -or [double]$value -le 0 -or
+                [double]$value -ne [Math]::Truncate([double]$value)) { return $null }
+        }
+        $zone=[TimeZoneInfo]::FindSystemTimeZoneById('Eastern Standard Time')
+        $close=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$Snapshot.collection_close_ms)
+        $open=[DateTimeOffset]::FromUnixTimeMilliseconds([long]$Snapshot.collection_open_ms)
+        $localClose=[TimeZoneInfo]::ConvertTime($close,$zone)
+        $localOpen=[TimeZoneInfo]::ConvertTime($open,$zone)
+        $localNow=[TimeZoneInfo]::ConvertTime($At,$zone)
+        if ($localClose.ToString('yyyy-MM-dd') -cne $Snapshot.session_date -or
+            $localOpen.ToString('yyyy-MM-dd') -cne $Snapshot.session_date -or
+            $localNow.ToString('yyyy-MM-dd') -cne $Snapshot.session_date -or
+            $localClose.TimeOfDay -ne [TimeSpan]::FromMinutes(16*60+30) -or
+            $localOpen.TimeOfDay -ne [TimeSpan]::FromHours(9) -or
+            $At -lt $close -or $At -ge $close.AddHours(1)) { return $null }
+        return [pscustomobject]@{SessionDate=$Snapshot.session_date;Close=$close;End=$close.AddHours(1)}
+    } catch { return $null }
+}
+function Write-DerivativeReportHoldStatus {
+    param([Parameter(Mandatory)]$Runtime,[Parameter(Mandatory)][string]$RunId,
+          [Parameter(Mandatory)]$Context,[Parameter(Mandatory)][string]$State,
+          [Parameter(Mandatory)][string]$Reason)
+    # One bounded private record per existing wrapper launch; no child output,
+    # broker identity, credentials, or exception details enter this record.
+    if ($RunId -cnotmatch '^[A-Za-z0-9-]{1,80}$') { return }
+    $value=[ordered]@{schema_version=1;session_date=$Context.SessionDate;phase=$State;reason=$Reason;
+        updated_ms=(Get-DerivativeReportHoldTime).ToUnixTimeMilliseconds();
+        stop_ms=$Context.End.ToUnixTimeMilliseconds();system_awake_required=($State -eq 'holding');
+        display_awake_required=($State -eq 'holding')}
+    [IO.File]::WriteAllText((Join-Path $Runtime.Root ($RunId+'-report-awake.json')),
+        ($value|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+}
+function Invoke-DerivativeReportAwakeHold {
+    param([Parameter(Mandatory)]$Snapshot,[Parameter(Mandatory)]$Runtime,
+          [Parameter(Mandatory)][string]$RunId)
+    $start=Get-DerivativeReportHoldTime
+    $context=Get-DerivativeReportHoldContext $Snapshot $start
+    if ($null -eq $context) { return }
+    $budget=[Math]::Min(3600,($context.End-$start).TotalSeconds)
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    $held=$false;$phase='failed';$reason='postclose_power_request_failed'
+    try {
+        # The detached report can wait until 17:00 and analyze for 20 minutes.
+        # On this Modern Standby host, screen-off can suspend WSL. Hold both
+        # system and display only during the bounded post-close report window.
+        if ((Set-DerivativeReportHoldPower ([uint32]2147483651)) -eq 0) { return }
+        $held=$true
+        try { Write-DerivativeReportHoldStatus $Runtime $RunId $context 'holding' 'postclose_report_window' } catch { }
+        while ($true) {
+            $now=Get-DerivativeReportHoldTime
+            if ($null -eq (Get-DerivativeReportHoldContext $Snapshot $now)) {
+                $reason='postclose_wall_boundary';break
+            }
+            $elapsed=Get-DerivativeReportHoldElapsedSeconds $timer
+            if ($elapsed -ge $budget) { $reason='postclose_steady_deadline';break }
+            $remaining=[Math]::Min($budget-$elapsed,($context.End-$now).TotalSeconds)
+            Wait-DerivativeReportHold ([int][Math]::Max(1,[Math]::Min(15000,$remaining*1000)))
+        }
+        $phase='stopped'
+    } catch { $reason='postclose_report_hold_failed' }
+    finally {
+        if ($held) { try { [void](Set-DerivativeReportHoldPower ([uint32]2147483648)) } catch { } }
+        $timer.Stop()
+        try { Write-DerivativeReportHoldStatus $Runtime $RunId $context $phase $reason } catch { }
+    }
+}
+
 function Invoke-DerivativeDailyCollection {
     param([switch]$ValidateOnly)
     if ((Get-TimeZone).Id -ne 'Eastern Standard Time') {
@@ -263,7 +351,11 @@ namespace DerivativeLab {
         # capture stop and its private lock, never this wrapper.
         $controller.WaitForExit()
         $controller.Refresh()
-        return [int]$controller.ExitCode
+        $controllerCode=[int]$controller.ExitCode
+        if ($controllerCode -eq 0) {
+            Invoke-DerivativeReportAwakeHold -Snapshot $snapshot -Runtime $runtime -RunId $runId
+        }
+        return $controllerCode
     } finally {
         if ($awake) {
             [void][DerivativeLab.NativePower]::SetThreadExecutionState([uint32]2147483648)

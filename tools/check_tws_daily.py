@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+from datetime import datetime
 import io
 import ipaddress
 import json
@@ -26,6 +27,8 @@ DEFAULT_SDK = r"\\wsl.localhost\Ubuntu\home\michperez\.local\share\ibkr-api-10.4
 PORT = 7497
 CLIENT_ID = 91
 CONFIG_REQUEST_ID = 9101
+LAUNCHER_LOG_MAX_BYTES = 256 * 1024
+LAUNCHER_LOG_MAX_LINES = 2048
 PUBLIC_FIELDS = frozenset({
     "connected", "read_only_api", "paper_identity", "source_ip_trusted",
     "localhost_trusted", "auto_restart", "auto_restart_time",
@@ -205,7 +208,12 @@ def run_query(source_ip, timeout, factory=make_peer, timezone_reader=lambda: Non
             result["reason"] = peer.failure or "configuration_response_timeout"
             return result
         result.update(peer.selected)
-        result["timezone"] = timezone_reader()
+        try:
+            result["timezone"] = timezone_reader()
+        except (OSError, ValueError, subprocess.SubprocessError):
+            # Keep the verified API observations, but never authorize collection
+            # when the active process's timezone cannot be established.
+            result["timezone"] = None
         return finish_result(result)
     finally:
         peer.disconnect()
@@ -279,20 +287,82 @@ def load_sdk(sdk_path, dependency_path):
         raise ValueError("private_protobuf_runtime_version_mismatch")
 
 
+def launcher_config_directory(executable, created_local):
+    """Bind native-launcher metadata to this listener's process start."""
+    created = datetime.fromisoformat(created_local)
+    if created.tzinfo is not None:
+        raise ValueError("tws_process_creation_time_unverified")
+    log = executable.with_name("launcher.log")
+    if not log.is_file() or log.is_symlink() or log.is_junction():
+        raise ValueError("tws_launcher_log_unavailable")
+    # Read a complete, bounded regular-file snapshot. Even an early directory
+    # match cannot authorize a truncated scan that might hide conflicting proof.
+    with log.open("rb") as source:
+        contents = source.read(LAUNCHER_LOG_MAX_BYTES + 1)
+    if len(contents) > LAUNCHER_LOG_MAX_BYTES:
+        raise ValueError("tws_launcher_log_limit_exceeded")
+    lines = contents.decode("utf-8", errors="replace").splitlines()
+    if len(lines) > LAUNCHER_LOG_MAX_LINES:
+        raise ValueError("tws_launcher_log_limit_exceeded")
+    directories = set()
+    first_entry = True
+    for line in lines:
+        if not line.strip():
+            continue
+        stamp = re.match(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})\s", line)
+        if stamp is None:
+            if first_entry:
+                raise ValueError("tws_launcher_start_unverified")
+            continue
+        age = (datetime.fromisoformat(stamp[1]) - created).total_seconds()
+        if first_entry:
+            first_entry = False
+            if not -2 <= age <= 15:
+                raise ValueError("tws_launcher_start_unverified")
+        if not -2 <= age <= 60:
+            continue
+        # Spaces belong to an unquoted value. Require a structural delimiter,
+        # never whitespace or a partial final line, before accepting the path.
+        pattern = (r'(?<![\w])jtsConfigDir\s*=\s*(?:"([^"\r\n]+)"|([^,\]\r\n"]+?))'
+                   r'\s*(?=,\s*[A-Za-z][\w]*\s*=|\])')
+        for match in re.finditer(pattern, line, re.I):
+            directories.add((match[1] or match[2]).strip())
+    if len(directories) != 1:
+        raise ValueError("tws_launcher_config_unverified")
+    directory = Path(directories.pop())
+    if not directory.is_absolute():
+        raise ValueError("tws_absolute_config_directory_required")
+    return directory
+
+
 def read_tws_timezone():
     """Read only the timezone key from the active listener's configuration."""
-    config_directory = powershell(r"""
+    metadata = json.loads(powershell(r"""
 $ErrorActionPreference='Stop'
 $owners=@(Get-NetTCPConnection -LocalPort 7497 -State Listen | Select-Object -ExpandProperty OwningProcess -Unique)
 if($owners.Count -ne 1){throw 'single TWS listener required'}
 $process=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $owners[0])
 if([IO.Path]::GetFileName($process.ExecutablePath) -notin @('tws.exe','ibgateway.exe')) {throw 'TWS executable required'}
-$match=[regex]::Match([string]$process.CommandLine,'(?i)-DjtsConfigDir=(?:"([^"]+)"|(\S+))')
-if(-not $match.Success){throw 'TWS config directory unavailable'}
-if($match.Groups[1].Success){$match.Groups[1].Value}else{$match.Groups[2].Value}
-""")
-    ini = Path(config_directory) / "jts.ini"
-    if not ini.is_file() or ini.is_symlink():
+$command=[string]$process.CommandLine
+if([string]::IsNullOrWhiteSpace($command) -or $null -eq $process.CreationDate){throw 'TWS process metadata unavailable'}
+$configMatches=[regex]::Matches($command,'(?i)(?:^|\s)(?:-J)?-DjtsConfigDir=(?:"([^"]+)"|(\S+))')
+if($configMatches.Count -gt 1){throw 'ambiguous TWS config directory'}
+$directory=$null
+if($configMatches.Count -eq 1){
+  $directory=if($configMatches[0].Groups[1].Success){$configMatches[0].Groups[1].Value}else{$configMatches[0].Groups[2].Value}
+}elseif($command -match '(?i)jtsConfigDir'){throw 'invalid TWS config directory argument'}
+[pscustomobject]@{executable=$process.ExecutablePath;created_local=$process.CreationDate.ToString('yyyy-MM-ddTHH:mm:ss.fff');config_directory=$directory}|ConvertTo-Json -Compress
+"""))
+    executable = Path(metadata["executable"])
+    if not executable.is_absolute() or executable.name.lower() not in {"tws.exe", "ibgateway.exe"}:
+        raise ValueError("tws_executable_unverified")
+    value = metadata.get("config_directory")
+    config_directory = (Path(value) if value else
+                        launcher_config_directory(executable, metadata["created_local"]))
+    if not config_directory.is_absolute():
+        raise ValueError("tws_absolute_config_directory_required")
+    ini = config_directory / "jts.ini"
+    if not ini.is_file() or ini.is_symlink() or ini.is_junction():
         return None
     with ini.open(encoding="utf-8", errors="replace") as source:
         for line in source:
