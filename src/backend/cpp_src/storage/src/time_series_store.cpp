@@ -5,6 +5,7 @@
 #include <dts/numerical_schema.hpp>
 #include <dts/hedging_schema.hpp>
 #include <dts/depth_schema.hpp>
+#include <dts/backfill_schema.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -70,6 +71,41 @@ public:
 };
 std::int64_t scalar(sqlite3* db,const char* s) { Statement q(db,s); q.step(); return q.integer(); }
 std::string scalar_text(sqlite3* db,const char* s) { Statement q(db,s); q.step(); return q.text(); }
+void verify_backfill_extension(sqlite3* db) {
+    sqlite3* expected_raw=nullptr;
+    const auto rc=sqlite3_open(":memory:",&expected_raw);
+    std::unique_ptr<sqlite3,decltype(&sqlite3_close)> expected(expected_raw,sqlite3_close);
+    check(rc,expected.get());
+    sql(expected.get(),backfill_schema);
+    // Compare the exact SQLite definitions emitted by the known migration,
+    // including indexes and unexpected triggers. A version number alone is not
+    // sufficient to adopt a newer archive. Never edit/downgrade the user's schema.
+    const char* query="SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name IN ('history_backfills','history_backfill_windows') ORDER BY type,name";
+    Statement actual(db,query), reference(expected.get(),query);
+    while(reference.step()) {
+        if(!actual.step()||actual.row()!=reference.row())
+            throw std::runtime_error("Unrecognized schema-7 backfill extension; archive unchanged");
+    }
+    if(actual.step())throw std::runtime_error("Unrecognized schema-7 backfill extension; archive unchanged");
+}
+void verify_depth_schema(sqlite3* db,bool expanded) {
+    sqlite3* raw=nullptr;
+    const auto rc=sqlite3_open(":memory:",&raw);
+    std::unique_ptr<sqlite3,decltype(&sqlite3_close)> expected(raw,sqlite3_close);
+    check(rc,expected.get());sql(expected.get(),depth_schema);
+    if(expanded)sql(expected.get(),depth_rows_v8_migration);
+    const char* query="SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name IN ('depth_sessions','depth_events') ORDER BY type,name";
+    Statement actual(db,query),reference(expected.get(),query);
+    while(reference.step()) {
+        if(!actual.step()||actual.row()!=reference.row())
+            throw std::runtime_error("Unrecognized depth schema; archive unchanged");
+    }
+    if(actual.step()||scalar(db,"SELECT count(*) FROM sqlite_master WHERE name='depth_sessions_v8'"))
+        throw std::runtime_error("Unrecognized depth schema; archive unchanged");
+}
+bool has_backfill_extension(sqlite3* db) {
+    return scalar(db,"SELECT count(*) FROM sqlite_master WHERE tbl_name IN ('history_backfills','history_backfill_windows')")!=0;
+}
 class Transaction {
     sqlite3* db_; bool done_=false;
 public:
@@ -175,8 +211,12 @@ struct TimeSeriesStore::Impl {
             sqlite3_extended_result_codes(db,1);sqlite3_busy_timeout(db,1000);
             const auto appid=scalar(db,"PRAGMA application_id"),version=scalar(db,"PRAGMA user_version");
             const bool empty=scalar(db,"SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")==0;
-            if(!((appid==0&&version==0&&empty)||(appid==application_id&&(version==1||version==2||version==3||version==4||version==5||version==6))))
+            if(!((appid==0&&version==0&&empty)||(appid==application_id&&(version==1||version==2||version==3||version==4||version==5||version==6||version==7||version==8))))
                 throw std::runtime_error("Unknown recording schema: existing file was not adopted or reset");
+            if(version>=6)verify_depth_schema(db,version==8);
+            const bool backfill_present=has_backfill_extension(db);
+            if(version==7||(version==8&&backfill_present))verify_backfill_extension(db);
+            if(version==6&&backfill_present)throw std::runtime_error("Unrecognized depth/backfill schema combination; archive unchanged");
             sql(db,"PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON;");
             // Single connection in exclusive mode: no cross-process WAL writers
             // or checkpoint races, including on older system SQLite builds.
@@ -226,6 +266,31 @@ PRAGMA user_version=1;
                 {Statement check_fk(db,"PRAGMA foreign_key_check");if(check_fk.step())throw std::runtime_error("Migration foreign-key check failed");}
                 migration.commit();
             }
+            if(version<8) {
+                // An existing legacy archive was backed up before its earlier
+                // migration above; v6/v7 need their own verified pre-v8 backup.
+                if(!empty&&version>=6){info.run_id="migration8";backup_locked();}
+                verify_depth_schema(db,false);
+                {Statement fk(db,"PRAGMA foreign_key_check");if(fk.step())throw std::runtime_error("Pre-migration foreign-key check failed");}
+                const auto previous_sequence=scalar(db,"SELECT coalesce(max(seq),0) FROM sqlite_sequence WHERE name='depth_sessions'");
+                sql(db,"PRAGMA foreign_keys=OFF");
+                try {
+                    Transaction migration(db);
+                    sql(db,depth_rows_v8_migration);
+                    Statement sequence(db,"UPDATE sqlite_sequence SET seq=max(seq,?1) WHERE name='depth_sessions'");
+                    sequence.bind(1,previous_sequence);sequence.step();
+                    Statement missing_sequence(db,"INSERT INTO sqlite_sequence(name,seq) SELECT 'depth_sessions',?1 WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='depth_sessions')");
+                    missing_sequence.bind(1,previous_sequence);missing_sequence.step();
+                    {Statement fk(db,"PRAGMA foreign_key_check");if(fk.step())throw std::runtime_error("Depth migration foreign-key check failed");}
+                    if(scalar_text(db,"PRAGMA quick_check")!="ok")throw std::runtime_error("Depth migration integrity check failed");
+                    verify_depth_schema(db,true);
+                    migration.commit();
+                } catch(...) {
+                    sql(db,"PRAGMA foreign_keys=ON");throw;
+                }
+                sql(db,"PRAGMA foreign_keys=ON");
+                if(scalar(db,"PRAGMA foreign_keys")!=1)throw std::runtime_error("Foreign keys unavailable after depth migration");
+            }
             Transaction t(db);
             // Record a terminal boundary after a crash; this is not an IBKR event
             // and does not claim to know the number of in-flight observations lost.
@@ -233,6 +298,7 @@ PRAGMA user_version=1;
  SELECT session_id,last_sequence+1,'interrupted','recorder_recovery',strftime('%s','now')*1000000,0,-1,-1,-1,NULL,'not_applicable','','',0,-1031
  FROM depth_sessions WHERE state='recording';
  UPDATE depth_sessions SET state='interrupted',last_sequence=last_sequence+1,event_count=event_count+1,ended_ms=strftime('%s','now')*1000 WHERE state='recording';)SQL");
+            if(backfill_present)sql(db,interrupt_backfills);
             sql(db,"UPDATE history_requests SET state='interrupted',finished_ms=strftime('%s','now')*1000 WHERE state IN ('queued','pending')");
             sql(db,"UPDATE runs SET state='interrupted' WHERE state='running'");
             Statement run(db,"INSERT INTO runs(mode,started_ms,state) VALUES(?1,?2,'running')");
@@ -453,5 +519,7 @@ void TimeSeriesStore::close(bool acquisition_clean) {
 #include "research_store.inc"
 
 #include "numerical_store.inc"
+
+#include "depth_raw.inc"
 
 #include "depth_store.inc"

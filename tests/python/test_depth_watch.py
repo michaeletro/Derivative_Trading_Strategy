@@ -90,8 +90,20 @@ class DepthWatchTests(unittest.TestCase):
         self.assertIn('bid 1/10, ask 1/10', out)
         self.assertIn('rows need not be distinct price levels', out)
 
+    def test_fifty_requested_rows_keep_all_delivered_rows(self):
+        p = payload(requested_rows=50)
+        for name, direction in [('bids', -1), ('asks', 1)]:
+            p['book'][name] = [dict(price=100+direction*(i+1), size='10', market_maker='') for i in range(50)]
+        f = watch.parse_frame(p)
+        self.assertEqual((len(f.bids), len(f.asks)), (50, 50))
+        self.assertEqual(f.bids[49].price, Decimal(50))
+        self.assertIn('bid 50/50, ask 50/50', watch.render(f, watch.Evidence(), 5))
+        p['book']['bids'] = p['book']['bids'][:10]
+        p['book']['asks'] = p['book']['asks'][:10]
+        self.assertIn('bid 10/50, ask 10/50', watch.render(watch.parse_frame(p), watch.Evidence(), 5))
+
     def test_row_bounds_enforced(self):
-        for rows in (0, 11, True):
+        for rows in (0, 51, True):
             with self.subTest(rows=rows), self.assertRaises(watch.ViewError): watch.parse_frame(payload(requested_rows=rows))
         p = payload(requested_rows=1); p['book']['bids'] *= 2
         with self.assertRaises(watch.ViewError): watch.parse_frame(p)

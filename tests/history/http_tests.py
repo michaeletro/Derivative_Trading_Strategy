@@ -39,7 +39,11 @@ def main(exe,seed):
             ck(s.call('/api/history/request',{**WINDOW,'policy':'refresh'})[0]==409)
             ck(s.call('/api/history/request',{**WINDOW,'end_s':START+6*86400,'policy':'fetch_missing'})[0]==409)
             ck(s.call('/api/history/view',{**WINDOW,'dataset_id':'999'})[0]==404)
-            for field,value in [('dataset_id',1),('dataset_id','../1'),('start_s',START+.5),('start_s',0),('end_s',START),('end_s',START+367*86400),('extra','rejected')]:
+            code,multi=s.call('/api/history/view',{**WINDOW,'start_s':946684800})
+            ck(code==200 and len(multi['bars'])==1 and multi['progress']['total_attempts']>=5)
+            ck('queue' in multi and multi['view_bar_limit']==40000)
+            ck(cat['datasets'][0]['requested_start_s']==START and cat['datasets'][0]['requested_end_s']>=WINDOW['end_s'])
+            for field,value in [('dataset_id',1),('dataset_id','../1'),('start_s',START+.5),('start_s',0),('end_s',START),('end_s',4102444801),('extra','rejected')]:
                 ck(s.call('/api/history/view',{**WINDOW,field:value})[0]==400)
             for patch in [{'bar_size':'1 min'},{'price_type':'BID'},{'use_rth':False},{'contract_id':123},{'policy':'unexpected'}]:
                 ck(s.call('/api/history/request',{**WINDOW,'policy':'saved',**patch})[0]==400)
@@ -53,7 +57,7 @@ def main(exe,seed):
             ck(s.stop()==0)
         backups=list((root/'backups').glob('*.sqlite'));ck(bool(backups))
         with closing(sqlite3.connect(backups[-1])) as db, db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==6)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==8)
             ck(db.execute('SELECT count(*) FROM history_versions').fetchone()[0]==2)
     # A v1 archive is upgraded only after a complete, verified old-schema backup.
     with tempfile.TemporaryDirectory() as tmp:
@@ -78,7 +82,7 @@ def main(exe,seed):
             ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
             ck(db.execute('PRAGMA quick_check').fetchall()==[('ok',)])
         with closing(sqlite3.connect(path)) as db, db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==6)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==8)
             ck(db.execute('SELECT count(*) FROM bar_observations').fetchone()[0]==2)
             db.execute('PRAGMA user_version=999')
         before=path.read_bytes()

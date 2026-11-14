@@ -38,6 +38,11 @@ def main(exe,seed):
             expect(page.locator('#replay-rows tr').last).not_to_contain_text('warm-up')
             page.locator('#experiment-name').fill('Baseline trailing volatility');page.locator('#replay-save').click()
             expect(page.locator('#experiment-summary')).to_contain_text('Saved immutable run #1')
+            expect(page.locator('#replay-cumulative-chart')).to_have_attribute('aria-label','cumulative price return through observation 80; numerical values in the table.')
+            expect(page.locator('#replay-metrics')).to_contain_text('Cumulative price return')
+            page.locator('#replay-reset').click();expect(page.locator('#replay-rows tr')).to_have_count(0)
+            page.locator('#experiment-open').click();expect(page.locator('#experiment-summary')).to_contain_text('Opened saved report #1')
+            expect(page.locator('#replay-rows tr')).to_have_count(80)
             page.locator('#experiment-name').fill('Exact rerun');page.locator('#experiment-rerun').click()
             expect(page.locator('#experiment-summary')).to_contain_text('parent #1')
             page.locator('#experiment-a').select_option('1');page.locator('#experiment-b').select_option('2');page.locator('#experiment-compare').click()
@@ -52,6 +57,17 @@ def main(exe,seed):
             page.locator('#replay-windows').fill('5,20');expect(page.locator('#replay-rows tr')).to_have_count(0)
             page.locator('#replay-finish').click();expect(page.locator('#replay-rows tr')).to_have_count(80)
             page.locator('#replay-reset').click();expect(page.locator('#replay-rows tr')).to_have_count(0)
+            # A multi-year saved period can be selected and frozen; no download.
+            page.goto(s.origin+'/#history');page.locator('#history-load').click()
+            page.locator('#history-dataset').select_option('1');page.locator('#history-start').fill('2024-01-01');page.locator('#history-end').fill('2026-03-26')
+            page.locator('#history-request').click();expect(page.locator('#history-rows tr')).to_have_count(80)
+            expect(page.locator('#history-freeze')).to_be_enabled();page.locator('#history-freeze').click();page.locator('#replay-create').click()
+            expect(page.locator('#replay-quality-cards')).to_contain_text('Weekdays without bars')
+            expect(page.locator('#replay-issues tr')).to_have_count(100)
+            # Reopen the original frozen snapshot before the prefix/access checks.
+            page.locator('#replay-load').click();page.locator('#replay-select').select_option('1')
+            expect(page.locator('#replay-manifest')).to_contain_text('Snapshot #1')
+            page.locator('#replay-windows').fill('5,20')
             # Reject malformed research responses without drawing invented results.
             page.route('**/api/research/replay',lambda route: route.fulfill(status=200,content_type='application/json',body='{"deliberately":"invalid"}'))
             page.locator('#replay-step').click();expect(page.locator('#replay-notice')).to_contain_text('does not match')
@@ -65,6 +81,8 @@ def main(exe,seed):
             except Exception:pass
             expect(page.locator('#replay-manifest')).to_have_text('');expect(page.locator('#replay-rows tr')).to_have_count(0)
             expect(page.locator('#experiment-comparison tr')).to_have_count(0)
+            expect(page.locator('#replay-quality-cards')).to_have_text('')
+            expect(page.locator('#replay-metrics')).to_have_text('')
             expect(page.locator('#replay-price-chart')).to_have_attribute('aria-label','No observations released')
             assert not any('/api/broker/connect' in v for v in calls)
             assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0

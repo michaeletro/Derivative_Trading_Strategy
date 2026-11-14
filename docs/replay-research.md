@@ -3,8 +3,8 @@
 ## What this increment does
 
 Freeze the **latest completed historical responses at snapshot creation time**,
-replay their observations in order, calculate trailing price-return and sample-
-volatility diagnostics, and preserve immutable complete experiment runs. The lab
+replay their observations in order, calculate trailing price-return, sample-volatility, cumulative-price-return and drawdown
+diagnostics, and preserve immutable complete experiment runs. The lab
 never acquires market data, connects to IBKR, transfers prices into the live quote
 cache, submits orders, or simulates fills. It is **retrospective dataset research**,
 not a point-in-time strategy backtester, a forecast, or a listed-option P&L report.
@@ -72,7 +72,9 @@ Research snapshots and runs are included in that same backup/restore lifecycle.
    only. Preview requests are stateless calculations and do not create saved runs.
 6. **Compute & save full run** computes all frozen observations regardless of the
    current playback cursor. It commits an immutable result and its configuration.
-7. Load saved runs, choose A/B and Compare. Rerun A creates a new child record on
+7. Load saved runs, choose A and **Open saved report A** to reopen its archived
+   quality checks, charts and numerical values without recalculation. Choose A/B
+   and Compare for two runs. Rerun A creates a new child record on
    the same snapshot/configuration; it never overwrites A. Export A saves the
    archived result, not a newly computed result.
 
@@ -92,7 +94,9 @@ completed-response coverage gaps. Daily data remains provider session-date
 coordinates; minute coordinates are UTC bar starts. Adjustments remain provider-
 native; this feature adds no corporate-action or exchange-calendar normalization.
 
-Snapshots are bounded to **2,000 bars** and materialize selected values in separate
+Daily snapshots support the same multi-year date range as the historical workspace
+(years 2000..2099); minute snapshots remain bounded to 24 hours. Snapshots are
+bounded to **40,000 bars** and materialize selected values in separate
 immutable tables. This duplicates a bounded amount of data intentionally: a later
 source refresh cannot change a frozen value. Foreign keys retain provenance, and
 sealing/immutability triggers reject updates/deletes through ordinary SQLite use.
@@ -120,6 +124,17 @@ spans and large adjacent price moves (absolute log move above log(1.5), a review
 flag only). Large moves are not automatically labeled splits or outliers.
 Completed request coverage is **not** a claim of complete market history.
 Calendar verification and full-market coverage remain false/unverified.
+
+The version-2 audit additionally counts bars with any nonpositive OHLC value,
+missing versus zero TRADES volume, weekend observations, and weekdays without
+bars across the full requested daily range (including edges). A weekday without
+a bar is a **review candidate**, not a confirmed missing trading session: holidays,
+closures and pre-listing periods are not resolved by this screening. Non-TRADES
+volume is not expected and is labeled accordingly. Counters cover all rows;
+the first 100 review items are displayed with dates. Invalid/nonfinite OHLC,
+inconsistent bounds, negative/malformed volume, duplicate or unordered coordinates
+are rejected by snapshot validation rather than repaired. No fill, interpolation,
+corporate-action adjustment or automatic re-download is performed.
 
 The numerical engine receives an immutable snapshot and a requested prefix length.
 Only bars with ordinals <= that prefix enter its calculations. It cannot call a
@@ -158,6 +173,17 @@ The square-root scaling is a reporting convention, not a claim that returns are
 independent or identically distributed. Historical sample volatility is not
 implied option volatility. No direct transfer to the pricing lab is added here.
 
+Cumulative price return is `close / first positive close in segment - 1`.
+Drawdown is `close / running maximum close in segment - 1`. Both restart at
+nonpositive closes and nonconsecutive minute gaps; invalid closes have null
+values. Daily calendar gaps retain the existing adjacent-observation convention.
+An unrepresentable cumulative ratio remains null. The largest observed segment
+drawdown card takes the minimum of reported segment drawdowns. These are price
+series diagnostics; dividends, fees and trading cash flows are not normalized.
+All numerical points are computed from the released prefix in C++, saved with
+the report, and exported without chart truncation. Charts use observation order
+with date labels and break at segment resets. The table shows the latest 200 rows.
+
 ## Experiment records and reproducibility
 
 The catalog stores **return/volatility diagnostic runs only**, not a general
@@ -175,7 +201,12 @@ saved result. Creation time and build metadata are not numerical reproducibility
 claims. Floating-point/libm and JSON formatting may differ across builds; these
 digests are not a cross-platform canonical-JSON or signed-attestation standard.
 Different snapshot fingerprints/builds are explicitly called out in comparisons.
-Unsupported saved engine versions are not silently reinterpreted by Rerun.
+New reports use `retrospective-replay-2`. Existing version-1 reports remain
+readable/exportable byte-for-byte with their archived quality audit and numerical
+values; absent cumulative/drawdown charts stay empty. Rerun refuses an older
+engine version. Open its immutable snapshot and explicitly save a new run to
+calculate with the current engine. Snapshot fingerprint format remains unchanged.
+No database schema change or rewriting of existing records is required.
 
 Archived decimal values are explicitly promoted to double on JSON reconstruction
 because the vendored Crow rvalue->wvalue path otherwise truncates some decimals to
@@ -206,7 +237,9 @@ have More controls; the numerical preview table shows the last 200 released rows
 Full numerical runs and snapshot exports contain all bounded rows. No automatic
 acquisition or unbounded full-history scan is exposed. Calculation contention can
 return 429 and is not automatically retried. Slow storage may still delay the
-existing synchronous recorder. Snapshot creation rejects excessive revision scans.
+existing synchronous recorder. Snapshot creation rejects excessive revision scans (20,000 completed request
+rows); saved result JSON is bounded to 64 MiB. Requests exceeding bounds fail
+explicitly without silently truncating or saving a partial report.
 
 The market archive now also contains research records. No automatic record or
 backup deletion is added. Monitor space, retain complete backups separately, and

@@ -8,7 +8,7 @@ test('decimal string IDs',()=>{assert.equal(id('999999999999999999'),'9999999999
 test('explicit config',()=>assert.deepEqual(replayConfig('5,20',252),{windows:[5,20],annualization_factor:252}));
 test('invalid/blank configuration',()=>{for(const x of ['','5,5','20,5','1','5,','NaN','2,3,4,5,6','2.5'])assert.throws(()=>replayConfig(x,252));for(const x of ['',NaN,Infinity,0,-1,1e8])assert.throws(()=>replayConfig('5',x));});
 test('presentation batch cannot alter cursor domain',()=>{assert.equal(nextCursor(78,80,20),80);for(const x of [-1,81,1.5])assert.throws(()=>nextCursor(x,80,1));});
-test('snapshot provenance required',()=>{assert.equal(validateManifest(s),s);for(const patch of [{retrospective_only:false},{immutable:false},{bar_count:2001},{bar_size:'unknown'},{fingerprint:'x'}])assert.throws(()=>validateManifest({...s,...patch}));});
+test('snapshot provenance required',()=>{assert.equal(validateManifest(s),s);for(const patch of [{retrospective_only:false},{immutable:false},{bar_count:40001},{bar_size:'unknown'},{fingerprint:'x'}])assert.throws(()=>validateManifest({...s,...patch}));});
 test('matching prefix accepted',()=>assert.equal(validateReplay(r,s,c,1),r));
 test('future or mismatched cursor rejected',()=>{for(const patch of [{processed:2},{snapshot_id:'5'},{snapshot_fingerprint:'b'.repeat(64)},{points:[...r.points,...r.points]},{complete:true}])assert.throws(()=>validateReplay({...r,...patch},s,c,1));});
 test('wrong configuration rejected',()=>assert.throws(()=>validateReplay({...r,config:{windows:[3],annualization_factor:252}},s,c,1)));
@@ -18,3 +18,8 @@ test('null warmup never masquerades as zero volatility',()=>{const v=structuredC
 test('nonfinite value refused',()=>{const v=structuredClone(r);v.points[0].close=Infinity;assert.throws(()=>validateReplay(v,s,c,1));});
 test('comparison warns on different datasets',()=>{const a={result:{snapshot_fingerprint:'a',build:{research_source_sha256:'x'}}},b={result:{snapshot_fingerprint:'b',build:{research_source_sha256:'x'}}};assert.match(comparisonLabel(a,b),/Different frozen data/);b.result.snapshot_fingerprint='a';assert.match(comparisonLabel(a,b),/Same frozen/);});
 test('saved experiment must contain a validated full run',()=>assert.throws(()=>validateExperiment({immutable:true,retrospective_only:true,engine_version:'retrospective-replay-1',experiment_id:'1',config:c,result:r})));
+
+test('multi-year cursor and manifest',()=>{assert.equal(validateManifest({...s,bar_count:30000}).bar_count,30000);assert.equal(nextCursor(29990,30000,20),30000);assert.throws(()=>nextCursor(0,40001,20));});
+test('v2 cumulative and drawdown validation',()=>{const v=structuredClone(r);v.engine_version='retrospective-replay-2';v.points[0].cumulative_price_return=0;v.points[0].drawdown=0;assert.equal(validateReplay(v,s,c,1),v);v.points[0].drawdown=.1;assert.throws(()=>validateReplay(v,s,c,1));v.points[0].drawdown=0;v.points[0].cumulative_price_return=Infinity;assert.throws(()=>validateReplay(v,s,c,1));});
+
+test('archived v1 report remains readable without inventing new metrics',()=>{const snap={...s,bar_count:1};const output={...r,total:1,complete:true,snapshot:snap};const e={immutable:true,retrospective_only:true,engine_version:r.engine_version,experiment_id:'1',snapshot_id:'1',config:c,result:output};assert.equal(validateExperiment(e),e);assert.equal(e.result.points[0].drawdown,undefined);});

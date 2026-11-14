@@ -2,6 +2,8 @@
 #include <dts/time_series_store.hpp>
 #include <dts/recording_broker.hpp>
 #include <dts/mock_broker.hpp>
+#include <dts/backfill_schema.hpp>
+#include <dts/depth_schema.hpp>
 #include <sqlite3.h>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -30,6 +32,32 @@ std::int64_t scalar(const fs::path& path,const char* query){
     auto n=sqlite3_column_int64(s,0);sqlite3_finalize(s);CHECK(sqlite3_close(db)==SQLITE_OK);return n;
 }
 void execute(const fs::path& path,const char* query){sqlite3* db=nullptr;CHECK(sqlite3_open(path.c_str(),&db)==SQLITE_OK);CHECK(sqlite3_exec(db,query,nullptr,nullptr,nullptr)==SQLITE_OK);CHECK(sqlite3_close(db)==SQLITE_OK);}
+std::string dump_query(const fs::path& path,const std::string& query){
+    sqlite3* db=nullptr;CHECK(sqlite3_open_v2(path.c_str(),&db,SQLITE_OPEN_READONLY,nullptr)==SQLITE_OK);
+    sqlite3_stmt* q=nullptr;CHECK(sqlite3_prepare_v2(db,query.c_str(),-1,&q,nullptr)==SQLITE_OK);std::string out;
+    int rc;while((rc=sqlite3_step(q))==SQLITE_ROW){for(int i=0;i<sqlite3_column_count(q);++i){
+        const auto* text=sqlite3_column_text(q,i);const auto n=sqlite3_column_bytes(q,i);
+        out+=std::to_string(sqlite3_column_type(q,i))+":"+std::to_string(n)+":";
+        if(text)out.append(reinterpret_cast<const char*>(text),n);
+        out+=';';
+    }out+='\n';}CHECK(rc==SQLITE_DONE);sqlite3_finalize(q);CHECK(sqlite3_close(db)==SQLITE_OK);return out;
+}
+void legacy_depth6(const fs::path& db){
+    const std::string schema=depth_schema;const auto end=schema.find("CREATE TABLE depth_events");CHECK(end!=std::string::npos);
+    const auto text=std::string("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON; BEGIN IMMEDIATE; ALTER TABLE depth_sessions RENAME TO legacy_depth_sessions;")+
+        schema.substr(0,end)+"INSERT INTO depth_sessions SELECT * FROM legacy_depth_sessions; DROP TABLE legacy_depth_sessions; PRAGMA user_version=6; COMMIT; PRAGMA legacy_alter_table=OFF; PRAGMA foreign_keys=ON;";
+    execute(db,text.c_str());
+}
+void seed_depth(TimeSeriesStore& store){
+    DepthSpec spec{contract(),"TEST",10};store.begin_depth("mock",42,spec);
+    DepthEvent start;start.request_id=42;start.sequence=1;start.kind="start";start.received={1700000000000000LL,1000000000};
+    auto update=start;update.sequence=2;update.kind="update";update.operation=0;update.side=0;update.position=0;update.price=101.125;update.size="123.000";update.market_maker="TEST";update.callback_format="synthetic_fixture";
+    auto stop=start;stop.sequence=3;stop.kind="stop";store.record_depth_events("mock",{start,update,stop});
+}
+void sql_rejected(const fs::path& path,const char* query){
+    sqlite3* db=nullptr;CHECK(sqlite3_open(path.c_str(),&db)==SQLITE_OK);const int rc=sqlite3_exec(db,query,nullptr,nullptr,nullptr);
+    CHECK(sqlite3_close(db)==SQLITE_OK);CHECK(rc!=SQLITE_OK);
+}
 int main(){int passed=0;auto test=[&](const char* name,auto fn){try{fn();++passed;std::cout<<"PASS "<<name<<'\n';}catch(const std::exception& e){std::cerr<<"FAIL "<<name<<": "<<e.what()<<'\n';throw;}};
 try{
  test("quote commit, repeated prices, cursor paging, mode changes and durable restart",[]{
@@ -100,6 +128,123 @@ try{
  test("future schema never downgraded",[]{
     Temp t;{TimeSeriesStore s(t.config(),"none");s.close();}const auto db=t.config().directory/"timeseries.sqlite3";
     execute(db,"PRAGMA user_version=99");rejects([&]{TimeSeriesStore s(t.config(),"none");});CHECK(scalar(db,"PRAGMA user_version")==99);
+ });
+ test("known schema 7 upgrades to 8 retaining history and backups",[]{
+    Temp t;{TimeSeriesStore s(t.config(),"mock");s.register_contract("mock",contract());s.record_events("mock",{quote()});s.close();}
+    const auto db=t.config().directory/"timeseries.sqlite3";
+    CHECK(scalar(db,"PRAGMA user_version")==8);
+    legacy_depth6(db);
+    execute(db,backfill_schema);
+    execute(db,R"SQL(
+INSERT INTO history_datasets VALUES(1,'mock','schema7-fixture',9001,'SYNTHETIC','TEST','USD','1 min','TRADES',1,'UTC','unknown');
+INSERT INTO history_backfills VALUES(1,1,100,200,1,'complete',1234);
+INSERT INTO history_backfills VALUES(2,1,200,300,1,'running',1235);
+INSERT INTO history_backfill_windows VALUES(1,1,100,200,'complete',NULL,1,7,0);
+INSERT INTO history_backfill_windows VALUES(2,2,200,300,'pending',NULL,1,0,0);
+)SQL");
+    std::string backup;
+    {TimeSeriesStore s(t.config(),"none");CHECK(s.status().quotes==1);s.close();backup=s.status().last_backup;}
+    for(const fs::path& p:{db,fs::path(backup)}) {
+        CHECK(scalar(p,"PRAGMA user_version")==8);
+        CHECK(scalar(p,"SELECT count(*) FROM quote_observations")==1);
+        CHECK(scalar(p,"SELECT count(*) FROM history_backfills")==2);
+        CHECK(scalar(p,"SELECT count(*) FROM history_backfills WHERE backfill_id=1 AND state='complete'")==1);
+        CHECK(scalar(p,"SELECT received_rows FROM history_backfill_windows WHERE window_id=1")==7);
+        CHECK(scalar(p,"SELECT count(*) FROM history_backfills WHERE backfill_id=2 AND state='interrupted'")==1);
+        CHECK(scalar(p,"SELECT count(*) FROM history_backfill_windows WHERE window_id=2 AND state='interrupted'")==1);
+    }
+    {TimeSeriesStore s(t.config(),"none");CHECK(s.status().quotes==1);s.close();}
+    CHECK(scalar(db,"PRAGMA user_version")==8);
+ });
+ test("schema 7 number without recognized extension is refused before run mutation",[]{
+    Temp t;{TimeSeriesStore s(t.config(),"none");s.close();}
+    const auto db=t.config().directory/"timeseries.sqlite3";
+    legacy_depth6(db);execute(db,"PRAGMA user_version=7");
+    rejects([&]{TimeSeriesStore s(t.config(),"none");});
+    CHECK(scalar(db,"SELECT count(*) FROM runs")==1);
+    execute(db,backfill_schema);
+    execute(db,"DROP INDEX one_running_backfill");
+    rejects([&]{TimeSeriesStore s(t.config(),"none");});
+    CHECK(scalar(db,"SELECT count(*) FROM runs")==1);
+    CHECK(scalar(db,"PRAGMA user_version")==7);
+ });
+ test("schema 6 and 7 migrations preserve depth IDs payloads unrelated data and metadata",[]{
+    for(const int version:{6,7}){
+        Temp t;std::string raw_before;
+        {TimeSeriesStore s(t.config(),"mock");s.register_contract("mock",contract());s.record_events("mock",{quote()});seed_depth(s);s.close();}
+        const auto db=t.config().directory/"timeseries.sqlite3";legacy_depth6(db);
+        if(version==7)execute(db,backfill_schema);
+        execute(db,"CREATE TABLE preserved_extra(key TEXT PRIMARY KEY,value BLOB); INSERT INTO preserved_extra VALUES('archive-note',x'001122ff'); UPDATE sqlite_sequence SET seq=500 WHERE name='depth_sessions';");
+        const auto sessions=dump_query(db,"SELECT * FROM depth_sessions ORDER BY session_id");
+        const auto events=dump_query(db,"SELECT * FROM depth_events ORDER BY event_id");
+        const auto quotes=dump_query(db,"SELECT * FROM quote_observations ORDER BY observation_id");
+        const auto extra=dump_query(db,"SELECT * FROM preserved_extra");
+        const auto definitions=dump_query(db,"SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND tbl_name!='depth_sessions' ORDER BY type,name");
+        const auto raw=t.config().directory/"depth-raw/run-1/session-1.jsonl";
+        {std::ifstream f(raw);raw_before.assign(std::istreambuf_iterator<char>(f),std::istreambuf_iterator<char>());}
+        {
+            TimeSeriesStore s(t.config(),"none");
+            CHECK(s.depth_session(1).at("requested_rows")==Cell(std::int64_t(10)));
+            auto wide=DepthSpec{contract(),"TEST",50};const auto id=s.begin_depth("mock",99,wide);CHECK(id==501);
+            DepthEvent start;start.request_id=99;start.sequence=1;start.kind="start";start.received=DepthStamp::now();
+            s.record_depth_events("mock",{start});s.close();
+        }
+        CHECK(scalar(db,"PRAGMA user_version")==8);
+        CHECK(dump_query(db,"SELECT * FROM depth_sessions WHERE session_id=1")==sessions);
+        CHECK(dump_query(db,"SELECT * FROM depth_events WHERE session_id=1 ORDER BY event_id")==events);
+        CHECK(dump_query(db,"SELECT * FROM quote_observations ORDER BY observation_id")==quotes);
+        CHECK(dump_query(db,"SELECT * FROM preserved_extra")==extra);
+        CHECK(dump_query(db,"SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND tbl_name!='depth_sessions' ORDER BY type,name")==definitions);
+        CHECK(scalar(db,"SELECT count(*) FROM pragma_foreign_key_check")==0);
+        CHECK(scalar(db,"SELECT requested_rows FROM depth_sessions WHERE session_id=501")==50);
+        CHECK(scalar(db,"SELECT count(*) FROM sqlite_master WHERE type='trigger' AND tbl_name='depth_events'")==2);
+        sql_rejected(db,"UPDATE depth_sessions SET requested_rows=51 WHERE session_id=501");
+        sql_rejected(db,"UPDATE depth_events SET size='lost' WHERE session_id=1");
+        sql_rejected(db,"DELETE FROM depth_events WHERE session_id=1");
+        {std::ifstream f(raw);const std::string after{std::istreambuf_iterator<char>(f),std::istreambuf_iterator<char>()};CHECK(after==raw_before);}
+        bool old_backup=false;
+        for(const auto& f:fs::directory_iterator(t.config().backup_directory))
+            if(f.path().filename().string().find("runmigration8")!=std::string::npos){
+                CHECK(scalar(f.path(),"PRAGMA user_version")==version);
+                CHECK(dump_query(f.path(),"SELECT * FROM depth_sessions ORDER BY session_id")==sessions);
+                CHECK(dump_query(f.path(),"SELECT * FROM depth_events ORDER BY event_id")==events);
+                old_backup=true;
+            }
+        CHECK(old_backup);
+        {TimeSeriesStore s(t.config(),"none");CHECK(s.depth_sessions().rows.size()==2);s.close();}
+    }
+ });
+ test("empty legacy session table preserves its prior allocation watermark",[]{
+    Temp t;{TimeSeriesStore s(t.config(),"none");s.close();}
+    const auto db=t.config().directory/"timeseries.sqlite3";legacy_depth6(db);
+    execute(db,"DELETE FROM sqlite_sequence WHERE name='depth_sessions'; INSERT INTO sqlite_sequence(name,seq) VALUES('depth_sessions',700);");
+    {TimeSeriesStore s(t.config(),"none");CHECK(s.begin_depth("mock",42,{contract(),"TEST",50})==701);s.close();}
+    CHECK(scalar(db,"SELECT seq FROM sqlite_sequence WHERE name='depth_sessions'")==701);
+ });
+ test("migration refuses missing backups before changing schema or observations",[]{
+    Temp t;{TimeSeriesStore s(t.config(),"mock");seed_depth(s);s.close();}
+    const auto db=t.config().directory/"timeseries.sqlite3";legacy_depth6(db);
+    const auto before=dump_query(db,"SELECT * FROM depth_events ORDER BY event_id");
+    fs::rename(t.config().backup_directory,t.path/"saved-backups");std::ofstream(t.config().backup_directory)<<"blocked";
+    rejects([&]{TimeSeriesStore s(t.config(),"none");});
+    CHECK(scalar(db,"PRAGMA user_version")==6);CHECK(scalar(db,"SELECT count(*) FROM runs")==1);
+    CHECK(dump_query(db,"SELECT * FROM depth_events ORDER BY event_id")==before);
+ });
+ test("migration refuses foreign-key corruption and malformed depth definitions",[]{
+    Temp t;{TimeSeriesStore s(t.config(),"mock");seed_depth(s);s.close();}
+    const auto db=t.config().directory/"timeseries.sqlite3";legacy_depth6(db);
+    execute(db,"UPDATE depth_sessions SET run_id=999 WHERE session_id=1");
+    rejects([&]{TimeSeriesStore s(t.config(),"none");});CHECK(scalar(db,"PRAGMA user_version")==6);
+    execute(db,"UPDATE depth_sessions SET run_id=1 WHERE session_id=1; DROP TRIGGER depth_events_no_delete");
+    rejects([&]{TimeSeriesStore s(t.config(),"none");});CHECK(scalar(db,"SELECT count(*) FROM runs")==1);
+ });
+ test("schema 8 refuses partial backfill and forged version labels",[]{
+    Temp t;{TimeSeriesStore s(t.config(),"none");s.close();}
+    const auto db=t.config().directory/"timeseries.sqlite3";
+    execute(db,"CREATE TABLE history_backfills(fake TEXT)");
+    rejects([&]{TimeSeriesStore s(t.config(),"none");});CHECK(scalar(db,"SELECT count(*) FROM runs")==1);
+    execute(db,"DROP TABLE history_backfills");legacy_depth6(db);execute(db,"PRAGMA user_version=8");
+    rejects([&]{TimeSeriesStore s(t.config(),"none");});CHECK(scalar(db,"SELECT count(*) FROM runs")==1);
  });
  test("SQLite write error fails closed without losing prior committed rows",[]{
     Temp t;{TimeSeriesStore s(t.config(),"mock");s.register_contract("mock",contract());s.record_events("mock",{quote()});s.close();}

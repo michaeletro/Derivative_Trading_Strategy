@@ -1,5 +1,7 @@
 """Independent replay and CLI safety; fixtures contain no real market data."""
 import copy
+import contextlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -28,6 +30,47 @@ class ReferenceTests(unittest.TestCase):
         self.assertFalse(a['complete_exchange_book'])
         self.assertEqual(a['session']['source'], 'mock')
 
+    def test_fifty_row_export_replays_last_position(self):
+        data = synthetic_fixture(); template = data['events'][0]; events = []
+        def emit(kind='update', **kw):
+            seq = len(events)+1
+            e = dict(template, sequence=str(seq), event_id=str(seq), kind=kind,
+                     received_unix_us=str(1_700_000_000_000_000+seq*100_000),
+                     received_monotonic_ns=str(1_000_000_000+seq*100_000_000))
+            e.update(kw); events.append(e)
+        emit('start')
+        for side in (0,1):
+            for pos in range(50):
+                price = 101+pos if side == 0 else 99-pos
+                emit(side=side,position=pos,operation=0,price=price,price_repr=str(price),size='10')
+        emit(side=0,position=49,operation=1,price=150,price_repr='150',size='25')
+        emit(side=0,position=49,operation=2)
+        emit('stop')
+        data['events']=events;data['session']['requested_rows']=50
+        data['session']['last_sequence']=data['session']['event_count']=data['through_id']=str(len(events))
+        data['sha256']=digest(data)
+        states=list(replay(data))
+        self.assertEqual((len(states[-4]['bids']),len(states[-4]['asks'])),(50,50))
+        self.assertEqual(states[-3]['asks'][49]['size'],'25')
+        self.assertEqual(len(states[-2]['asks']),49)
+        self.assertEqual(states[-2]['quality'],'two_sided_unverified')
+        self.assertFalse(states[-1]['active'])
+        for rows in (0,51,True):
+            with self.subTest(rows=rows):
+                with self.assertRaises(ValueError): Book(rows)
+                bad=copy.deepcopy(data);bad['session']['requested_rows']=rows;bad['sha256']=digest(bad)
+                with self.assertRaises(ValueError): validate_export(bad)
+
+    def test_cli_forwards_fifty_rows_and_rejects_fifty_one(self):
+        for rows,expected in ((50,0),(51,2)):
+            with self.subTest(rows=rows),patch.object(capture,'Client') as client,contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                client.return_value.call.return_value={'request_id':'7'}
+                code=capture.main(['--profile','synthetic-test','start','--contract-id','9001','--venue','TESTEX','--rows',str(rows)])
+                self.assertEqual(code,expected)
+                if rows==50:
+                    client.return_value.call.assert_called_once_with('/api/depth/subscribe',dict(contract_id='9001',venue='TESTEX',rows=50))
+                else:client.return_value.call.assert_not_called()
+
     def test_resets_never_forward_fill(self):
         states = list(replay(synthetic_fixture()))
         resets = [s for s in states if s['kind'] == 'reset']
@@ -48,6 +91,32 @@ class ReferenceTests(unittest.TestCase):
     def test_numeric_ordering(self):
         data = synthetic_fixture(); data['events'][1:4] = list(reversed(data['events'][1:4])); data['sha256'] = digest(data)
         with self.assertRaises(ValueError): validate_export(data)
+
+    def test_explicit_descriptive_event_bound_keeps_default_strict(self):
+        data = synthetic_fixture()
+        # Only fields relevant to export count/ordering validation are needed
+        # here; book semantics are covered by complete replay fixtures above.
+        data['events'] = [dict(event_id=str(i), sequence=str(i)) for i in range(1, 500001)]
+        data['session']['event_count'] = data['session']['last_sequence'] = '500000'
+        data['sha256'] = digest(data)
+        with self.assertRaisesRegex(ValueError, 'Export too large'):
+            validate_export(data)
+        self.assertIs(validate_export(data, max_events=500000), data)
+        data['events'].append(dict(event_id='500001', sequence='500001'))
+        data['session']['event_count'] = data['session']['last_sequence'] = '500001'
+        data['sha256'] = digest(data)
+        with self.assertRaisesRegex(ValueError, 'Export too large'):
+            validate_export(data, max_events=500000)
+
+    def test_descriptive_event_bound_cannot_be_unlimited_or_implicit(self):
+        data = synthetic_fixture()
+        for cap in (0, -1, 500001, True, 500000., None):
+            with self.subTest(cap=cap), self.assertRaisesRegex(ValueError, 'Export event bound'):
+                validate_export(data, max_events=cap)
+        with self.assertRaises(TypeError):
+            validate_export(data, 500000)
+        with self.assertRaisesRegex(ValueError, 'Export too large'):
+            validate_export(data, max_events=len(data['events'])-1)
 
     def test_sequence_gap_then_reset(self):
         b = Book(3); b.apply(event(1, 'start')); b.apply(event(3))

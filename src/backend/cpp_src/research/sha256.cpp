@@ -3,6 +3,10 @@
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
 
 namespace dts::research {
 namespace {
@@ -17,16 +21,10 @@ constexpr std::array<std::uint32_t, 64> constants{
     0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
     0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
 }
-std::string sha256(const std::string& text) {
-    std::vector<std::uint8_t> bytes(text.begin(), text.end());
-    const std::uint64_t bits = static_cast<std::uint64_t>(bytes.size()) * 8;
-    bytes.push_back(0x80);
-    while (bytes.size() % 64 != 56) bytes.push_back(0);
-    for (int shift = 56; shift >= 0; shift -= 8) bytes.push_back(static_cast<std::uint8_t>(bits >> shift));
-    std::array<std::uint32_t,8> h{0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-    for (std::size_t offset = 0; offset < bytes.size(); offset += 64) {
+void Sha256::block(const std::uint8_t* bytes) {
+        auto& h = state_;
         std::array<std::uint32_t,64> w{};
-        for (std::size_t i=0; i<16; ++i) for (std::size_t j=0; j<4; ++j) w[i]=(w[i]<<8)|bytes[offset+4*i+j];
+        for (std::size_t i=0; i<16; ++i) for (std::size_t j=0; j<4; ++j) w[i]=(w[i]<<8)|bytes[4*i+j];
         for (std::size_t i=16; i<64; ++i) {
             const auto a=w[i-15], b=w[i-2];
             w[i]=w[i-16]+(rotate(a,7)^rotate(a,18)^(a>>3))+w[i-7]+(rotate(b,17)^rotate(b,19)^(b>>10));
@@ -38,9 +36,34 @@ std::string sha256(const std::string& text) {
             v=g;g=f;f=e;e=d+t1;d=c;c=b;b=a;a=t1+t2;
         }
         h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=v;
+}
+void Sha256::update(const char* bytes, std::size_t count) {
+    if (count > std::numeric_limits<std::uint64_t>::max() / 8 - bytes_)
+        throw std::length_error("SHA256 input exceeds its length bound");
+    bytes_ += count;
+    if (pending_size_) {
+        const auto take = std::min(count, pending_.size() - pending_size_);
+        std::memcpy(pending_.data() + pending_size_, bytes, take);
+        pending_size_ += take; bytes += take; count -= take;
+        if (pending_size_ == pending_.size()) { block(pending_.data()); pending_size_ = 0; }
     }
+    while (count >= 64) { block(reinterpret_cast<const std::uint8_t*>(bytes)); bytes += 64; count -= 64; }
+    if (count) { std::memcpy(pending_.data(), bytes, count); pending_size_ = count; }
+}
+std::string Sha256::finish() const {
+    auto copy = *this;
+    const std::uint64_t bits = bytes_ * 8;
+    copy.pending_[copy.pending_size_++] = 0x80;
+    if (copy.pending_size_ > 56) {
+        std::fill(copy.pending_.begin() + copy.pending_size_, copy.pending_.end(), 0);
+        copy.block(copy.pending_.data()); copy.pending_size_ = 0;
+    }
+    std::fill(copy.pending_.begin() + copy.pending_size_, copy.pending_.begin() + 56, 0);
+    for (int i = 0; i < 8; ++i) copy.pending_[56 + i] = static_cast<std::uint8_t>(bits >> (56 - 8 * i));
+    copy.block(copy.pending_.data());
     std::ostringstream out;out.imbue(std::locale::classic());out<<std::hex<<std::setfill('0');
-    for (auto part:h) out<<std::setw(8)<<part;
+    for (auto part:copy.state_) out<<std::setw(8)<<part;
     return out.str();
 }
+std::string sha256(const std::string& text) { Sha256 hash; hash.update(text); return hash.finish(); }
 } // namespace dts::research

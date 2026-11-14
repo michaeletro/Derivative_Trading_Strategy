@@ -10,20 +10,21 @@ export function replayConfig(windows,factor){
   return {windows:values,annualization_factor};
 }
 export function nextCursor(cursor,total,batch){
-  if(![cursor,total,batch].every(Number.isSafeInteger)||cursor<0||cursor>total||total>2000||batch<1||batch>2000)throw new Error('Invalid replay cursor');
+  if(![cursor,total,batch].every(Number.isSafeInteger)||cursor<0||cursor>total||total>40000||batch<1||batch>2000)throw new Error('Invalid replay cursor');
   return Math.min(total,cursor+batch);
 }
 export function validateManifest(v){
   if(!v||v.kind!=='frozen_historical_snapshot'||v.schema_version!==1||v.retrospective_only!==true||v.immutable!==true||! /^[a-f0-9]{64}$/.test(v.fingerprint??''))throw new Error('Invalid frozen snapshot manifest');
   id(v.snapshot_id);id(v.dataset_id);
-  if(!['1 day','1 min'].includes(v.bar_size)||!Number.isSafeInteger(v.bar_count)||v.bar_count<1||v.bar_count>2000||!v.quality||v.quality.complete_market_history!==false||!Array.isArray(v.quality.warnings))throw new Error('Invalid snapshot conventions/quality');
+  if(!['1 day','1 min'].includes(v.bar_size)||!Number.isSafeInteger(v.bar_count)||v.bar_count<1||v.bar_count>40000||!v.quality||v.quality.complete_market_history!==false||!Array.isArray(v.quality.warnings))throw new Error('Invalid snapshot conventions/quality');
   return v;
 }
 export function validateReplay(v,s,c,count){
-  if(!v||v.kind!=='retrospective_return_diagnostics'||v.schema_version!==1||v.engine_version!=='retrospective-replay-1'||v.retrospective_only!==true||v.snapshot_id!==s.snapshot_id||v.snapshot_fingerprint!==s.fingerprint||v.processed!==count||v.total!==s.bar_count||v.complete!==(count===s.bar_count)||!Array.isArray(v.points)||v.points.length!==count||JSON.stringify(v.config?.windows)!==JSON.stringify(c.windows)||v.config?.annualization_factor!==c.annualization_factor)throw new Error('Replay response does not match the requested snapshot, configuration, or cursor.');
+  if(!v||v.kind!=='retrospective_return_diagnostics'||v.schema_version!==1||!['retrospective-replay-1','retrospective-replay-2'].includes(v.engine_version)||v.retrospective_only!==true||v.snapshot_id!==s.snapshot_id||v.snapshot_fingerprint!==s.fingerprint||v.processed!==count||v.total!==s.bar_count||v.complete!==(count===s.bar_count)||!Array.isArray(v.points)||v.points.length!==count||JSON.stringify(v.config?.windows)!==JSON.stringify(c.windows)||v.config?.annualization_factor!==c.annualization_factor)throw new Error('Replay response does not match the requested snapshot, configuration, or cursor.');
   let last=-Infinity;
   for(const [i,p] of v.points.entries()){
     if(p.ordinal!==i+1||!finite(p.coordinate_s)||p.coordinate_s<=last||!finite(p.close)||p.close<0||!(p.log_return===null||finite(p.log_return))||!Array.isArray(p.rolling)||p.rolling.length!==c.windows.length)throw new Error('Invalid replay observations');
+    if(v.engine_version==='retrospective-replay-2'&&(!(p.cumulative_price_return===null||(finite(p.cumulative_price_return)&&p.cumulative_price_return>=-1))||!(p.drawdown===null||(finite(p.drawdown)&&p.drawdown>=-1&&p.drawdown<=0))||(p.close<=0&&(p.cumulative_price_return!==null||p.drawdown!==null))))throw new Error('Invalid cumulative return or drawdown');
     if(s.bar_size==='1 min'?p.available_s!==p.coordinate_s+60:p.available_s!==null)throw new Error('Incorrect bar-availability convention');
     for(const [k,r] of p.rolling.entries())if(r.window!==c.windows[k]||!Number.isInteger(r.observations)||r.observations<0||r.observations>r.window||!(r.annualized_volatility===null||(finite(r.annualized_volatility)&&r.annualized_volatility>=0))||!(r.mean_log_return===null||finite(r.mean_log_return))||(r.observations<r.window&&(r.mean_log_return!==null||r.annualized_volatility!==null)))throw new Error('Invalid rolling estimates or warm-up');
     last=p.coordinate_s;
@@ -31,9 +32,10 @@ export function validateReplay(v,s,c,count){
   return v;
 }
 export function validateExperiment(v){
-  if(!v||v.immutable!==true||v.retrospective_only!==true||v.engine_version!=='retrospective-replay-1')throw new Error('Unsupported experiment record');
+  if(!v||v.immutable!==true||v.retrospective_only!==true||!['retrospective-replay-1','retrospective-replay-2'].includes(v.engine_version))throw new Error('Unsupported experiment record');
   id(v.experiment_id);const s=validateManifest(v.result?.snapshot);
   const c=replayConfig(v.config?.windows?.join(','),v.config?.annualization_factor);
+  if(v.engine_version!==v.result.engine_version||v.snapshot_id!==s.snapshot_id)throw new Error('Saved run binding mismatch');
   validateReplay(v.result,s,c,s.bar_count);return v;
 }
 export function comparisonLabel(a,b){

@@ -44,6 +44,51 @@ int main() {
     test("position timeout is failure", [&] { TwsState s; s.start(now); s.ready(); s.request_positions(10,now); s.expire(now+std::chrono::seconds(11)); auto e=s.poll(); CHECK(!std::get<PositionsComplete>(e.back()).success); });
     test("unsupported position poisons snapshot", [&] { TwsState s; s.start(now); s.ready(); s.request_positions(10,now); s.bad_position("Unsupported FUT"); s.position_end(); auto e=s.poll(); CHECK(!std::get<PositionsComplete>(e.back()).success); });
     test("connectivity loss fails closed", [&] { TwsState s; s.start(now); s.ready(); s.subscribe(stock(),now); s.error(0,1100,"lost"); CHECK(s.state()==ConnectionState::Failed); rejects([&]{s.subscribe(stock(),now);}); });
+    test("connectivity failure preserves sequenced depth tail", [&] {
+        TwsState s; s.start(now); s.ready(); s.poll();
+        DepthSpec spec; spec.contract=stock(); spec.venue="BATS"; spec.rows=30;
+        const auto id=s.depth(spec,now);
+        for(int i=0;i<24;++i) {
+            DepthEvent event; event.request_id=id; event.kind="update";
+            event.side=i%2; event.position=i/2; event.operation=0;
+            event.price=event.side==0?101.+event.position:99.-event.position;
+            event.size="10"; event.raw_payload="accepted callback "+std::to_string(i);
+            s.depth_update(event);
+        }
+        s.error(0,1100,"lost");
+        CHECK(s.state()==ConnectionState::Failed);
+        const auto events=s.poll(); CHECK(events.size()==28);
+        for(std::size_t i=0;i<26;++i) {
+            const auto& event=std::get<DepthEvent>(events[i]);
+            CHECK(event.request_id==id && event.sequence==i+1);
+            CHECK(event.kind==(i==0?"start":i==25?"gap":"update"));
+            if(i>0 && i<25) CHECK(event.raw_payload=="accepted callback "+std::to_string(i-1));
+        }
+        CHECK(std::get<DepthEvent>(events[25]).code==1100);
+        CHECK(std::get<BrokerError>(events[26]).code==1100);
+        CHECK(std::get<ConnectionEvent>(events[27]).state==ConnectionState::Failed);
+        DepthEvent late; late.request_id=id; s.depth_update(late);
+        CHECK(s.poll().empty()); rejects([&]{s.depth(spec,now);});
+    });
+    test("depth overflow preserves accepted events and exposes rejected callback", [&] {
+        TwsState s; s.start(now); s.ready(); s.poll();
+        DepthSpec spec; spec.contract=stock(); spec.venue="BATS"; spec.rows=5;
+        const auto id=s.depth(spec,now);
+        DepthEvent update; update.request_id=id; update.kind="update";
+        for(int i=0;i<2048;++i) s.depth_update(update);
+        CHECK(s.state()==ConnectionState::Failed);
+        for(int i=0;i<20;++i) s.error(0,1100,"repeated failure");
+        const auto events=s.poll(); CHECK(events.size()==2051);
+        for(std::size_t i=0;i<2048;++i) {
+            const auto& event=std::get<DepthEvent>(events[i]);
+            CHECK(event.sequence==i+1 && event.kind==(i==0?"start":"update"));
+        }
+        const auto& gap=std::get<DepthEvent>(events[2048]);
+        CHECK(gap.kind=="gap" && gap.code==-1006 && gap.sequence==2050);
+        CHECK(std::get<BrokerError>(events[2049]).code==-1006);
+        CHECK(std::get<ConnectionEvent>(events[2050]).state==ConnectionState::Failed);
+        s.error(0,1100,"late repeat"); CHECK(s.poll().empty());
+    });
     test("pacing bound", [&] { TwsState s; s.start(now); s.ready(); for(int i=0;i<10;++i)s.resolve(query(),now); rejects([&]{s.resolve(query(),now);}); });
     test("event overflow invalidates session", [&] { TwsState s; s.start(now); s.ready(); auto id=s.subscribe(stock(),now); s.data_type(id,1); for(int i=0;i<2100;++i)s.price(id,1,99,now); CHECK(s.state()==ConnectionState::Failed); });
     test("disabled means unavailable", [&] { ReadOnlyService svc(nullptr); CHECK(svc.positions().status==SnapshotStatus::Unavailable); rejects([&]{svc.connect();}); });

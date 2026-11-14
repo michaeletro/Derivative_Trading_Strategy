@@ -1,8 +1,12 @@
 # Historical Data Manager and private local profiles
 
+For configurable historical trade and best-bid/ask tick downloads and replay,
+see [Historical ticks](historical-ticks.md). The sections below describe bars.
+
 This increment adds persistent local configuration and cached historical bars.
-It does not add orders, strategy replay, historical options, automatic broker
-login, or background acquisition. Use the intended paper TWS session with its
+It does not add orders, historical options or automatic broker login. Explicitly
+started downloads continue while the browser tab is closed; restarting or
+disconnecting interrupts them until the user resumes. Use the intended paper TWS session with its
 Read-Only API setting retained.
 
 ## Update and database compatibility
@@ -87,18 +91,43 @@ For a first dataset, Connect broker, wait for Ready, resolve a USD equity/ETF
 under Instruments, and choose **Historical bars** on the intended candidate.
 This selection does not subscribe to streaming quotes or fetch history itself.
 
-Set the interval, price source, trading-hours policy and date/time range. Choose:
+Set **Bar interval → 1 day** for daily prices and choose any past range from
+2000 onward, subject to IBKR availability. Quick period offers one, five or ten
+years, and Since 2000; custom dates remain editable. The end date is excluded.
+New contract selections default to **TRADES**, regular hours and **Fetch uncovered
+intervals**. TRADES includes provider-reported volume; MIDPOINT/BID/ASK do not.
+Nothing downloads until the user clicks **Load / request history**.
 
-- **Saved data only**: read recorded results without a broker request.
-- **Fetch uncovered intervals**: reuse completed responses and queue only ranges
-  lacking completed or already pending requests.
-- **Refresh this interval**: explicitly ask IBKR again; prior versions remain.
+- **Saved data only** reads recorded results without a broker request.
+- **Fetch uncovered intervals** queues ranges with no completed or pending response.
+- **Refresh this interval** explicitly requests the selected period again, with confirmation.
 
-Click **Load / request history**. Completion and errors appear in the request
-ledger. To reopen after a restart, use **Load saved datasets**, select the dataset,
-and load the desired range. A fully cached interval can be read offline.
-Saved dataset conventions cannot be changed in place; select a resolved contract
-to create a different interval/price-type/trading-hours dataset.
+The progress panel shows saved bars, calendar-time response coverage, completed
+batches, queued/receiving batches and the active or next batch across this server.
+If another stock is ahead, its symbol and queue position are shown. Counts include
+all attempts in the selected period, even beyond the 200-row request ledger;
+failed/interrupted attempts are retained after recovery. A completed empty
+response counts as response coverage, never as proof of no trading.
+
+**Stop all bar downloads** interrupts the shared bar queue after confirmation.
+**Resume missing data** explicitly uses fetch_missing for the displayed period,
+keeping completed responses and suppressing duplicate pending requests. It does
+not automatically refresh completed empty responses or retry failures.
+
+To reopen after a restart, click **Load saved datasets**, then **Open saved
+period** in the saved-data table. Daily datasets restore the complete requested
+range; minute datasets restore at most the latest requested 24 hours. These reads
+work offline. The archive preserves requested ranges and completed/interrupted
+requests without a schema change. A saved dataset's conventions cannot be changed
+in place; select a resolved stock to start a different source or interval.
+
+Chart start/end controls zoom the saved view without downloading. Up to 240 bars
+are shown as OHLC candles; wider views show all supplied closes as a line. The
+separate volume chart keeps missing values blank and is available for TRADES.
+Export contains the entire loaded period, independent of chart zoom. Research
+snapshots accept the full multi-year daily view, up to 40,000 saved bars. Select
+for research opens the research workspace without downloading or freezing until
+you explicitly create a snapshot.
 
 ## Deliberately narrow first scope
 
@@ -111,8 +140,9 @@ Requesting delayed streaming data does not establish historical-data entitlement
 All windows are half-open **[start, end)**. Daily values are provider session
 dates, not exchange event timestamps. Their internal UTC-midnight coordinates
 are only date coordinates. Minute inputs are **UTC**, even if the browser uses
-another timezone; they identify bar-start times. Daily requests accept up to 366
-calendar dates; minute requests accept at most 24 hours, with minute alignment.
+another timezone; they identify bar-start times. Daily user ranges may span all supported years; minute ranges accept at most
+24 hours, with minute alignment. Native requests remain small and separate from
+the user-selected range.
 Years 2000 through 2099 are supported.
 
 The application restricts downloads to closed windows: a daily end date at least
@@ -122,10 +152,10 @@ Daily provider requests include a date buffer and only the selected dates are
 retained. Daily requests are split into at most 30-date chunks.
 
 One native historical request runs at a time, with at least 15 seconds between
-local dispatches and at most 32 queued/in-flight chunks. A request has a 60-second
+local dispatches and at most 2,048 queued/in-flight batches across the server. A request has a 60-second
 deadline and a 1,800-returned-bar bound. This pacing does not coordinate other
 clients sharing the TWS account. Failures are not retried automatically.
-**Cancel pending downloads** affects this server's whole historical queue, not
+**Stop all bar downloads** affects this server's whole historical queue, not
 brokerage orders. Restart/disconnect marks unfinished requests interrupted;
 interrupted requests do not silently resume.
 
@@ -159,9 +189,9 @@ WAP and trade count are null, not zero.
 
 ## Display, API and existing recording
 
-The chart shows at most the last 240 returned candles, with an accessible table
+The chart shows candles or a close-price overview, with an accessible table
 of the last 200 bars. Export this view saves all returned bars and metadata, up
-to the 2,000-row response limit. The catalog and request ledger each show up to
+to the 40,000-row response limit (enough for all supported daily dates). The catalog and request ledger each show up to
 200 recent entries. Limits are displayed, not presented as an unlimited listing.
 Streaming Recorded history and these typed historical datasets remain separate;
 the existing legacy bar counter does not include these new versioned bars.
@@ -190,8 +220,10 @@ disk-failure protection.
 
 ## Validation
 
-The new suite has 24 internal C++ history/state/cache cases, 53 actual-server
-HTTP/cache/migration checks, 10 profile tests and 7 frontend rule tests. CTest
+The suite covers C++ history/state/cache behavior, actual-server HTTP/cache and
+migrations, private profiles, frontend rules and real-browser acceptance.
+Multi-year tests cover more than 200 queued batches, duplicate suppression,
+pacing, cancel/restart/explicit resume and views above the old 2,000-row limit. CTest
 also retains the existing pricing, Greeks, storage, HTTP and launcher checks.
 Native callback tests exercise official-SDK legacy and protobuf historical
 messages. Browser acceptance uses a temporary archive seeded by C++ test data;

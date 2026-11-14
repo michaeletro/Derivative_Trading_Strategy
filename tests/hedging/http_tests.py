@@ -99,7 +99,7 @@ def main(exe):
         backup=sorted((root/'backups').glob('*.sqlite'))[-1];dest=root/'restored'
         subprocess.run([sys.executable,str(ROOT/'tools/restore_timeseries.py'),'--backup',str(backup),'--data-dir',str(dest)],check=True,capture_output=True)
         with closing(sqlite3.connect(dest/'timeseries.sqlite3')) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==6);ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==8);ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
             ck(db.execute('SELECT count(*) FROM numerical_experiments').fetchone()[0]==2)
             for sql in ['UPDATE numerical_experiments SET name="x"','DELETE FROM numerical_experiments']:
                 try:db.execute(sql)
@@ -128,6 +128,6 @@ def main(exe):
         migrations=list((root/'backups').glob('*-runmigration-*.sqlite'));ck(len(migrations)==1)
         with closing(sqlite3.connect(migrations[0])) as db:ck(db.execute('PRAGMA user_version').fetchone()[0]==4);ck(db.execute('SELECT * FROM numerical_experiments').fetchall()==records)
         with closing(sqlite3.connect(root/'data/timeseries.sqlite3')) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==6);ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==8);ck(db.execute('PRAGMA foreign_key_check').fetchall()==[])
     print(f'{checks} hedge HTTP/independent-ledger/catalog/migration/restore checks passed')
 if __name__=='__main__':main(sys.argv[1])

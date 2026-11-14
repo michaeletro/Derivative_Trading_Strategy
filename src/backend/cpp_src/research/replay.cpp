@@ -19,9 +19,10 @@ RollingPoint rolling(const std::deque<double>& returns, int window, double annua
 }
 }
 void Snapshot::validate() const {
-    spec.validate(window);
+    spec.validate_range(window);
     if(observations.empty()||observations.size()>maximum_bars||dataset_id<=0||request_cutoff<=0)
-        throw std::invalid_argument("A research snapshot requires 1..2000 saved bars and valid provenance");
+        throw std::invalid_argument("A research snapshot requires 1..40000 saved bars and valid provenance");
+    if(uncovered_intervals.size()>maximum_bars)throw std::invalid_argument("Too many snapshot coverage intervals");
     if(time_basis!=(spec.bar_size=="1 day"?"provider_session_date":"UTC_epoch_seconds")||source.empty()||adjustment_policy.empty())
         throw std::invalid_argument("Unrecognized snapshot time/provenance conventions");
     std::int64_t last=window.start-1;
@@ -65,16 +66,34 @@ std::string snapshot_fingerprint(const Snapshot& s) {
 Quality inspect(const Snapshot& snapshot) {
     snapshot.validate();Quality q;q.bars=snapshot.observations.size();q.response_coverage_complete=snapshot.uncovered_intervals.empty();
     const bool minute=snapshot.spec.bar_size=="1 min";
+    q.volume_expected=snapshot.spec.price_type=="TRADES";
+    const auto issue=[&](std::int64_t t,const char* kind){if(q.issues.size()<100)q.issues.push_back({t,kind});};
     for(std::size_t i=0;i<q.bars;++i) {
         const auto& r=snapshot.observations[i];if(r.bar.close<=0)++q.nonpositive_closes;
+        if(std::min({r.bar.open,r.bar.high,r.bar.low,r.bar.close})<=0){++q.nonpositive_price_bars;issue(r.coordinate_s,"nonpositive_price");}
+        if(q.volume_expected&&!r.bar.volume){++q.missing_volume;issue(r.coordinate_s,"missing_volume");}
+        if(q.volume_expected&&r.bar.volume&&std::stold(*r.bar.volume)==0){++q.zero_volume;issue(r.coordinate_s,"zero_volume");}
+        const auto weekday=(r.coordinate_s/86400+4)%7;
+        if(!minute&&(weekday==0||weekday==6)){++q.weekend_observations;issue(r.coordinate_s,"weekend_observation");}
         if(i){const auto& p=snapshot.observations[i-1];if(r.coordinate_s-p.coordinate_s!=(minute?60:86400))++q.discontinuities;
-            if(r.bar.close>0&&p.bar.close>0&&std::abs(std::log(r.bar.close)-std::log(p.bar.close))>std::log(1.5))++q.large_return_candidates;}
+            if(r.bar.close>0&&p.bar.close>0&&std::abs(std::log(r.bar.close)-std::log(p.bar.close))>std::log(1.5)){++q.large_return_candidates;issue(r.coordinate_s,"large_price_move");}}
     }
+    // Weekday screening is deliberately not an exchange calendar. Include edges
+    // of the requested window and retain holidays as candidates for review.
+    if(!minute){std::size_t i=0;for(auto t=snapshot.window.start;t<snapshot.window.end;t+=86400){
+        while(i<q.bars&&snapshot.observations[i].coordinate_s<t)++i;
+        const auto weekday=(t/86400+4)%7;
+        if(weekday!=0&&weekday!=6&&(i==q.bars||snapshot.observations[i].coordinate_s!=t)){
+            ++q.missing_weekday_candidates;issue(t,"weekday_without_bar_calendar_unverified");}
+    }}
     q.warnings={"Retrospective frozen provider data, NOT historical point-in-time availability or a trading backtest.","Provider-native corporate-action adjustments are not normalized; returns are not total returns.","No exchange calendar or gap-free market coverage has been verified."};
     q.warnings.push_back(minute?"Minute bars release at start+60 seconds by modeling convention; actual delivery latency is unknown. Returns reset across nonconsecutive minutes.":"Daily replay uses completed-session ordinal order, not inferred exchange timestamps. Returns use adjacent supplied session closes, even across calendar gaps.");
     if(!q.response_coverage_complete)q.warnings.push_back("This snapshot includes intervals without completed provider responses.");
     if(q.nonpositive_closes)q.warnings.push_back("Nonpositive closes reset rolling-return windows; prices are not replaced or interpolated.");
     if(q.large_return_candidates)q.warnings.push_back("Large adjacent price changes require review; no corporate action is inferred or corrected.");
+    if(q.missing_weekday_candidates)q.warnings.push_back("Weekdays without bars include holidays, closures, unavailable history or missing observations; these are not confirmed missing trading sessions.");
+    if(q.missing_volume)q.warnings.push_back("Some TRADES bars have no reported volume. Missing values remain absent.");
+    if(q.zero_volume)q.warnings.push_back("Zero reported volume is retained separately from missing volume.");
     return q;
 }
 ReplayResult replay(const Snapshot& snapshot,const ReplayConfig& config,std::size_t count) {
@@ -85,7 +104,7 @@ ReplayResult replay(const Snapshot& snapshot,const ReplayConfig& config,std::siz
     ReplayResult out;out.processed=count;out.total=snapshot.observations.size();
     out.availability_policy=minute?"bar_start_plus_60s_modeled_no_delivery_latency":"completed_session_ordinal_no_exchange_timestamp";
     out.return_policy=minute?"consecutive_60s_only_reset_across_gaps":"adjacent_observed_session_closes_no_calendar_validation";
-    std::deque<double> returns;std::size_t segment=0;std::optional<double> previous;
+    std::deque<double> returns;std::size_t segment=0;std::optional<double> previous,base,peak;
     for(std::size_t i=0;i<count;++i) {
         const auto& bar=snapshot.observations[i];ReplayPoint point;point.ordinal=i+1;point.coordinate_s=bar.coordinate_s;point.close=bar.bar.close;
         if(minute)point.available_s=bar.coordinate_s+60;
@@ -99,6 +118,14 @@ ReplayResult replay(const Snapshot& snapshot,const ReplayConfig& config,std::siz
             if(returns.size()>static_cast<std::size_t>(config.windows.back()))returns.pop_front();
             point.status=(!minute&&span!=86400)?"adjacent_observation_calendar_span_unverified":"observed_return";}
         if(positive)previous=point.close;
+        if(!positive){base.reset();peak.reset();}
+        else {
+            if(!base||!point.log_return){base=point.close;peak=point.close;}
+            peak=std::max(*peak,point.close);
+            const auto cumulative=point.close / *base - 1;
+            if(std::isfinite(cumulative))point.cumulative_price_return=cumulative;
+            point.drawdown=point.close / *peak - 1;
+        }
         point.segment=segment;
         for(int window:config.windows)point.rolling.push_back(rolling(returns,window,config.annualization_factor));
         out.points.push_back(std::move(point));

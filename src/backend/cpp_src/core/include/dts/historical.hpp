@@ -8,6 +8,8 @@
 #include <vector>
 
 namespace dts {
+inline constexpr std::size_t history_queue_limit = 2048;
+inline constexpr std::size_t history_view_limit = 40000;
 // Intraday times are UTC epoch seconds. Daily range endpoints are synthetic
 // UTC-midnight coordinates of provider SESSION DATES, not exchange timestamps.
 struct HistoryWindow { std::int64_t start = 0, end = 0; }; // [start,end)
@@ -25,13 +27,18 @@ struct HistorySpec {
         if (price_type != "TRADES" && price_type != "MIDPOINT" && price_type != "BID" && price_type != "ASK")
             throw std::invalid_argument("Historical price type must be TRADES, MIDPOINT, BID or ASK");
     }
-    void validate(HistoryWindow w) const {
+    void validate_range(HistoryWindow w) const {
         validate();
         const auto unit = bar_size == "1 day" ? 86400 : 60;
-        const auto maximum = bar_size == "1 day" ? 366LL*86400 : 86400LL;
         if (w.start < 946684800 || w.end > 4102444800LL || w.end <= w.start ||
-            w.end-w.start > maximum || w.start%unit || w.end%unit)
-            throw std::invalid_argument("Use aligned half-open dates/times: max 366 daily dates or 24 hours of minute bars, years 2000..2099");
+            (bar_size == "1 min" && w.end-w.start > 86400) || w.start%unit || w.end%unit)
+            throw std::invalid_argument("Use daily dates in years 2000..2099, or at most 24 hours of aligned UTC minute bars; end is excluded");
+    }
+    // Native requests stay small; a user range may span many years.
+    void validate(HistoryWindow w) const {
+        validate_range(w);
+        if (bar_size == "1 day" && w.end-w.start > 366LL*86400)
+            throw std::invalid_argument("Split native daily requests into at most 366 dates");
     }
 };
 struct HistoricalBar {
@@ -106,7 +113,7 @@ inline std::vector<HistoryWindow> historical_chunks(const HistorySpec& s,const s
     std::vector<HistoryWindow> out;
     const std::int64_t step=s.bar_size=="1 day" ? 30*86400 : 86400;
     for(auto g:gaps)for(auto t=g.start;t<g.end;t+=step)out.push_back({t,std::min(t+step,g.end)});
-    if(out.size()>32)throw std::length_error("Too many uncovered intervals; narrow the range");
+    if(out.size()>history_queue_limit)throw std::length_error("Too many uncovered intervals; narrow the range");
     return out;
 }
 inline std::string history_end_time(const HistorySpec& s,HistoryWindow w) {

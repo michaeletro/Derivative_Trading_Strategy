@@ -16,7 +16,7 @@ def main():
         errors=[];calls=[]
         page.on('pageerror',lambda e:errors.append(str(e)))
         page.on('request',lambda r:calls.append(r.url))
-        page.goto(server.origin)
+        page.goto(server.origin+'/#pricing')
         expect(page.locator('#pricing-run')).to_be_disabled()
         page.locator('#token').fill(TOKEN);page.locator('#unlock').click()
         expect(page.locator('#http-status')).to_have_text('Available')
@@ -40,6 +40,7 @@ def main():
         page.locator('#pricing').screenshot(path=str(shots/'pricing-lab-desktop.png'))
         page.set_viewport_size({'width':390,'height':844})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'No mobile page overflow'
+        page.locator('#workspace-menu').click()
         page.locator('a[href="#pricing"]').click()
         page.screenshot(path=str(shots/'pricing-lab-mobile.png'))
         page.locator('#pricing-results').scroll_into_view_if_needed()

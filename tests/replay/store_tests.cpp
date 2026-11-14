@@ -18,12 +18,39 @@ void populate(TimeSeriesStore& s,bool minute=false,double scale=1,bool empty=fal
     if(!empty)for(int i=0;i<80;++i){const auto t=start+i*(minute?60:86400);const double p=scale*100*std::exp(.003*i+.01*(i%3));HistoricalBar b{minute?std::to_string(t):utc_text(t,"%Y%m%d"),p,p+1,p-1,p,std::string("123.5"),p,10};events.push_back(HistoricalBarEvent{10,b});}
     events.push_back(HistoricalEnd{10,end,0,"",""});s.record_history_events(events);
 }
+void populate_wide(TimeSeriesStore& store){
+    auto model=spec();model.contract.id=999;model.contract.symbol="SYNTHETIC_WIDE";
+    const auto id=store.historical_dataset(model);
+    const HistoryWindow w{start,start+2101LL*86400};
+    for(auto chunk:historical_chunks(model,{w})){
+        const auto rid=store.queue_history(id,{chunk})[0];store.bind_history(rid,99);std::vector<BrokerEvent> events;
+        for(auto t=chunk.start;t<chunk.end;t+=86400){const auto p=100+(t-start)/86400*.01;HistoricalBar b{utc_text(t,"%Y%m%d"),p,p,p,p,std::string("123.456"),p,1};events.push_back(HistoricalBarEvent{99,b});}
+        events.push_back(HistoricalEnd{99,"complete",0,"",""});store.record_history_events(events);
+    }
+}
 void raw_reject(sqlite3* db,const std::string& sql){check(sqlite3_exec(db,sql.c_str(),nullptr,nullptr,nullptr)!=SQLITE_OK);}
+void populate_variation(TimeSeriesStore& store){
+    auto model=spec(true);model.price_type="MIDPOINT";model.use_rth=true;
+    const auto id=store.historical_dataset(model);
+    // Nine regular US equity sessions; synthetic fixture only, no broker.
+    constexpr std::int64_t first=1789948800; // 2026-09-21 00:00 UTC
+    for(const int offset:{0,1,2,3,4,7,8,9,10}){
+        const HistoryWindow w{first+offset*86400LL,first+(offset+1)*86400LL};
+        const auto rid=store.queue_history(id,{w})[0];store.bind_history(rid,99);
+        std::vector<BrokerEvent> events;
+        for(int i=0;i<390;++i){const auto t=w.start+48600+i*60;const double p=100*std::exp(.00001*i+.0001*std::sin(i+offset));
+            HistoricalBar b{std::to_string(t),p,p,p,p,std::string("0"),p,0};events.push_back(HistoricalBarEvent{99,b});}
+        events.push_back(HistoricalEnd{99,"complete",0,"",""});store.record_history_events(events);
+    }
+}
 }
 int main(int argc,char** argv){
     auto root=argc>2?std::filesystem::path(argv[2]):std::filesystem::temp_directory_path()/("replay-store-"+std::to_string(getpid()));
+    if(argc>2&&std::string(argv[1])=="--seed-variation") {try{TimeSeriesStore s({root,root/"backups"},"synthetic_test");populate_variation(s);s.close();return 0;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}
+    if(argc>2&&std::string(argv[1])=="--freeze-variation") {try{TimeSeriesStore s({root,root/"backups"},"synthetic_test");for(const int offset:{0,1,2,3,4,7,8,9,10})s.create_snapshot(1,{1789948800+offset*86400LL,1789948800+(offset+1)*86400LL},"Synthetic variation session");s.close();return 0;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}
     if(argc>2&&std::string(argv[1])=="--seed") {try{TimeSeriesStore s({root,root/"backups"},"synthetic_test");populate(s);populate(s,true);s.close();return 0;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}
     if(argc>2&&std::string(argv[1])=="--revise") {try{TimeSeriesStore s({root,root/"backups"},"synthetic_test");populate(s,false,2);s.close();return 0;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}
+    if(argc>2&&std::string(argv[1])=="--seed-wide") {try{TimeSeriesStore s({root,root/"backups"},"synthetic_test");populate_wide(s);s.close();return 0;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}
     int cases=0;std::int64_t first=0,minute_id=0;std::string fingerprint;double original=0;
     try {
         {
@@ -57,6 +84,11 @@ int main(int argc,char** argv){
             const auto child=fork();check(child>=0);if(child==0){try{TimeSeriesStore store({root,root/"backups"},"test");store.create_snapshot(minute_id,window(true),"Abrupt exit");_exit(0);}catch(...){_exit(2);}}
             int status=0;waitpid(child,&status,0);check(WIFEXITED(status)&&WEXITSTATUS(status)==0);
             TimeSeriesStore store({root,root/"backups"},"test");check(store.snapshot_catalog().rows.size()==7);store.close();++cases;
+        }
+        {
+            const auto wide_root=root/"wide";std::string hash;std::int64_t id=0;
+            {TimeSeriesStore store({wide_root,wide_root/"backups"},"synthetic_test");populate_wide(store);auto s=store.create_snapshot(1,{start,start+2101LL*86400},"Multi-year");id=s.id;hash=s.fingerprint;check(s.observations.size()==2101&&s.uncovered_intervals.empty());check(s.observations.back().bar.volume=="123.456");store.close();}
+            {TimeSeriesStore store({wide_root,wide_root/"backups"},"synthetic_test");auto s=store.snapshot(id);check(s.fingerprint==hash&&s.observations.size()==2101);store.close();}++cases;
         }
         std::cout<<cases<<" research storage cases passed\n";std::filesystem::remove_all(root);return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<" at case "<<cases<<'\n';return 1;}

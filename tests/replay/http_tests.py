@@ -49,6 +49,8 @@ def main(exe,seed,hash_exe):
             for window in CFG['windows']:
                 point=run['points'][-1]['rolling'][CFG['windows'].index(window)]
                 ck(abs(point['annualized_volatility']-statistics.stdev(returns[-window:])*math.sqrt(252))<1e-12)
+            ck(abs(run['points'][-1]['cumulative_price_return']-(full['bars'][29]['close']/100-1))<1e-12)
+            ck(abs(run['points'][-1]['drawdown']-(full['bars'][29]['close']/max(b['close'] for b in full['bars'][:30])-1))<1e-12)
             ck(run['points'][4]['rolling'][0]['annualized_volatility'] is None)
             ck(run['points'][5]['rolling'][0]['annualized_volatility'] is not None)
             all_run=s.call(PREFIX+'replay',{**req,'through_ordinal':80})[1]
@@ -90,13 +92,28 @@ def main(exe,seed,hash_exe):
         # Complete backups include both the snapshots and the experiment catalog.
         backup=sorted((root/'backups').glob('*.sqlite'))[-1]
         with closing(sqlite3.connect(backup)) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==6)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==8)
             ck(db.execute('SELECT count(*) FROM research_experiments').fetchone()[0]==2)
             ck(db.execute('PRAGMA quick_check').fetchall()==[('ok',)])
         dest=root/'restored'
         subprocess.run([sys.executable,str(ROOT/'tools/restore_timeseries.py'),'--backup',str(backup),'--data-dir',str(dest)],check=True,capture_output=True)
         with closing(sqlite3.connect(dest/'timeseries.sqlite3')) as db:
             ck(db.execute('SELECT fingerprint FROM research_snapshots WHERE snapshot_id=?',(int(sid),)).fetchone()[0]==fingerprint)
+    # Multi-year range, >2,000 rows, independent cumulative/drawdown oracle and restart.
+    with tempfile.TemporaryDirectory() as tmp:
+        root=Path(tmp);populate(root,'--seed-wide')
+        with Server(exe,root) as s:
+            code,m=s.call(PREFIX+'snapshots/create',{**WINDOW,'end_s':START+2101*86400});ck(code==200 and m['bar_count']==2101)
+            ck(m['quality']['missing_weekday_candidates']==0 and m['quality']['missing_volume']==0)
+            code,e=s.call(PREFIX+'experiments/create',{'snapshot_id':m['snapshot_id'],'name':'Multi-year report','config':CFG});ck(code==200)
+            points=e['result']['points'];ck(len(points)==2101 and e['engine_version']=='retrospective-replay-2')
+            ck(abs(points[-1]['cumulative_price_return']-(121/100-1))<1e-12)
+            ck(all(p['drawdown']==0 for p in points))
+            ck(s.call(PREFIX+'replay',{'snapshot_id':m['snapshot_id'],'config':CFG,'through_ordinal':2101})[1]['points']==points)
+            ck(s.stop()==0)
+        with Server(exe,root) as s:
+            ck(s.call(PREFIX+'experiments/view',{'experiment_id':e['experiment_id']})[1]==e)
+            ck(s.stop()==0)
     # Genuine schema-2 fixture: no schema-3 tables, no user archive touched.
     with tempfile.TemporaryDirectory() as tmp:
         root=Path(tmp);populate(root)
@@ -116,7 +133,7 @@ def main(exe,seed,hash_exe):
             ck(db.execute('PRAGMA user_version').fetchone()[0]==2)
             ck(db.execute('SELECT count(*) FROM history_versions').fetchone()[0]==160)
         with closing(sqlite3.connect(path)) as db:
-            ck(db.execute('PRAGMA user_version').fetchone()[0]==6)
+            ck(db.execute('PRAGMA user_version').fetchone()[0]==8)
     # Verify multi-block/binary-UTF8 fingerprints against an independent implementation.
     rng=random.Random(5)
     for length in [0,1,55,56,57,63,64,65,128,1024,4096]:

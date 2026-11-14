@@ -2,11 +2,11 @@
 from __future__ import annotations
 import math
 import numpy as np
-from depth_replay import digest
+from depth_replay import digest, MAX_DEPTH_ROWS
 
 
 def synthetic_sessions(count=6, seconds=1200, rows=5, seed=41):
-    if not 1 <= count <= 10 or not 40 <= seconds <= 1800 or not 1 <= rows <= 10:
+    if not 1 <= count <= 10 or not 40 <= seconds <= 1800 or not 1 <= rows <= MAX_DEPTH_ROWS:
         raise ValueError('Synthetic fixture size outside bounds')
     rng = np.random.default_rng(seed)
     sessions = []

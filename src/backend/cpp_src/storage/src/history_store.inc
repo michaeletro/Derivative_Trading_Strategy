@@ -32,21 +32,27 @@ HistorySpec TimeSeriesStore::historical_spec(std::int64_t id)const {
 }
 std::vector<Row> TimeSeriesStore::historical_catalog()const {
     std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();
-    Statement q(impl_->db,"SELECT cast(dataset_id AS TEXT) AS dataset_id,source,contract_id,symbol,exchange,currency,bar_size,price_type,use_rth,time_basis,adjustment_policy FROM history_datasets ORDER BY dataset_id DESC LIMIT 200");
+    Statement q(impl_->db,R"SQL(SELECT cast(d.dataset_id AS TEXT) AS dataset_id,source,contract_id,symbol,exchange,currency,bar_size,price_type,use_rth,time_basis,adjustment_policy,
+ min(r.start_s) AS requested_start_s,max(r.end_s) AS requested_end_s,
+ sum(CASE WHEN r.state IN ('complete','empty') THEN 1 ELSE 0 END) AS completed_batches,
+ sum(CASE WHEN r.state IN ('queued','pending') THEN 1 ELSE 0 END) AS active_batches,
+ sum(CASE WHEN r.state IN ('failed','unavailable','interrupted') THEN 1 ELSE 0 END) AS unsuccessful_attempts
+ FROM history_datasets d LEFT JOIN history_requests r ON r.dataset_id=d.dataset_id
+ GROUP BY d.dataset_id ORDER BY d.dataset_id DESC LIMIT 200)SQL");
     std::vector<Row> out;while(q.step())out.push_back(q.row());return out;
 }
-std::vector<HistoryWindow> TimeSeriesStore::historical_gaps(std::int64_t id,HistoryWindow w,bool pending)const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();history_spec_locked(impl_->db,id).validate(w);
-    Statement q(impl_->db,"SELECT start_s,end_s FROM history_requests WHERE dataset_id=?1 AND end_s>?2 AND start_s<?3 AND (state IN ('complete','empty') OR (?4=1 AND state IN ('queued','pending'))) ORDER BY start_s");
-    q.bind(1,id);q.bind(2,w.start);q.bind(3,w.end);q.bind(4,std::int64_t(pending));std::vector<HistoryWindow> covered;
+std::vector<HistoryWindow> TimeSeriesStore::historical_gaps(std::int64_t id,HistoryWindow w,bool pending,bool completed)const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();history_spec_locked(impl_->db,id).validate_range(w);
+    Statement q(impl_->db,"SELECT start_s,end_s FROM history_requests WHERE dataset_id=?1 AND end_s>?2 AND start_s<?3 AND ((?5=1 AND state IN ('complete','empty')) OR (?4=1 AND state IN ('queued','pending'))) ORDER BY start_s");
+    q.bind(1,id);q.bind(2,w.start);q.bind(3,w.end);q.bind(4,std::int64_t(pending));q.bind(5,std::int64_t(completed));std::vector<HistoryWindow> covered;
     while(q.step())covered.push_back({q.integer(0),q.integer(1)});
     return uncovered(w,covered);
 }
 std::vector<std::int64_t> TimeSeriesStore::queue_history(std::int64_t id,const std::vector<HistoryWindow>& windows) {
     const auto spec=historical_spec(id);for(auto w:windows)spec.validate(w);
-    if(windows.size()>32)throw std::length_error("Historical queue limit is 32 chunks");
+    if(windows.size()>history_queue_limit)throw std::length_error("Historical queue limit is 2048 batches");
     std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();
-    if(scalar(impl_->db,"SELECT count(*) FROM history_requests WHERE state IN ('queued','pending')")+windows.size()>32)
+    if(scalar(impl_->db,"SELECT count(*) FROM history_requests WHERE state IN ('queued','pending')")+windows.size()>history_queue_limit)
         throw std::length_error("Historical request queue full");
     return impl_->write([&]{std::vector<std::int64_t> ids;
         for(auto w:windows){Statement q(impl_->db,"INSERT INTO history_requests(dataset_id,run_id,start_s,end_s,state,created_ms) VALUES(?1,?2,?3,?4,'queued',?5)");
@@ -120,12 +126,36 @@ void TimeSeriesStore::record_history_events(const std::vector<BrokerEvent>& even
     });
 }
 std::vector<Row> TimeSeriesStore::historical_requests(std::int64_t id,HistoryWindow w)const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();history_spec_locked(impl_->db,id).validate(w);
+    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();history_spec_locked(impl_->db,id).validate_range(w);
     Statement q(impl_->db,"SELECT cast(r.request_id AS TEXT) AS request_id,start_s,end_s,state,created_ms,finished_ms,code,provider_start,provider_end,(SELECT count(*) FROM history_membership m WHERE m.request_id=r.request_id) AS received_rows FROM history_requests r WHERE dataset_id=?1 AND end_s>?2 AND start_s<?3 ORDER BY r.request_id DESC LIMIT 200");
     q.bind(1,id);q.bind(2,w.start);q.bind(3,w.end);std::vector<Row> out;while(q.step())out.push_back(q.row());return out;
 }
+Row TimeSeriesStore::historical_progress(std::int64_t id,HistoryWindow w)const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();history_spec_locked(impl_->db,id).validate_range(w);
+    // Aggregate every attempt, independently of the 200-row display ledger.
+    Statement q(impl_->db,R"SQL(SELECT count(*) AS total_attempts,
+ coalesce(sum(state='complete'),0) AS complete,coalesce(sum(state='empty'),0) AS empty,
+ coalesce(sum(state='queued'),0) AS queued,coalesce(sum(state='pending'),0) AS pending,
+ coalesce(sum(state IN ('failed','unavailable')),0) AS failed,
+ coalesce(sum(state='interrupted'),0) AS interrupted
+ FROM history_requests WHERE dataset_id=?1 AND end_s>?2 AND start_s<?3)SQL");
+    q.bind(1,id);q.bind(2,w.start);q.bind(3,w.end);q.step();auto out=q.row();
+    Statement ahead(impl_->db,R"SQL(SELECT count(*) AS queue_ahead FROM history_requests
+ WHERE state IN ('queued','pending') AND request_id < (SELECT min(request_id) FROM history_requests
+ WHERE dataset_id=?1 AND end_s>?2 AND start_s<?3 AND state IN ('queued','pending')))SQL");
+    ahead.bind(1,id);ahead.bind(2,w.start);ahead.bind(3,w.end);ahead.step();out["queue_ahead"]=ahead.integer();return out;
+}
+std::vector<Row> TimeSeriesStore::historical_queue()const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();
+    Statement q(impl_->db,R"SQL(SELECT cast(r.request_id AS TEXT) AS request_id,cast(r.dataset_id AS TEXT) AS dataset_id,
+ d.symbol,d.bar_size,d.price_type,r.start_s,r.end_s,r.state,
+ (SELECT count(*) FROM history_requests WHERE state IN ('queued','pending')) AS remaining_batches
+ FROM history_requests r JOIN history_datasets d ON d.dataset_id=r.dataset_id
+ WHERE r.state IN ('queued','pending') ORDER BY r.request_id LIMIT 1)SQL");
+    std::vector<Row> out;if(q.step())out.push_back(q.row());return out;
+}
 std::vector<Row> TimeSeriesStore::historical_bars(std::int64_t id,HistoryWindow w)const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();history_spec_locked(impl_->db,id).validate(w);
+    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->healthy();history_spec_locked(impl_->db,id).validate_range(w);
     // Latest COMPLETED RESPONSE covering a coordinate wins, not max version ID.
     // A->B->A revisions and empty refreshed responses therefore behave correctly.
     // Failed/partial responses never grant cache coverage or replace valid history.
@@ -137,9 +167,9 @@ std::vector<Row> TimeSeriesStore::historical_bars(std::int64_t id,HistoryWindow 
  WHERE v.dataset_id=?1 AND v.coordinate_s>=?2 AND v.coordinate_s<?3
  AND r.state IN ('complete','empty') AND r.request_id=(SELECT max(q.request_id) FROM history_requests q
  WHERE q.dataset_id=?1 AND q.start_s<=v.coordinate_s AND q.end_s>v.coordinate_s AND q.state IN ('complete','empty'))
- ORDER BY v.coordinate_s LIMIT 2001)SQL");
+ ORDER BY v.coordinate_s LIMIT 40001)SQL");
     q.bind(1,id);q.bind(2,w.start);q.bind(3,w.end);std::vector<Row> out;while(q.step())out.push_back(q.row());
-    if(out.size()>2000)throw std::length_error("Historical result limit exceeded; narrow the range");
+    if(out.size()>history_view_limit)throw std::length_error("Historical result limit exceeded; narrow the range");
     return out;
 }
 } // namespace dts::storage
