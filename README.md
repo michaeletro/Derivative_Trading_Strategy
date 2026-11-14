@@ -13,6 +13,10 @@ The CMake project version is **0.11.0**; the current archive schema is **6**.
 Offline liquidity learning is also implemented. The capabilities below describe
 the committed implementation rather than a sequence of release announcements.
 
+See the [project history](docs/project-history.md) for linked September–November
+milestones and the distinction between integrated work and the workspace branch
+still under review.
+
 - [Capabilities](#capabilities)
 - [Build the offline C++ core](#build-the-offline-c-core)
 - [Run the dashboard](#run-the-dashboard)
@@ -38,6 +42,8 @@ the committed implementation rather than a sequence of release announcements.
 | Replay and experiment catalog | Immutable historical snapshots; released-prefix return/volatility diagnostics; saved pricing, Greek, SDE, hedging, and replay records with input/source/build identity and linked reruns | Dashboard `#replay` and `#lab-catalog`; [replay](docs/replay-research.md), [catalog](docs/sde-discretization.md) |
 | Displayed-depth research | Explicit direct-venue capture, ordered archival/reconstruction, quality/reset/gap flags, stopped-session JSON export, and independent Python replay | `tools/depth_capture.py`, Phase I notebook; [depth runbook](docs/course-depth.md) |
 | Liquidity prediction | Offline persistence and residual-ridge baselines; trailing features, train-only scaling, chronological whole-date train/validation/test partitions, and held-out error reports | `tools/liquidity_study.py`, Phase II notebook; [learning runbook](docs/liquidity-learning.md) |
+| Terminal depth viewer | Read-only polling ladder and bounded native sequence/receipt verification; no acquisition or broker connection side effects | `tools/depth_watch.py`; [feed check](docs/live-depth-check.md) |
+| Offline order-book model lab | Distinct-price diagnostics, residual nearest-neighbor comparison, daily HAR/CHAR forecasting, private HTML reports, and a scalar scenario-CVaR hedge LP | `tools/orderbook_lab.py`, Phase III notebook; [model lab](docs/orderbook-model-lab.md) |
 
 Numerical inputs are explicit model assumptions. Broker quotes do not automatically
 populate a volatility surface, rate curve, dividend model, or calibrated strategy.
@@ -138,7 +144,7 @@ profile workflow above uses **8081**. A direct launch does not perform automatic
 profile sign-in. Reconfigure after updating source so build identity and embedded
 assets match the checkout.
 
-**Known HTTP build limitation:** the [current integration commit](https://github.com/michaeletro/Derivative_Trading_Strategy/commit/3afcec4531e54f0a8e1e776b52097b578cae0cdc)
+**Known HTTP build limitation:** the [October integration commit](https://github.com/michaeletro/Derivative_Trading_Strategy/commit/3afcec4531e54f0a8e1e776b52097b578cae0cdc)
 records a bundled-Crow/installed-Boost incompatibility involving the removed
 `asio::io_service` API. CMake's Boost minimum does not guarantee compatibility
 with every newer installation. If this error occurs, the HTTP target needs a
@@ -189,6 +195,10 @@ session IDs are different. Capture does not aggregate SMART venues, backfill
 historical depth, or create a new depth dashboard panel. Export only stopped
 sessions to a private destination outside the checkout.
 
+`tools/depth_watch.py --profile paper-tws --once` displays the current recorded
+request's ladder; `--verify` checks for advancing native sequence/receipt evidence.
+It does not connect or start/stop acquisition. See [the terminal viewer runbook](docs/live-depth-check.md).
+
 ## Run offline liquidity research
 
 Use an isolated Python environment for notebooks and learning dependencies.
@@ -230,7 +240,23 @@ and [LaTeX theory/literature paper](research/liquidity_aware_hedging/reports/the
 describe the larger study. Compile the paper from its `reports/` directory with
 `latexmk -pdf -interaction=nonstopmode -halt-on-error theory_literature.tex`.
 Its LSV calibration/simulation and scenario-CVaR optimizer are specifications for
-future implementation, not executable engines or empirical results.
+the larger study. A separate scalar scenario-CVaR LP is now implemented in the
+offline order-book lab; it uses explicit exogenous scenarios rather than a
+calibrated joint price/liquidity model. LSV calibration remains future work.
+
+For the additional offline report/model workflow:
+
+```bash
+python -m pip install -r research/liquidity_aware_hedging/requirements-models.txt
+python tools/orderbook_lab.py demo --quantity 200 \
+  --output "$HOME/.local/share/derivative-lab/analysis/synthetic-001"
+```
+
+Open the generated `report.html`. The output directory must be new and outside
+Git. [The model-lab guide](docs/orderbook-model-lab.md) covers real exports/manifests,
+daily HAR/CHAR panels, the synthetic hedge case, and Phase III notebook
+`03_orderbook_model_lab.ipynb`. Synthetic reports establish pipeline behavior,
+not empirical profitability or calibrated trading decisions.
 
 ## Data, configuration, and archive upgrades
 
@@ -276,7 +302,7 @@ and [recording/backup/restore](docs/persistent-timeseries.md).
 | `src/backend/cpp_src/ibkr/` | Optional native SDK adapter and callback normalization |
 | `src/frontend/dashboard/` | Active embedded dashboard: ES modules, HTML, CSS, and browser-session authentication |
 | `tools/` | Configure/start/open helpers, depth capture/export, offline liquidity study, restore, and Python connection diagnostic |
-| `research/liquidity_aware_hedging/` | Proposal, data/model cards, independent replay/learning modules, two notebooks, and LaTeX/bibliography sources |
+| `research/liquidity_aware_hedging/` | Proposal, data/model cards, independent replay/learning modules, the offline `orderbook/` model/LP package, three notebooks, and LaTeX/bibliography sources |
 | `tests/`, `.github/workflows/` | Numerical/domain/storage/HTTP/browser/Python/learning tests and CI workflows |
 | `docs/` | Detailed operating and model runbooks indexed below |
 | `src/backend/Arch/`, older asset/time-series/API/database classes under `src/backend/cpp_src/src/` and `src/backend/cpp_src/headers/`, `src/backend/data_files/` | Earlier Python/Polygon and C++ research scaffolds, sample CSVs, and retained experimental transports; many are outside the active CMake targets |
@@ -310,6 +336,10 @@ node --test tests/*/model.test.mjs
 # Learning and independent depth replay; use the research requirements above.
 python -m unittest discover -s tests/liquidity -p 'test_*.py' -v
 python tests/depth/reference_tests.py
+
+# Offline order-book models; install requirements-models.txt first.
+python -m unittest discover -s tests/orderbook -p 'test_*.py' -v
+python -m unittest discover -s tests/python -p 'test_depth_watch.py' -v
 ```
 
 Root `requirements.txt` contains legacy pandas requirements; it is not the complete
@@ -337,6 +367,9 @@ entitlements or out-of-sample market performance.
 | [Replay and research](docs/replay-research.md) | Immutable snapshots, release conventions, diagnostics, and saved reruns |
 | [Displayed-depth foundation](docs/course-depth.md) | Current schema-6 migration, direct-depth capture/export, and Phase I analysis |
 | [Liquidity learning](docs/liquidity-learning.md) | Source manifests, causal features/labels, ridge fitting, date partitions, and evaluation |
+| [Terminal depth/feed check](docs/live-depth-check.md) | Read-only ladder, bounded native-update evidence, and display limitations |
+| [Offline order-book model lab](docs/orderbook-model-lab.md) | Diagnostics/reports, nonlinear liquidity comparison, HAR/CHAR, scalar scenario-CVaR, and Phase III notebook |
+| [Project history](docs/project-history.md) | Linked development/integration milestones and workspace work still under review |
 
 Some runbooks retain increment-specific version numbers and branch-switch examples.
 Use this README's launch commands for the current checkout and the schema-6
@@ -357,9 +390,10 @@ migration guidance above; earlier schema references describe earlier increments.
   Missing/unsupported positions remain unavailable/failed rather than zero exposure.
   Account balances, continuous reconciliation, risk approval, and order management
   are not implemented by the active broker interface. `/ib/send` returns 410.
-- Heston/LSV calibration, scenario-CVaR optimization, and a demonstrated empirical
-  forecasting or hedging advantage remain future work. Offline fitted liquidity
-  baselines exist, but their synthetic demonstration does not establish that advantage.
+- Heston/LSV calibration and a demonstrated empirical forecasting or hedging
+  advantage remain future work. Offline fitted liquidity baselines and a scalar
+  scenario-CVaR hedge LP exist; synthetic demonstrations do not establish that
+  advantage or a calibrated multi-period policy.
 
 ## Security and license
 
