@@ -2,6 +2,10 @@
 // cancellations. Polling and rendering never submit a mutation.
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fail = message => { throw new Error(message); };
+const MANUAL_TICKER = /^KXBTC15M-[A-Za-z0-9_.:-]{1,119}$/;
+const ACCOUNT_TICKER = /^KX(?:BTC|ETH|SOL|XRP|GOLD)15M-[A-Za-z0-9_.:-]{1,119}$/;
+const supportedTicker = (ticker, source) => typeof ticker === 'string' && ticker.length <= 128
+  && (source === 'kalshi_account' ? ACCOUNT_TICKER : MANUAL_TICKER).test(ticker);
 const label = (value, name, max = 1000) => {
   if (typeof value !== 'string' || value.length > max || /[\u0000-\u001f\u007f]/u.test(value)) fail(`Invalid ${name}.`);
   return value;
@@ -16,11 +20,20 @@ const nullable = (value, name, options) => value === null ? null : number(value,
 function timestamp(value) {
   label(value, 'position timestamp', 48);
   if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|\+00:00)$/.test(value) || !Number.isFinite(Date.parse(value))) fail('Invalid position timestamp.');
+  if (new Date(Date.parse(value)).toISOString().slice(0, 19) !== value.slice(0, 19)) fail('Invalid position timestamp.');
   return value;
+}
+function acquisition(raw, result) {
+  for (const key of ['refreshing', 'refresh_failed']) if (raw[key] !== undefined) {
+    if (typeof raw[key] !== 'boolean') fail('Invalid portfolio refresh metadata.');
+    result[key] = raw[key];
+  }
+  return result;
 }
 export function validatePositionReport(raw) {
   if (!object(raw) || raw.kind !== 'kalshi_position_report' || raw.version !== 1
       || !['paper', 'demo', 'live'].includes(raw.mode) || !['production', 'demo'].includes(raw.environment)
+      || raw.mode === 'live' && raw.environment !== 'production' || raw.mode === 'demo' && raw.environment !== 'demo'
       || !['paper_journal', 'kalshi_account'].includes(raw.source)
       || !['ready', 'partial', 'unavailable'].includes(raw.status) || !object(raw.summary)
       || !Array.isArray(raw.positions) || raw.positions.length > 1000) fail('Unsupported position report.');
@@ -29,6 +42,14 @@ export function validatePositionReport(raw) {
     reason: label(raw.reason, 'position status'), summary: {}, positions: []};
   for (const key of ['cash_balance', 'portfolio_value', 'fees_paid']) result.summary[key] = nullable(raw.summary[key], key);
   for (const key of ['realized_pnl', 'unrealized_pnl']) result.summary[key] = nullable(raw.summary[key], key, {signed: true});
+  if (raw.holdings_scope !== undefined || raw.accounting_scope !== undefined) {
+    if (raw.source !== 'kalshi_account'
+        || !(raw.holdings_scope === 'current_nonzero_unsettled' && raw.accounting_scope === 'separate_performance_history'
+          || raw.holdings_scope === 'recent_all_settlement_states' && raw.accounting_scope === 'recent_position_rows')) fail('Invalid position accounting scope.');
+    result.holdings_scope = raw.holdings_scope; result.accounting_scope = raw.accounting_scope;
+    if (raw.accounting_scope === 'separate_performance_history' && (result.summary.realized_pnl !== null || result.summary.fees_paid !== null))
+      fail('Current holdings cannot claim broad realized P&L or fee totals.');
+  }
   for (const key of ['open_count', 'unknown_intent_count']) {
     const value = raw.summary[key] ?? (key === 'unknown_intent_count' ? 0 : null);
     if (!Number.isSafeInteger(value) || value < 0 || value > 100000) fail('Invalid position count.');
@@ -42,13 +63,13 @@ export function validatePositionReport(raw) {
       quantity: number(row.quantity, 'quantity', {max: 1e8}),
       status: label(row.status, 'position state', 100), mark_basis: label(row.mark_basis, 'mark basis', 150),
       warning: row.warning === null ? null : label(row.warning, 'position warning')};
-    if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(parsed.ticker)) fail('Invalid position ticker.');
+    if (!supportedTicker(parsed.ticker, raw.source)) fail('Invalid position ticker.');
     for (const key of ['cost_basis', 'marked_value', 'fees_paid']) parsed[key] = nullable(row[key], key);
     for (const key of ['average_entry_price', 'mark_price']) parsed[key] = nullable(row[key], key, {max: 1});
     for (const key of ['unrealized_pnl', 'realized_pnl']) parsed[key] = nullable(row[key], key, {signed: true});
     return parsed;
   });
-  return result;
+  return acquisition(raw, result);
 }
 
 export function validateOrderReport(raw) {
@@ -77,19 +98,19 @@ export function validateOrderReport(raw) {
     parsed.order_type = row.order_type ?? 'ioc';
     parsed.expiration_time = row.expiration_time ?? null;
     parsed.cancelable = row.cancelable ?? false;
-    if (!['ioc', 'limit'].includes(parsed.order_type) || typeof parsed.cancelable !== 'boolean'
+    if (!['ioc', 'limit', ...(raw.source === 'kalshi_account' ? ['unknown'] : [])].includes(parsed.order_type) || typeof parsed.cancelable !== 'boolean'
         || parsed.expiration_time !== null && (!Number.isSafeInteger(parsed.expiration_time)
           || parsed.expiration_time <= 0 || parsed.expiration_time > 253402300799)
-        || parsed.cancelable && (parsed.order_type !== 'limit' || !['resting', 'paper_resting'].includes(parsed.status)
+        || parsed.cancelable && (!MANUAL_TICKER.test(parsed.ticker) || parsed.order_type !== 'limit' || !['resting', 'paper_resting'].includes(parsed.status)
           || !parsed.client_order_id || !/^[A-Za-z0-9_.:-]{1,200}$/.test(parsed.client_order_id))) fail('Invalid resting-order controls.');
-    if (!/^KXBTC15M-[A-Za-z0-9_.:-]{1,119}$/.test(parsed.ticker)
+    if (!supportedTicker(parsed.ticker, raw.source)
         || raw.source === 'kalshi_account' && (parsed.fill_count === null || parsed.remaining_count === null)
         || Number(parsed.price) >= 1 || (parsed.fill_count !== null && Number(parsed.fill_count) > Number(parsed.count))
         || (parsed.remaining_count !== null && Number(parsed.remaining_count) > Number(parsed.count))
         || (parsed.fill_count !== null && parsed.remaining_count !== null && Number(parsed.fill_count) + Number(parsed.remaining_count) > Number(parsed.count) + 1e-8)) fail('Inconsistent order quantities or price.');
     return parsed;
   });
-  return result;
+  return acquisition(raw, result);
 }
 
 export function validateTuning(bankroll, fraction, limits) {
@@ -103,6 +124,8 @@ export function validateTuning(bankroll, fraction, limits) {
 export function kellySensitivity(state, probability, bankroll, chosenFraction, requestedOutcome = 'auto', order = {order_type: 'ioc'}) {
   if (!['auto', 'yes', 'no'].includes(requestedOutcome)) fail('Choose Auto, YES or NO.');
   if (!state?.market || state.market_status !== 'ready') return null;
+  if (state.manual_order_supported === false || state.selected_asset && state.selected_asset !== 'BTC'
+      || state.market.ticker !== undefined && !MANUAL_TICKER.test(state.market.ticker)) return null;
   const p = Number(number(probability, 'probability', {max: 1, digits: 6}));
   const wealth = Number(number(bankroll, 'allocated bankroll', {positive: true, max: 1e6, digits: 4}));
   const chosen = Number(number(chosenFraction, 'Kelly multiplier', {positive: true, max: 1, digits: 6}));
@@ -163,8 +186,9 @@ function retainedValue(cache, key, value, at) {
   const previous = cache.get(key);
   return previous ? {...previous, stale: true} : {value: null, at: null, stale: false};
 }
-const reportIdentity = value => `${value.source}|${value.environment}|${value.mode}`;
-export function mountPositions(doc = document, win = window, {fetchImpl = win.fetch.bind(win), now = Date.now, pollMs = 10000} = {}) {
+const reportContextIdentity = value => `${value.source}|${value.environment}|${value.mode}`;
+const reportIdentity = value => `${reportContextIdentity(value)}|${value.holdings_scope ?? ''}|${value.accounting_scope ?? ''}`;
+export function mountPositions(doc = document, win = window, {fetchImpl = win.fetch.bind(win), now = Date.now, pollMs = 10000, autoRefresh = true, autoLoad = true} = {}) {
   const $ = id => doc.getElementById(id);
   if (!$('positions-panel') || typeof doc.createElement !== 'function') return null;
   let stopped = false, fetching = false, generation = 0, controller = null, report = null;
@@ -191,7 +215,8 @@ export function mountPositions(doc = document, win = window, {fetchImpl = win.fe
       : 'Paper positions come from simulated journal fills. Unavailable values do not imply a zero position or zero P&L.');
   }
   function render(value) {
-    if (identity !== null && identity !== reportIdentity(value)) clear('Loading the selected account context.', {reset: true});
+    if (identity !== null && identity !== reportIdentity(value)
+        && (value.status !== 'unavailable' || reportContextIdentity(value) !== reportContextIdentity(lastSnapshot))) clear('Loading the selected account context.', {reset: true});
     const account = value.source === 'kalshi_account';
     set('positions-source-label', account ? `${value.environment === 'production' ? 'Production' : 'Demo'} account (read-only)` : 'Paper journal simulation');
     if (value.status === 'unavailable') { clear(value.reason); return; }
@@ -205,10 +230,12 @@ export function mountPositions(doc = document, win = window, {fetchImpl = win.fe
     }
     set('position-realized-label', account ? 'Reported realized P&L' : 'Est. settled net P&L');
     set('position-fees-label', account ? 'Reported fees (separate)' : 'Estimated entry fee allowance');
-    set('positions-updated', `Snapshot ${new Date(value.fetched_at).toLocaleTimeString()} | refresh every ${pollMs / 1000}s`);
+    set('positions-updated', `Snapshot ${new Date(value.fetched_at).toLocaleTimeString()} | ${autoRefresh ? `refresh every ${pollMs / 1000}s` : 'active Portfolio refresh'}${value.refreshing ? ' | acquisition in progress' : ''}`);
     set('positions-status', `${value.reason}${value.summary.unknown_intent_count ? ` | ${value.summary.unknown_intent_count} uncertain intents require reconciliation.` : ''}`);
     set('positions-accounting', account
-      ? 'Account view is separate from execution mode. Open marks use available liquidation bids before exit fees. Reported realized P&L and fees are shown separately; missing entry basis remains unavailable. This is not a complete lifetime account return.'
+      ? value.accounting_scope === 'separate_performance_history'
+        ? 'Current nonzero unsettled holdings include closed contracts awaiting settlement. Broader realized P&L and fee totals are unavailable in this view; use Performance for separate accounting history. Open marks use available liquidation bids before exit fees; missing entry basis remains unavailable.'
+        : 'Account view is separate from execution mode. Open marks use available liquidation bids before exit fees. Reported realized P&L and fees are shown separately; missing entry basis remains unavailable. This is not a complete lifetime account return.'
       : 'Paper positions use simulated fills and conservative entry fee allowances. Open marks use liquidation bids before exit fees. Pending or unavailable marks remain unavailable; they are not zero.');
     $('position-rows').replaceChildren(); markData($('position-rows'), false);
     const currentKeys = new Set(value.positions.map(row => `${row.ticker}|${row.outcome}`));
@@ -234,9 +261,12 @@ export function mountPositions(doc = document, win = window, {fetchImpl = win.fe
     }
     if (!value.positions.length) set('positions-status', `${value.reason} No filled positions are available for this view.`);
     if (retainedFields) set('positions-status', `${value.reason} | ${retainedFields} STALE last-known fields retained; hover marked values for their original timestamps.`);
+    if (value.refresh_failed) clear('The latest account read failed; the original position snapshot is retained.');
   }
   async function refresh() {
-    if (stopped || fetching) return;
+    if (stopped) return;
+    if (report?.fetched_at && (now() - Date.parse(report.fetched_at) > 30000 || now() - Date.parse(report.fetched_at) < -1000)) clear('Position snapshot is stale; waiting for a fresh read.');
+    if (fetching) return;
     fetching = true; const expected = generation, selected = source(), activeController = new AbortController();
     controller = activeController;
     const timeout = win.setTimeout(() => activeController.abort(), 12000);
@@ -247,7 +277,14 @@ export function mountPositions(doc = document, win = window, {fetchImpl = win.fe
       const value = validatePositionReport(JSON.parse(text));
       if (stopped || expected !== generation) return;
       if (value.source !== (selected === 'account' ? 'kalshi_account' : 'paper_journal')) fail('Position source differs from the selected view.');
+      if (serviceContext !== null && `${value.environment}|${value.mode}` !== serviceContext) {
+        clear('Position snapshot belongs to a different service environment; waiting for the selected context.'); return;
+      }
       if (value.fetched_at !== null && (now() - Date.parse(value.fetched_at) < -1000 || now() - Date.parse(value.fetched_at) > 30000)) fail('Position snapshot is stale.');
+      if (value.fetched_at !== null && lastSnapshot && reportContextIdentity(value) === reportContextIdentity(lastSnapshot)
+          && Date.parse(value.fetched_at) < Date.parse(lastSnapshot.fetched_at)) {
+        clear('An older position snapshot was ignored; waiting for a current read.'); return;
+      }
       render(value);
     } catch {
       if (!stopped && expected === generation) clear(selected === 'account'
@@ -267,10 +304,13 @@ export function mountPositions(doc = document, win = window, {fetchImpl = win.fe
     const changed = context !== null && previousContext !== null && context !== previousContext;
     if (context !== null) serviceContext = context;
     if (changed) { generation++; controller?.abort(); fetching = false; clear('Loading the changed account environment.', {reset: true}); }
-    if (defaultApplied) return changed ? refresh() : undefined;
+    if (defaultApplied) {
+      if (!sourceChosen && state.account_view_enabled === true && source() !== 'account') { $('position-source').value = 'account'; return changeSource(); }
+      return changed ? refresh() : undefined;
+    }
     defaultApplied = true;
     if (sourceChosen) return;
-    const selected = state.mode === 'paper' ? 'paper' : 'account';
+    const selected = state.account_view_enabled === true || state.mode !== 'paper' ? 'account' : 'paper';
     if (source() !== selected) { $('position-source').value = selected; return changeSource(); }
     if (changed) return refresh();
   }
@@ -280,17 +320,17 @@ export function mountPositions(doc = document, win = window, {fetchImpl = win.fe
   }
   $('position-source').addEventListener('change', () => { sourceChosen = true; changeSource(); });
   $('positions-refresh').addEventListener('click', () => refreshNow());
-  const timer = win.setInterval(() => {
+  const timer = autoRefresh && pollMs > 0 ? win.setInterval(() => {
     if (report?.fetched_at && now() - Date.parse(report.fetched_at) > 30000) clear('Position snapshot is stale; waiting for a fresh read.');
     refresh();
-  }, pollMs);
+  }, pollMs) : null;
   function dispose() { stopped = true; generation++; controller?.abort(); win.clearInterval(timer); }
   win.addEventListener('pagehide', dispose);
-  const ready = refresh();
-  return {ready, refresh: refreshNow, dispose, setServiceState, getReport: () => report};
+  const ready = autoLoad ? refresh() : Promise.resolve();
+  return {ready, refresh: refreshNow, poll: refresh, dispose, setServiceState, getReport: () => report};
 }
 
-export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch.bind(win), now = Date.now, pollMs = 10000, onCancel = () => {}} = {}) {
+export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch.bind(win), now = Date.now, pollMs = 10000, autoRefresh = true, autoLoad = true, onCancel = () => {}} = {}) {
   const $ = id => doc.getElementById(id);
   if (!$('orders-panel') || !$('position-source') || typeof doc.createElement !== 'function') return null;
   const set = (id, value) => { if ($(id)) $(id).textContent = value; };
@@ -337,7 +377,7 @@ export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch
         {text: row.ticker}, {text: row.action.toUpperCase()}, {text: row.outcome.toUpperCase()}, {text: row.count},
         field('fill_count', value => value ?? 'Unknown'), field('remaining_count', value => value ?? 'Unknown'),
         field('price', money),
-        {text: `${row.status}${row.order_type === 'limit' ? ' | resting limit' : ' | IOC'}${row.expiration_time ? ' | expires ' + new Date(row.expiration_time * 1000).toLocaleTimeString() : ''}${key !== null && retainedOrders.has(key) ? ' | STALE fields retained' : ''}`},
+        {text: `${row.status}${row.order_type === 'limit' ? ' | resting limit' : row.order_type === 'ioc' ? ' | IOC' : ' | execution type unavailable'}${row.expiration_time ? ' | expires ' + new Date(row.expiration_time * 1000).toLocaleTimeString() : ''}${key !== null && retainedOrders.has(key) ? ' | STALE fields retained' : ''}`},
         {text: row.order_id || row.client_order_id || 'Unavailable'}];
       for (const shown of values) {
         const td = doc.createElement('td'); displayData(td, shown.text, Object.hasOwn(shown, 'at') ? shown.at : value.fetched_at, shown.stale); tr.appendChild(td);
@@ -358,8 +398,10 @@ export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch
     set('orders-status', `${value.reason}${value.orders.length ? '' : ' No orders returned for this view.'}`);
     if (retainedFields) set('orders-status', `${value.reason} | ${retainedFields} STALE last-known fields retained; cancellation requires complete current order data.`);
     set('orders-updated', `${value.source === 'kalshi_account' ? 'Kalshi account' : 'Paper journal'} | snapshot ${new Date(value.fetched_at).toLocaleTimeString()}`);
+    if (value.refresh_failed) clear('The latest account read failed; previous orders remain stale and cancellation requires a fresh read.');
   }
   async function cancelOrder(clientOrderId, expectedSource) {
+    const expectedContext = report ? reportIdentity(report) : null;
     const row = report?.orders.find(row => row.client_order_id === clientOrderId && row.cancelable);
     if (stopped || !row || report.source !== expectedSource || cancelling.has(clientOrderId) || attempted.has(clientOrderId)
         || retainedOrders.has(orderKey(row))) return;
@@ -380,8 +422,10 @@ export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch
       const token = JSON.parse(sessionText)?.token;
       if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{24,256}$/.test(token)) fail('Local cancellation session is invalid.');
       const currentRow = report?.orders.find(item => item.client_order_id === clientOrderId && item.cancelable);
-      if (stopped || report?.source !== expectedSource || !currentRow || retainedOrders.has(orderKey(currentRow))
-          || !report.fetched_at || now() - Date.parse(report.fetched_at) > 30000 || now() - Date.parse(report.fetched_at) < -1000) return;
+      if (stopped || report?.source !== expectedSource || !currentRow || reportIdentity(report) !== expectedContext
+          || retainedOrders.has(orderKey(currentRow)) || !report.fetched_at
+          || now() - Date.parse(report.fetched_at) > 30000 || now() - Date.parse(report.fetched_at) < -1000
+          || currentRow.expiration_time !== null && currentRow.expiration_time * 1000 <= now()) return;
       attempted.add(clientOrderId);
       const response = await fetchImpl('/api/cancel-order', {...options, method: 'POST',
         headers: {Accept: 'application/json', 'Content-Type': 'application/json', 'X-Kalshi-Token': token},
@@ -407,7 +451,9 @@ export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch
     }
   }
   async function refresh() {
-    if (stopped || fetching) return;
+    if (stopped) return;
+    if (report?.fetched_at && (now() - Date.parse(report.fetched_at) > 30000 || now() - Date.parse(report.fetched_at) < -1000)) clear('Order snapshot is stale; waiting for a fresh read.');
+    if (fetching) return;
     fetching = true; const expected = generation, selected = source(), activeController = new AbortController();
     lastSource = selected; controller = activeController;
     const timeout = win.setTimeout(() => activeController.abort(), 12000);
@@ -418,7 +464,14 @@ export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch
       const value = validateOrderReport(JSON.parse(text));
       if (stopped || expected !== generation) return;
       if (value.source !== (selected === 'account' ? 'kalshi_account' : 'paper_journal')) fail('Order source differs from the selected view.');
+      if (serviceContext !== null && `${value.environment}|${value.mode}` !== serviceContext) {
+        clear('Order snapshot belongs to a different service environment; waiting for the selected context.'); return;
+      }
       if (value.fetched_at !== null && (now() - Date.parse(value.fetched_at) < -1000 || now() - Date.parse(value.fetched_at) > 30000)) fail('Order snapshot is stale.');
+      if (value.fetched_at !== null && lastSnapshot && reportIdentity(value) === reportIdentity(lastSnapshot)
+          && Date.parse(value.fetched_at) < Date.parse(lastSnapshot.fetched_at)) {
+        clear('An older order snapshot was ignored; cancellation requires a current read.'); return;
+      }
       render(value);
     } catch {
       if (!stopped && expected === generation) clear(selected === 'account'
@@ -439,12 +492,12 @@ export function mountOrders(doc = document, win = window, {fetchImpl = win.fetch
   }
   $('position-source').addEventListener('change', changeSource);
   $('orders-refresh').addEventListener('click', refreshNow);
-  const timer = win.setInterval(() => {
+  const timer = autoRefresh && pollMs > 0 ? win.setInterval(() => {
     if (report?.fetched_at && now() - Date.parse(report.fetched_at) > 30000) clear('Order snapshot is stale; waiting for a fresh read.');
     refresh();
-  }, pollMs);
+  }, pollMs) : null;
   function dispose() { stopped = true; generation++; controller?.abort(); win.clearInterval(timer); }
   win.addEventListener('pagehide', dispose);
-  const ready = refresh();
-  return {ready, refresh: refreshNow, setServiceState, dispose, getReport: () => report};
+  const ready = autoLoad ? refresh() : Promise.resolve();
+  return {ready, refresh: refreshNow, poll: refresh, setServiceState, dispose, getReport: () => report};
 }

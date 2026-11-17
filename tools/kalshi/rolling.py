@@ -37,6 +37,9 @@ class RollingConfig:
     exit_z: float = 0.5
     alpha: float = 0.05
     phase_seconds: int = 300
+    rsi_period: int = 14
+    rsi_filter: bool = False
+    rsi_entry: float = 55.0
 
     def __post_init__(self):
         if (type(self.phase_seconds) is not int or self.phase_seconds not in (300, 900)
@@ -44,6 +47,12 @@ class RollingConfig:
                 or self.window_seconds > self.phase_seconds):
             raise RollingError('Rolling window must be 120 to 900 seconds within a 300- or 900-second phase')
         maximum = self.max_entry_prior_samples
+        if (type(self.rsi_period) is not int or not 2 <= self.rsi_period <= min(50, maximum)
+                or type(self.rsi_filter) is not bool
+                or type(self.rsi_entry) not in (int, float) or not math.isfinite(self.rsi_entry)
+                or not 50 < self.rsi_entry < 100):
+            raise RollingError('Residual RSI requires a supported seed period, Boolean filter and entry threshold between 50 and 100')
+        object.__setattr__(self, 'rsi_entry', float(self.rsi_entry))
         if type(self.min_samples) is not int or not 20 <= self.min_samples <= maximum:
             raise RollingError('Rolling warmup must be at least 20 samples and fit before the final-minute entry cutoff')
         for field in ('entry_z', 'exit_z', 'alpha'):
@@ -69,7 +78,12 @@ class RollingConfig:
         return min(self.window_seconds // SAMPLE_SECONDS, entry_seconds // SAMPLE_SECONDS - 1)
 
     def to_dict(self):
-        return asdict(self)
+        result = asdict(self)
+        # Preserve the identity of existing baseline experiments and archives.
+        if (self.rsi_period, self.rsi_filter, self.rsi_entry) == (14, False, 55.0):
+            for name in ('rsi_period', 'rsi_filter', 'rsi_entry'):
+                result.pop(name)
+        return result
 
 
 def unavailable_indicator(reason, *, asset=None, ticker=None, as_of=None, config=None):
@@ -96,6 +110,9 @@ def unavailable_indicator(reason, *, asset=None, ticker=None, as_of=None, config
         phase_seconds=config.phase_seconds, phase_start=None, seconds_to_close=None,
         residual=None, mean=None, sd=None, z=None, stochastic_k=None, tail_yes=None, tail_no=None,
         minimum_tail_probability=None, entry_allowed=dict(yes=False, no=False),
+        baseline_entry_allowed=dict(yes=False, no=False),
+        rsi=None, rsi_period=config.rsi_period, rsi_filter=config.rsi_filter,
+        rsi_entry=config.rsi_entry, rsi_sample_count=0, rsi_input='model_market_residual',
         exit_allowed=dict(yes=False, no=False), reason=reason,
         thresholds=dict(entry_z=config.entry_z, exit_z=config.exit_z, alpha=config.alpha,
                         stochastic_low=20.0, stochastic_high=80.0, sample_seconds=SAMPLE_SECONDS))
@@ -212,6 +229,38 @@ def _inputs(forecast, quote, now, config):
         fingerprint=hashlib.sha256(encoded.encode()).hexdigest())
 
 
+def _wilder_rsi(samples, period):
+    """RSI of the contiguous admitted five-second residual suffix.
+
+    Seed with the first ``period`` changes, then retain Wilder's recursive
+    averages through the whole phase. Gaps never synthesize flat observations.
+    The count reports completed seed changes, capped at the required period.
+    """
+    values, previous_bucket = [], None
+    for bucket, residual in samples:
+        if previous_bucket is not None and bucket != previous_bucket + 1:
+            values = []
+        values.append(residual)
+        previous_bucket = bucket
+    count = min(period, max(0, len(values) - 1))
+    if count < period:
+        return None, count
+    changes = [current - previous for previous, current in zip(values, values[1:])]
+    gain = math.fsum(max(change, 0.0) for change in changes[:period]) / period
+    loss = math.fsum(max(-change, 0.0) for change in changes[:period]) / period
+    for change in changes[period:]:
+        gain = (gain * (period - 1) + max(change, 0.0)) / period
+        loss = (loss * (period - 1) + max(-change, 0.0)) / period
+    # Exact zero checks preserve scale invariance for small probability changes.
+    if gain == 0 and loss == 0:
+        return 50.0, count
+    if loss == 0:
+        return 100.0, count
+    if gain == 0:
+        return 0.0, count
+    return min(100.0, max(0.0, 100.0 - 100.0 / (1.0 + gain / loss))), count
+
+
 class RollingIndicator:
     """One writer, past-only scores and transactionally recorded observations."""
 
@@ -277,6 +326,8 @@ class RollingIndicator:
             if any(result['entry_allowed'].values()):
                 result['reason'] = 'Rolling extreme observed; new entries stop during the final minute'
             result['entry_allowed'] = dict(yes=False, no=False)
+            if 'baseline_entry_allowed' in result:
+                result['baseline_entry_allowed'] = dict(yes=False, no=False)
         return result
 
     def evaluate(self, forecast, quote, now):
@@ -336,12 +387,18 @@ class RollingIndicator:
             result.update(sample_count=n, mean=mean, sd=sd, minimum_tail_probability=1 / (n + 1))
             waiting = last is not None and (last['bucket'] == inputs['bucket']
                                            or inputs['as_of'] - last['as_of'] < MIN_SPACING_SECONDS)
+            admitted = [(row['bucket'], row['residual']) for row in self.db.execute(
+                'SELECT bucket,residual FROM rolling_samples WHERE context_key=? AND as_of<? ORDER BY as_of',
+                (context_key, inputs['as_of']))]
+            if not waiting:
+                admitted.append((inputs['bucket'], residual))
+            result['rsi'], result['rsi_sample_count'] = _wilder_rsi(admitted, self.config.rsi_period)
             if waiting:
                 result.update(status='sampling_wait', reason='Waiting for the next distinct five-second sampling bucket')
             else:
                 result.update(tail_yes=(1 + sum(value >= residual for value in prior)) / (n + 1) if n else None,
                               tail_no=(1 + sum(value <= residual for value in prior)) / (n + 1) if n else None,
-                              stochastic_k=100 * (residual - low) / (high - low) if high - low > EPSILON else None,
+                              stochastic_k=min(100.0, max(0.0, 100 * (residual - low) / (high - low))) if high - low > EPSILON else None,
                               z=(residual - mean) / sd if sd is not None and sd > EPSILON else None)
                 if n < self.config.min_samples:
                     prefix = 'History reset after a data gap. ' if gap_reset else ''
@@ -354,10 +411,20 @@ class RollingIndicator:
                            and result['stochastic_k'] >= 80)
                     no = (residual < 0 and z <= -self.config.entry_z and result['tail_no'] <= self.config.alpha
                           and result['stochastic_k'] <= 20)
-                    result.update(status='ready', entry_allowed=dict(yes=yes, no=no),
+                    baseline = dict(yes=yes, no=no)
+                    if self.config.rsi_filter:
+                        yes = yes and result['rsi'] is not None and result['rsi'] >= self.config.rsi_entry
+                        no = no and result['rsi'] is not None and result['rsi'] <= 100 - self.config.rsi_entry
+                    reason = ('Nominal historical tail signal for ' + ('YES' if yes else 'NO') if yes or no else
+                              'Residual remains inside the rolling entry bands; tail ranks are not calibrated confidence')
+                    if self.config.rsi_filter and any(baseline.values()):
+                        reason = (reason + '; residual RSI confirms the direction' if yes or no else
+                                  'Rolling extreme observed; residual RSI is warming up' if result['rsi'] is None else
+                                  'Rolling extreme observed; residual RSI does not confirm the direction')
+                    result.update(status='ready', baseline_entry_allowed=baseline,
+                        entry_allowed=dict(yes=yes, no=no),
                         exit_allowed=dict(yes=z <= self.config.exit_z, no=z >= -self.config.exit_z),
-                        reason='Nominal historical tail signal for ' + ('YES' if yes else 'NO') if yes or no else
-                               'Residual remains inside the rolling entry bands; tail ranks are not calibrated confidence')
+                        reason=reason)
                     self._entry_window(result, inputs['now'], inputs['identity']['close_time'])
                 self.db.execute('INSERT INTO rolling_samples VALUES (?,?,?,?)',
                     (context_key, inputs['as_of'], inputs['bucket'], residual))

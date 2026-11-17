@@ -1,0 +1,53 @@
+#neutral-panel{scroll-margin-top:24px;margin:30px 0;border:1px solid #2d4054;border-radius:15px;background:linear-gradient(135deg,#132237 0%,#101922 45%,#101923 100%);overflow:hidden}
+.neutral-chart-zero{stroke:#718ba3;stroke-width:1;stroke-dasharray:3 4;opacity:.7}
+.neutral-experiment{border:1px solid #34505e;border-radius:9px;padding:17px;margin:22px 0;background:#0c1923}.neutral-experiment h3{font-size:15px;font-weight:550;margin:0 0 9px}.neutral-experiment .neutral-evidence{margin:9px 0;overflow-wrap:anywhere}.neutral-experiment-metrics{margin:15px 0}.neutral-experiment [data-stale="true"]{color:var(--orange,#e9bd83)}
+.neutral-shell{padding:26px}.neutral-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}.neutral-heading h2{font-size:25px;line-height:1.2;letter-spacing:-.035em;font-weight:550;margin:0 0 12px}.neutral-eyebrow{font-size:10px;letter-spacing:.17em;text-transform:uppercase;color:#8fd8d0;font-weight:650;margin:0 0 10px}.neutral-intro{font-size:12px;max-width:720px;color:var(--muted,#a4b3c3);line-height:1.75;margin:0}.neutral-mode{white-space:nowrap;font-size:10px;color:#8fd8d0;border:1px solid #36565b;background:#16333566;padding:7px 10px;border-radius:99px}.neutral-toolbar{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin:22px 0 13px}.neutral-control{display:grid;gap:6px;font-size:10px;color:var(--muted)}.neutral-control select{border:1px solid #40566d;border-radius:7px;background:#0d1723;color:var(--text);font:inherit;font-size:12px;padding:10px;min-width:210px}.neutral-button{font-size:12px;color:var(--text);padding:10px 13px;border:1px solid #40566d;background:#192b3d;border-radius:7px;min-height:38px}.neutral-button:hover{background:#223a50}.neutral-button.secondary{background:transparent;color:var(--muted)}.neutral-provenance{margin:0 0 18px;color:var(--muted);font-size:10px;line-height:1.7;overflow-wrap:anywhere}.neutral-status{padding:13px 15px;border:1px solid #32475c;background:#0b1521aa;border-radius:8px;font-size:12px;line-height:1.65;color:var(--text)}.neutral-status[data-stale="true"]{border-color:#735a38;color:var(--orange)}.neutral-evidence{font-size:10px;color:var(--muted);line-height:1.7;margin:10px 0 22px}.neutral-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid #304051;border-left:1px solid #304051;margin:0 0 20px}.neutral-kpi{min-width:0;padding:17px 16px;border-right:1px solid #304051;border-bottom:1px solid #304051;background:#101a2699}.neutral-kpi-label{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.1em;line-height:1.5;color:var(--muted)}.neutral-kpi strong{display:block;font-size:23px;letter-spacing:-.03em;font-weight:550;font-variant-numeric:tabular-nums;margin:7px 0 3px;overflow-wrap:anywhere}.neutral-kpi-note{font-size:10px;line-height:1.6;color:var(--muted);display:block}.neutral-positive{color:var(--green)}.neutral-negative{color:var(--red)}.neutral-decisions{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:20px 0}.neutral-decision{border:1px solid #314152;border-radius:8px;background:#0e1822;padding:17px}.neutral-decision h3{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 11px}.neutral-decision strong{font-size:15px;font-weight:550;display:block;margin:0 0 7px}.neutral-decision p{color:var(--muted);font-size:11px;line-height:1.7;margin:7px 0}.neutral-risk-target{font-variant-numeric:tabular-nums}.neutral-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:22px 0}.neutral-chart-card{padding:17px;border:1px solid #2d4053;border-radius:9px;background:#0b1520;min-width:0}.neutral-chart-card h3{font-size:13px;font-weight:550;margin:0 0 8px}.neutral-chart-card svg{display:block;width:100%;height:auto;background:#0b131d;border-radius:6px;min-height:180px}.neutral-chart-card .neutral-control{display:inline-grid;margin:0 0 9px}.neutral-chart-card .neutral-control select{min-width:0;padding:6px 8px;font-size:10px}.neutral-chart-caption{font-size:10px;line-height:1.7;color:var(--muted);margin:10px 0 0}.neutral-legend{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 12px;font-size:9px;color:var(--muted)}.neutral-legend span{display:inline-flex;align-items:center;gap:5px}.neutral-legend i{width:12px;height:2px;background:currentColor;display:inline-block}.neutral-tables{display:grid;grid-template-columns:1fr;gap:20px;margin:23px 0}.neutral-table-wrap{overflow-x:auto}.neutral-table{width:100%;border-collapse:collapse;font-size:11px;min-width:580px;font-variant-numeric:tabular-nums}.neutral-table caption{text-align:left;color:var(--text);font-size:13px;font-weight:550;padding:0 0 11px}.neutral-table th{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;white-space:nowrap;padding:10px 9px;text-align:left;border-top:1px solid #2d4053;border-bottom:1px solid #2d4053}.neutral-table td{padding:11px 9px;border-bottom:1px solid #243445;vertical-align:top;color:#ced9e4;max-width:300px;overflow-wrap:anywhere}.neutral-table tr:last-child td{border-bottom:0}.neutral-empty-cell{color:var(--muted)!important;font-size:11px;padding:17px 9px!important}.neutral-table .neutral-subcell{display:block;color:var(--muted);font-size:9px;margin-top:4px}.neutral-math{border-top:1px solid #2e4155;padding-top:16px;margin-top:15px;color:var(--muted);font-size:11px;line-height:1.8}.neutral-math summary{color:var(--text);cursor:pointer;font-size:12px}.neutral-math code{color:#b9d7ef;display:block;background:#0b1521;padding:10px 12px;border-radius:6px;white-space:normal;overflow-wrap:anywhere;margin:11px 0}.neutral-math ul{padding-left:19px}.neutral-math li{margin:7px 0}.neutral-limitations{border-top:1px solid #2d4053;padding-top:12px;margin-top:17px;color:var(--muted);font-size:10px;line-height:1.7}.neutral-footer{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:10px;color:var(--muted);border-top:1px solid #2d4053;padding-top:12px;margin-top:19px}.neutral-chart-empty{fill:#95a5b7;font-size:12px;text-anchor:middle}.neutral-chart-axis{fill:#8f9eaf;font-size:10px}.neutral-chart-gridline{stroke:#243747;stroke-width:1}.neutral-chart-limit{stroke-dasharray:5 4}.neutral-chart-tick{font-variant-numeric:tabular-nums}.neutral-chart-card [data-chart-point]{outline:none}.neutral-chart-card [data-chart-point]:focus{stroke:#fff;stroke-width:2}.neutral-limit-crossed{color:var(--orange)}
+.neutral-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:17px 0}.neutral-settings>div{padding:10px 12px;background:#0d1722;border:1px solid #26394d;border-radius:5px;min-width:0}.neutral-settings span{font-size:9px;color:var(--muted);display:block}.neutral-settings strong{font-size:11px;font-weight:500;display:block;color:#bed0e2;margin-top:5px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+@media(max-width:1050px){.neutral-heading{display:block}.neutral-mode{display:inline-flex;margin-top:14px}.neutral-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.neutral-chart-grid{grid-template-columns:1fr}.neutral-settings{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.neutral-shell{padding:19px 13px}.neutral-heading h2{font-size:22px}.neutral-kpi{padding:13px 11px}.neutral-kpi strong{font-size:20px}.neutral-decisions{grid-template-columns:1fr}.neutral-toolbar{align-items:stretch}.neutral-control{width:100%}.neutral-control select{width:100%;min-width:0}.neutral-button{flex:1}.neutral-chart-card{padding:12px}.neutral-chart-card .neutral-control{width:auto}.neutral-chart-card svg{min-height:140px}.neutral-kpi-label{font-size:8px}}
+@media(max-width:600px){.neutral-chart-caption::after{content:"Swipe chart sideways or use Expand.";display:block;margin-top:7px;color:#b7d4ec;font-size:10px}}
+
+/* The hourly experiment is a research card within the shared workspace. */
+.workspace-tabpanel #neutral-panel {
+  margin: 0 0 22px;
+  padding: 0;
+  border-color: #304258;
+  border-radius: 12px;
+  background: var(--panel, #111821);
+}
+.workspace-tabpanel .neutral-shell { padding: 23px; }
+.workspace-tabpanel .neutral-heading h2 { font-size: 22px; line-height: 1.35; letter-spacing: -.025em; }
+.workspace-tabpanel .neutral-heading { gap: 20px; }
+.workspace-tabpanel .neutral-mode { border-radius: 6px; white-space: normal; line-height: 1.5; }
+.workspace-tabpanel .neutral-intro { max-width: 850px; line-height: 1.75; }
+.workspace-tabpanel .neutral-provenance { color: #9eafc3; font-size: 11px; }
+.workspace-tabpanel .neutral-evidence { font-size: 11px; line-height: 1.75; }
+.workspace-tabpanel .neutral-summary { border-color: #2d4055; }
+.workspace-tabpanel .neutral-kpi { border-color: #2d4055; padding: 16px 14px; background: #101c29; }
+.workspace-tabpanel .neutral-kpi strong { font-size: 21px; line-height: 1.35; margin-top: 8px; }
+.workspace-tabpanel .neutral-kpi-label { font-size: 9px; letter-spacing: .055em; }
+.workspace-tabpanel .neutral-kpi-note { color: #93a7bd; }
+.workspace-tabpanel .neutral-experiment { background: #0c1723; border-color: #30485d; }
+.workspace-tabpanel .neutral-experiment h3 { font-size: 16px; }
+.workspace-tabpanel .neutral-chart-grid { gap: 20px; }
+.workspace-tabpanel .neutral-chart-card { padding: 18px; border-color: #2b3e53; border-radius: 10px; background: #0e1722; }
+.workspace-tabpanel .neutral-chart-card h3 { font-size: 14px; line-height: 1.55; color: #deebf8; }
+.workspace-tabpanel .neutral-chart-caption { font-size: 11px; line-height: 1.75; }
+.workspace-tabpanel .neutral-legend { color: #b2c4d8; font-size: 10.5px; gap: 7px 14px; }
+.workspace-tabpanel .neutral-legend i { width: 17px; }
+.workspace-tabpanel .neutral-chart-axis { fill: #b5c9dd; }
+.workspace-tabpanel .neutral-chart-gridline { stroke: #293b4f; stroke-width: .75; }
+.workspace-tabpanel .neutral-table caption { color: #d7e6f5; font-size: 14px; }
+.workspace-tabpanel .neutral-table th { color: #a9bdd1; }
+.workspace-tabpanel .neutral-table tbody tr:hover { background: #1a2b3c52; }
+.workspace-tabpanel .neutral-math summary { padding-bottom: 3px; }
+@media (max-width: 620px) {
+  .workspace-tabpanel .neutral-shell { padding: 18px 13px; }
+  .workspace-tabpanel .neutral-heading h2 { font-size: 20px; }
+  .workspace-tabpanel .neutral-kpi { padding: 13px 11px; }
+  .workspace-tabpanel .neutral-kpi strong { font-size: 19px; }
+  .workspace-tabpanel .neutral-chart-grid { gap: 16px; }
+  .workspace-tabpanel .neutral-chart-card { padding: 14px 11px; }
+  .workspace-tabpanel .neutral-chart-caption { font-size: 10.5px; }
+  .workspace-tabpanel .neutral-legend { font-size: 10px; }
+}

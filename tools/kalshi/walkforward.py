@@ -98,6 +98,18 @@ def _compact_metrics(metrics):
         for horizon, item in value['by_horizon'].items()}) for name, value in metrics.items()}
 
 
+def _weight_fit_diagnostics(fitted):
+    """Retain optimizer evidence without implying a finite fit is stationary."""
+    diagnostics = fitted['diagnostics']
+    converged, iterations = diagnostics['converged'], fitted['iterations']
+    maximum = diagnostics['maximum_iterations']
+    return dict(converged=converged, iterations=iterations, maximum_iterations=maximum,
+        projected_gradient_residual=diagnostics['projected_gradient_residual'],
+        projected_gradient_tolerance=diagnostics['projected_gradient_tolerance'],
+        optimizer=diagnostics['optimizer'], status=('converged' if converged else
+            'iteration_limit_reached' if iterations >= maximum else 'not_converged'))
+
+
 def _percentile(values, fraction):
     position = (len(values) - 1) * fraction
     lower = int(position)
@@ -233,7 +245,8 @@ def walk_forward_evaluate(rows, *, asset='BTC', min_train_days=3, weight_days=1,
                 validation = evaluate_ensemble(prediction_rows['validation'], fitted['weights'])
                 mixture_candidates.append(dict(regularization=penalty, weights=fitted['weights'],
                     weight_training_objective=fitted['objective'],
-                    validation_log_loss=validation['log_loss']))
+                    validation_log_loss=validation['log_loss'],
+                    weight_fit_diagnostics=_weight_fit_diagnostics(fitted)))
             selected_mixture = mixture_candidates[-1]
             for candidate in reversed(mixture_candidates[:-1]):
                 if candidate['validation_log_loss'] < selected_mixture['validation_log_loss'] - 1e-10:
@@ -254,11 +267,14 @@ def walk_forward_evaluate(rows, *, asset='BTC', min_train_days=3, weight_days=1,
             splits=splits, member_parameters=parameters, member_fit=member_fit,
             selected_single=dict(selected_single), weights=dict(selected_mixture['weights']),
             regularization=selected_mixture['regularization'], mixture_candidates=mixture_candidates,
+            weight_fit_diagnostics=dict(selected_mixture['weight_fit_diagnostics']),
             validation_metrics=_compact_metrics(validation_metrics), test_metrics=_compact_metrics(test_metrics)))
         if progress:
             progress(dict(stage='walkforward_fold', fold=attempted, test_days=day_sets['test'],
                 test_contracts=len(tickers), weights=dict(selected_mixture['weights']),
-                regularization=selected_mixture['regularization'], execution_eligible=False))
+                regularization=selected_mixture['regularization'],
+                weight_fit_converged=selected_mixture['weight_fit_diagnostics']['converged'],
+                execution_eligible=False))
     if not folds:
         raise WalkForwardError('No complete walk-forward fold has enough eligible contracts in every block')
     aggregate = _evaluate_comparison(test_predictions)
@@ -267,6 +283,7 @@ def walk_forward_evaluate(rows, *, asset='BTC', min_train_days=3, weight_days=1,
     latest_fit = dict(kind='kalshi_ensemble_weight_fit', version=1, asset=profile.symbol,
         model_scope=MODEL_SCOPE, member_parameters=last['member_parameters'], weights=last['weights'],
         regularization=last['regularization'], source_fold_id=last['id'],
+        weight_fit_diagnostics=dict(last['weight_fit_diagnostics']),
         training_periods={name: last['splits'][name]['days'] for name in ('train', 'weight', 'validation')},
         test_days=last['test_days'], execution_eligible=False, calibrated=False, live_compatible=False,
         deployment_status='offline_research_only')
@@ -294,6 +311,7 @@ def walk_forward_evaluate(rows, *, asset='BTC', min_train_days=3, weight_days=1,
             'Members share the same final-minute settlement approximation and differ in volatility memory.',
             'Member scales use base-training outcomes; weights use later out-of-sample component forecasts.',
             'Regularization and the single-model comparator use a later validation block before outer testing.',
+            'Optimizer convergence and residuals are retained; a finite iteration-capped fit is not an optimality claim.',
             'Earlier outer test outcomes can enter later folds only after their chronological evaluation date.',
             'Bootstrap intervals resample whole UTC days, depend on the observed sample, and do not establish an execution edge.',
             'Constant fitted mixture weights are research artifacts and are not loaded by the live single-model fit loader.',

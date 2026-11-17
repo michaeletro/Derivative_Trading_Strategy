@@ -12,6 +12,8 @@ const ASSETS = Object.freeze({
   SOL: {series: 'KXSOL15M', index: 'SOLUSD_RTI', source: 'CF_SOLUSD_RTI', digits: 4},
   XRP: {series: 'KXXRP15M', index: 'XRPUSD_RTI', source: 'CF_XRPUSD_RTI', digits: 4}
 });
+const GOLD_MODEL_REASON = 'Gold probabilities are unavailable in this CF Monte Carlo panel. The separate Gold adapter uses Pyth Metal.Index.1OZGOLD/USD and its minute-close settlement model; the crypto final-minute-average model does not apply.';
+const viewAsset = value => value === 'GOLD' || Object.hasOwn(ASSETS, value);
 const assetForTicker = ticker => typeof ticker === 'string' ? Object.keys(ASSETS).find(asset =>
   new RegExp(`^${ASSETS[asset].series}-[A-Za-z0-9_.:-]{1,119}$`).test(ticker)) ?? null : null;
 const modelVersion = asset => `cf-${ASSETS[asset].index.toLowerCase().replaceAll('_', '-')}-local-diffusion-mc-v1`;
@@ -32,6 +34,13 @@ export function validateFittedParameters(raw, asset) {
     volatility_scale: number(raw.volatility_scale, .5, 2),
     test_contract_count: number(raw.test_contract_count, 20, 100000)};
   if (!Number.isSafeInteger(result.test_contract_count)) fail('Invalid historical fit sample count.');
+  if (Object.hasOwn(raw, 'history_window_seconds') || Object.hasOwn(raw, 'min_live_history_seconds')) {
+    if (!Number.isSafeInteger(raw.history_window_seconds) || raw.history_window_seconds < 1800
+        || raw.history_window_seconds > 3600 || !Number.isSafeInteger(raw.min_live_history_seconds)
+        || raw.min_live_history_seconds !== raw.history_window_seconds - 5) fail('Invalid fitted history window.');
+    result.history_window_seconds = raw.history_window_seconds;
+    result.min_live_history_seconds = raw.min_live_history_seconds;
+  }
   for (const key of ['test_baseline_log_loss', 'test_fitted_log_loss', 'test_baseline_brier_score', 'test_fitted_brier_score']) {
     result[key] = number(raw[key], 0, key.includes('brier') ? 1 : 1000000);
   }
@@ -41,7 +50,7 @@ export function validateFittedParameters(raw, asset) {
   result.out_of_sample_improved = improved;
   return result;
 }
-const fittedStatus = fit => fit ? `Historical fit active: ${(fit.half_life_seconds / 60).toFixed(2)} min EWMA half-life; volatility x${fit.volatility_scale.toFixed(4)}. ` : '';
+const fittedStatus = fit => fit ? `Historical fit active: ${(fit.half_life_seconds / 60).toFixed(2)} min EWMA half-life; volatility x${fit.volatility_scale.toFixed(4)}. ${fit.history_window_seconds === undefined ? '' : `${(fit.history_window_seconds / 60).toFixed(2)} min fitted history window. `}` : '';
 const fittedEvidence = fit => fit ? [
   `Held-out test: ${fit.test_contract_count} contracts; lower scores are better. Log loss baseline ${fit.test_baseline_log_loss.toFixed(6)} / fitted ${fit.test_fitted_log_loss.toFixed(6)}; Brier baseline ${fit.test_baseline_brier_score.toFixed(6)} / fitted ${fit.test_fitted_brier_score.toFixed(6)}.`,
   fit.out_of_sample_improved ? 'Fitted research parameters; held-out scores improved on this sample. Live performance remains unvalidated.'
@@ -94,17 +103,29 @@ export function validateLiveProbability(raw, expectedAsset = null) {
   const time = result.time;
   if (!same(time.window_end - time.window_start, 900) || !same(time.window_end, p.close_time)
       || !same(time.elapsed_seconds, result.as_of - time.window_start) || !same(time.remaining_seconds, time.window_end - result.as_of)
-      || !same(time.elapsed_seconds + time.remaining_seconds, 900) || !same(time.progress, time.elapsed_seconds / 900)) fail('Inconsistent fifteen-minute model clock.');
+      || !same(time.elapsed_seconds + time.remaining_seconds, 900) || !same(time.progress, time.elapsed_seconds / 900)
+      || result.model_time < time.window_start) fail('Inconsistent fifteen-minute model clock.');
   const deterministic = p.dollar_volatility_per_sqrt_second === 0;
   if ((result.sampling_interval.method === 'deterministic') !== deterministic) fail('Inconsistent deterministic interval.');
   if (deterministic && (!same(result.sampling_interval.lower, result.probability_yes) || !same(result.sampling_interval.upper, result.probability_yes)
       || ![0, 1].includes(result.probability_yes) || result.monte_carlo_se !== 0)) fail('Invalid deterministic probability.');
   for (const key of GREEKS) result.greeks[key] = deterministic && raw.greeks[key] === null ? null : number(raw.greeks[key]);
-  if (!deterministic && (result.greeks.delta_per_dollar < 0 || !same(result.greeks.delta_pp_per_100_dollars, 10000 * result.greeks.delta_per_dollar))) fail('Invalid probability delta units.');
+  if (!deterministic && (result.greeks.delta_per_dollar < 0
+      || !same(result.greeks.delta_pp_per_dollar, 100 * result.greeks.delta_per_dollar)
+      || !same(result.greeks.delta_pp_per_100_dollars, 10000 * result.greeks.delta_per_dollar))) fail('Invalid probability delta units.');
   const d = raw.diagnostics;
   if (!Number.isSafeInteger(d.paths) || d.paths < 1 || d.paths > 20000 || !Number.isSafeInteger(d.seed) || d.seed < 0) fail('Invalid simulation count or seed.');
   result.diagnostics = {paths: d.paths, seed: d.seed, source_age_seconds: number(d.source_age_seconds, 0, 5),
     latest_received_at: number(d.latest_received_at, 0, result.as_of)};
+  if (!same(result.diagnostics.source_age_seconds, result.as_of - result.model_time, 1e-12)
+      || result.diagnostics.latest_received_at < result.model_time
+      || Object.hasOwn(d, 'latest_event_time') && !same(number(d.latest_event_time, 0, result.as_of), result.model_time, 1e-12)) fail('Inconsistent probability source clocks.');
+  if (Object.hasOwn(d, 'successes')) {
+    if (!Number.isSafeInteger(d.successes) || d.successes < 0 || d.successes > d.paths
+        || !same(result.probability_yes, d.successes / d.paths, 1e-12)
+        || !same(result.monte_carlo_se, Math.sqrt(result.probability_yes * (1 - result.probability_yes) / d.paths), 1e-12)) fail('Monte Carlo count and sampling error disagree.');
+    result.diagnostics.successes = d.successes;
+  }
   if (raw.probability_fan.length < 2 || raw.probability_fan.length > 75 || raw.probability_paths.length < 1 || raw.probability_paths.length > 12) fail('Invalid probability path count.');
   result.probability_fan = raw.probability_fan.map((row, index) => {
     if (!object(row)) fail('Invalid probability fan.');
@@ -115,6 +136,16 @@ export function validateLiveProbability(raw, expectedAsset = null) {
   const grid = result.probability_fan.map(row => row.seconds), first = result.probability_fan[0];
   if (grid[0] !== 0 || !same(grid.at(-1), p.close_time - result.model_time)
       || !['p05', 'p50', 'p95'].every(key => same(first[key], result.analytic_probability_yes))) fail('Inconsistent conditional probability horizon.');
+  if (Object.hasOwn(d, 'probability_mean_path')) {
+    if (!Array.isArray(d.probability_mean_path) || d.probability_mean_path.length !== grid.length) fail('Invalid conditional probability mean.');
+    result.diagnostics.probability_mean_path = d.probability_mean_path.map((row, index) => {
+      if (!object(row) || !same(row.seconds, grid[index])) fail('Inconsistent conditional probability mean clock.');
+      return {seconds: number(row.seconds, 0, 905), probability_yes: probability(row.probability_yes)};
+    });
+    const mean = result.diagnostics.probability_mean_path;
+    if (!same(mean[0].probability_yes, result.analytic_probability_yes)
+        || !same(mean.at(-1).probability_yes, result.probability_yes)) fail('Inconsistent conditional probability mean endpoints.');
+  }
   const seen = new Set();
   result.probability_paths = raw.probability_paths.map(path => {
     if (!object(path) || typeof path.id !== 'string' || !path.id.length || seen.has(path.id) || !Array.isArray(path.points) || path.points.length !== grid.length) fail('Invalid probability path.');
@@ -145,6 +176,14 @@ export function validateLiveProbability(raw, expectedAsset = null) {
     }
     return resultRow;
   });
+  if (!deterministic) {
+    const keys = {delta: 'delta_per_dollar', gamma: 'gamma_per_dollar_squared',
+      theta: 'theta_per_second', vega: 'vega_per_dollar_volatility'};
+    for (const [metric, key] of Object.entries(keys)) for (const q of ['p05', 'p50', 'p95']) {
+      const value = result.sensitivity_fan[0][metric][q], initial = result.greeks[key];
+      if (Math.abs(value - initial) > 1e-12 + 1e-8 * Math.max(Math.abs(value), Math.abs(initial))) fail('Initial sensitivity scenarios differ from the current model.');
+    }
+  }
   if (raw.observed_sensitivities != null) {
     if (!Array.isArray(raw.observed_sensitivities) || raw.observed_sensitivities.length > 900) fail('Invalid observed sensitivity history.');
     result.observed_sensitivities = raw.observed_sensitivities.map((row, index) => {
@@ -169,12 +208,14 @@ const VALUES = ['yes', 'no', 'analytic', 'interval', 'se', 'spot', 'target', 'ag
 export function mountProbability(doc = document, win = window, {fetchImpl = win.fetch.bind(win), now = Date.now, pollMs = 5000, asset = 'BTC'} = {}) {
   if (!doc.getElementById('live-probability-panel')) return null;
   const $ = name => doc.getElementById(`probability-mc-${name}`), set = (name, value) => { if ($(name)) $(name).textContent = value; };
-  if (!Object.hasOwn(ASSETS, asset)) fail('Choose a supported crypto asset.');
-  let selectedAsset = asset, explicitlySelected = false, market = null, report = null, currentIdentity = null, version = 0, fetching = false, controller = null, stopped = false;
+  if (!viewAsset(asset)) fail('Choose a supported market asset.');
+  let selectedAsset = asset, explicitlySelected = false, environment = null, market = null, report = null, currentIdentity = null, version = 0, fetching = false, controller = null, stopped = false;
   let lastShown = null, staleReason = '', greekChartSnapshot = null;
+  let probabilityView = 'future', sensitivityView = 'all';
   const shownFields = new Map();
   let paths = '4000';
-  const validMarket = state => state?.market_status === 'ready' && assetForTicker(state.market?.ticker) === selectedAsset
+  const validMarket = state => (environment === null || environment === 'production')
+    && state?.market_status === 'ready' && assetForTicker(state.market?.ticker) === selectedAsset
     && (state.selected_asset == null || state.selected_asset === selectedAsset) && IDENTITY.test(state.market?.quote_id)
     && finite(Date.parse(state.market.open_time)) && finite(Date.parse(state.market.close_time)) && finite(Date.parse(state.fetched_at))
     && now() >= Date.parse(state.market.open_time) && now() < Date.parse(state.market.close_time)
@@ -225,25 +266,88 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
       const element = doc.createElement('li'); element.textContent = content; $('assumptions')?.appendChild(element);
     }
   }
+  function chartContext(svg, value, view, views, bounds, metric = '') {
+    svg.setAttribute('data-chart-views', JSON.stringify(views));
+    svg.setAttribute('data-chart-view', view);
+    svg.setAttribute('data-chart-bounds', bounds);
+    svg.setAttribute('data-chart-scope', `${environment ?? 'production'}|${selectedAsset}|${value.ticker}|${value.quote_id}|${value.fitted_parameters?.artifact_sha256 ?? 'baseline'}${metric ? `|${metric}` : ''}`);
+  }
+  function drawProbabilityHistory(value) {
+    const svg = $('chart');
+    // The producer archives probability_yes (the MC estimate), without each
+    // snapshot's simulation count or interval. Do not invent historical CIs.
+    const rows = [...new Map([...value.observed_sensitivities,
+      {model_time: value.model_time, as_of: value.as_of, probability_yes: value.probability_yes}]
+      .map(row => [row.model_time, row])).values()].sort((a, b) => a.model_time - b.model_time);
+    const first = rows[0].model_time, last = rows.at(-1).model_time;
+    const left = first === last ? first - .5 : first, right = first === last ? last + .5 : last;
+    const x = time => 52 + 572 * (time - left) / (right - left), y = p => 210 - 180 * p;
+    const add = (tag, fields, content = '') => {
+      const node = doc.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [key, val] of Object.entries(fields)) node.setAttribute(key, String(val));
+      node.textContent = content; svg.appendChild(node); return node;
+    };
+    const detail = (node, description) => {
+      node.setAttribute('data-chart-detail', description); node.setAttribute('data-chart-series', 'recorded-probability');
+      node.setAttribute('data-chart-label', 'Recorded MC model');
+      const title = doc.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = description; node.appendChild(title);
+    };
+    svg.setAttribute('aria-label', `${selectedAsset} recorded Monte Carlo settlement probability by source observation time`);
+    svg.setAttribute('data-chart-x-label', 'Recorded source observation time (UTC)');
+    svg.setAttribute('data-chart-y-label', 'Recorded MC YES probability (%)');
+    add('text', {x: 52, y: 15, class: 'chart-axis-title'}, `${selectedAsset} P(YES)`);
+    add('text', {x: 624, y: 15, class: 'chart-label', 'text-anchor': 'end'}, `${rows.length} recorded model snapshot${rows.length === 1 ? '' : 's'}`);
+    for (const level of [0, .25, .5, .75, 1]) {
+      add('line', {x1: 52, y1: y(level), x2: 624, y2: y(level), class: 'chart-grid'});
+      add('text', {x: 42, y: y(level) + 4, 'text-anchor': 'end', class: 'chart-label'}, `${level * 100}%`);
+    }
+    const segments = []; let segment = null;
+    for (const row of rows) {
+      if (!segment || row.model_time - segment.at(-1).model_time > 10) { segment = []; segments.push(segment); }
+      segment.push(row);
+    }
+    detail(add('path', {d: segments.map(points => points.map((row, i) => `${i ? 'L' : 'M'}${x(row.model_time)},${y(row.probability_yes)}`).join(' ')).join(' '),
+      class: 'chart-line chart-observed', 'vector-effect': 'non-scaling-stroke'}),
+      'Recorded Monte Carlo model probabilities for this contract. Gaps longer than 10 source seconds remain disconnected; this is model history, not observed settlement outcomes. Historical sampling intervals were not recorded.');
+    for (const row of rows) {
+      const precision = row.model_time === value.model_time
+        ? value.sampling_interval.method === 'deterministic' ? 'The current snapshot is deterministic; model uncertainty is unmeasured.'
+          : `Current 95% MC sampling interval ${percent(value.sampling_interval.lower)} to ${percent(value.sampling_interval.upper)}; model and calibration uncertainty are unmeasured.`
+        : 'A historical sampling interval is unavailable.';
+      const description = `${selectedAsset} recorded Monte Carlo model P(YES) ${percent(row.probability_yes)}; source observation ${new Date(row.model_time * 1000).toISOString()}; snapshot ${new Date(row.as_of * 1000).toISOString()}. This is a model estimate, not an observed outcome. ${precision}`;
+      detail(add('circle', {cx: x(row.model_time), cy: y(row.probability_yes), r: 2.5, fill: '#e8b86d'}), description);
+      detail(add('circle', {cx: x(row.model_time), cy: y(row.probability_yes), r: 6, fill: 'transparent', stroke: 'none',
+        class: 'chart-inspect-point', 'pointer-events': 'all'}), description);
+    }
+    for (const time of [...new Set([first, last])]) add('text', {x: x(time), y: 232,
+      'text-anchor': first === last ? 'middle' : time === first ? 'start' : 'end', class: 'chart-label'}, new Date(time * 1000).toISOString().slice(11, 19));
+    add('text', {x: 338, y: 252, 'text-anchor': 'middle', class: 'chart-axis-title'}, 'Recorded source observations (UTC); missing history remains gaps');
+  }
   function draw(value) {
     const svg = $('chart');
     if (!svg || typeof doc.createElementNS !== 'function') return;
     svg.replaceChildren();
+    chartContext(svg, value, probabilityView, [{value: 'future', label: 'Conditional scenarios'},
+      {value: 'observed', label: 'Recorded model probability'}], '52 30 624 210');
+    if (probabilityView === 'observed') { drawProbabilityHistory(value); return; }
     svg.setAttribute('aria-label', `${selectedAsset} settlement YES probability through the remaining contract window`);
     const horizon = value.probability_fan.at(-1).seconds;
     const x = seconds => 52 + 572 * seconds / horizon, y = p => 210 - 180 * p;
     const add = (tag, fields, label = '') => {
       const element = doc.createElementNS('http://www.w3.org/2000/svg', tag);
       for (const [key, val] of Object.entries(fields)) element.setAttribute(key, String(val));
-      element.textContent = label; svg.appendChild(element);
+      element.textContent = label; svg.appendChild(element); return element;
     };
+    const detail = (node, description, series, seriesLabel) => {
+      node.setAttribute('data-chart-detail', description); node.setAttribute('data-chart-series', series);
+      node.setAttribute('data-chart-label', seriesLabel);
+      const title = doc.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = description; node.appendChild(title); return node;
+    };
+    svg.setAttribute('data-chart-x-label', 'Time ahead (seconds)');
+    svg.setAttribute('data-chart-y-label', 'Conditional YES probability (%)');
     add('text', {x: 52, y: 15, class: 'chart-axis-title'}, `${selectedAsset} P(YES)`);
-    add('line', {x1: 192, x2: 212, y1: 11, y2: 11, stroke: '#79b8ff', 'stroke-width': 2});
-    add('text', {x: 220, y: 15, class: 'chart-label', fill: '#79b8ff'}, 'Median');
-    add('text', {x: 325, y: 15, class: 'chart-label'}, '5th-95th scenario band');
-    add('rect', {x: 302, y: 6, width: 15, height: 10, fill: '#79b8ff', 'fill-opacity': .25});
-    add('text', {x: 525, y: 15, class: 'chart-label'}, 'Sample paths');
-    add('line', {x1: 500, x2: 518, y1: 11, y2: 11, stroke: '#9aa9bc', 'stroke-width': 1, opacity: .5});
+    add('text', {x: 624, y: 15, class: 'chart-label', 'text-anchor': 'end'}, 'Conditional model scenarios');
     for (const level of [0, .25, .5, .75, 1]) {
       add('line', {x1: 52, y1: y(level), x2: 624, y2: y(level), class: 'chart-grid'});
       add('text', {x: 42, y: y(level) + 4, 'text-anchor': 'end', class: 'chart-label'}, `${level * 100}%`);
@@ -251,9 +355,50 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
     const path = points => points.map(([seconds, p], index) => `${index ? 'L' : 'M'}${x(seconds).toFixed(2)},${y(p).toFixed(2)}`).join(' ');
     const band = [...value.probability_fan.map(point => [point.seconds, point.p95]),
       ...value.probability_fan.slice().reverse().map(point => [point.seconds, point.p05])];
-    add('path', {d: `${path(band)} Z`, fill: '#79b8ff', 'fill-opacity': .10, stroke: 'none'});
-    for (const row of value.probability_paths) add('path', {d: path(row.points.map(point => [point.seconds, point.probability_yes])), class: 'chart-line chart-sample'});
-    for (const key of ['p05', 'p95', 'p50']) add('path', {d: path(value.probability_fan.map(point => [point.seconds, point[key]])), class: key === 'p50' ? 'chart-line chart-blue' : 'chart-line chart-band'});
+    detail(add('path', {d: `${path(band)} Z`, fill: '#79b8ff', 'fill-opacity': .10, stroke: 'none'}),
+      'Pointwise 5th–95th conditional scenario band; not a confidence interval or Monte Carlo sampling interval.', 'scenario-band', 'Scenario band');
+    for (const row of value.probability_paths) detail(add('path', {d: path(row.points.map(point => [point.seconds, point.probability_yes])),
+      class: 'chart-line chart-sample', opacity: .20, 'vector-effect': 'non-scaling-stroke'}),
+      `Illustrative simulated probability path ${row.id}; not observed market history.`, 'sample-paths', 'Illustrative paths');
+    for (const key of ['p05', 'p95', 'p50']) detail(add('path', {d: path(value.probability_fan.map(point => [point.seconds, point[key]])),
+      class: key === 'p50' ? 'chart-line chart-blue' : 'chart-line chart-band', 'vector-effect': 'non-scaling-stroke'}),
+      `Conditional scenario ${key === 'p50' ? 'median' : key === 'p05' ? '5th percentile' : '95th percentile'}; not a realized future probability.`,
+      key === 'p50' ? 'conditional-median' : 'scenario-bounds', key === 'p50' ? 'Conditional median' : 'Scenario bounds');
+    const mean = value.diagnostics.probability_mean_path;
+    if (mean) {
+      detail(add('path', {d: path(mean.map(point => [point.seconds, point.probability_yes])), fill: 'none', stroke: '#6ed9a1',
+        'stroke-width': 2, 'vector-effect': 'non-scaling-stroke'}),
+        'Mean of the provider simulated conditional YES probabilities at each future checkpoint. This differs from the scenario median and is conditional on the frozen diffusion model.',
+        'conditional-mean', 'Conditional mean');
+      for (const point of mean) detail(add('circle', {cx: x(point.seconds), cy: y(point.probability_yes), r: 5,
+        fill: 'transparent', stroke: 'none', class: 'chart-inspect-point', 'pointer-events': 'all'}),
+        `${selectedAsset} conditional mean at +${Number(point.seconds.toFixed(3))} s: ${percent(point.probability_yes)}. ${point.seconds === horizon ? 'At settlement this is the simulated YES outcome frequency; the terminal median is a separate binary quantile. ' : ''}Model observation ${new Date(value.model_time * 1000).toISOString()}.`,
+        'conditional-mean', 'Conditional mean');
+    }
+    for (const point of value.probability_fan) detail(add('circle', {cx: x(point.seconds), cy: y(point.p50), r: 5,
+      fill: 'transparent', stroke: 'none', class: 'chart-inspect-point', 'pointer-events': 'all'}),
+      `${selectedAsset} conditional scenario at +${Number(point.seconds.toFixed(3))} s: median ${percent(point.p50)}; 5th ${percent(point.p05)}; 95th ${percent(point.p95)}. ${point.seconds === horizon ? 'At settlement each simulated outcome is 0 or 1; the terminal median is a scenario quantile, not the expected YES probability. ' : ''}Model observation ${new Date(value.model_time * 1000).toISOString()}.`,
+      'conditional-median', 'Conditional median');
+    detail(add('text', {x: 620, y: 202, 'text-anchor': 'end', class: 'chart-label'}, 'Settlement: 0 or 1'),
+      'Settlement resolves to 0 or 1. The final scenario median is a quantile of binary simulated outcomes, not an expected future probability or directional forecast.',
+      'settlement-outcome', 'Settlement outcomes');
+    const sampling = value.sampling_interval, samplingX = x(0);
+    const samplingSeries = sampling.method === 'deterministic' ? 'Current deterministic estimate' : 'Current MC estimate / sampling interval';
+    const samplingDetail = sampling.method === 'deterministic'
+      ? `${selectedAsset} current deterministic estimate ${percent(value.probability_yes)}. Zero modeled volatility; no Monte Carlo sampling error. Model uncertainty is not measured.`
+      : `${selectedAsset} current Monte Carlo estimate ${percent(value.probability_yes)} from ${value.diagnostics.paths.toLocaleString()} paths. 95% sampling interval ${percent(sampling.lower)} to ${percent(sampling.upper)}; standard error ${(100 * value.monte_carlo_se).toFixed(3)} percentage points. Sampling error does not measure model or calibration uncertainty. Model observation ${new Date(value.model_time * 1000).toISOString()}.`;
+    if (sampling.method !== 'deterministic') {
+      for (const fields of [
+        {x1: samplingX, x2: samplingX, y1: y(sampling.lower), y2: y(sampling.upper)},
+        {x1: samplingX - 4, x2: samplingX + 4, y1: y(sampling.lower), y2: y(sampling.lower)},
+        {x1: samplingX - 4, x2: samplingX + 4, y1: y(sampling.upper), y2: y(sampling.upper)}
+      ]) detail(add('line', {...fields, stroke: '#e8b86d', 'stroke-width': 2,
+        'vector-effect': 'non-scaling-stroke'}), samplingDetail, 'current-estimate', samplingSeries);
+    }
+    detail(add('circle', {cx: samplingX, cy: y(value.probability_yes), r: 4,
+      fill: '#e8b86d', stroke: '#0d141c', 'stroke-width': 1.5,
+      class: 'chart-inspect-point', 'pointer-events': 'all'}),
+      samplingDetail, 'current-estimate', samplingSeries);
     for (const seconds of [0, horizon / 2, horizon]) {
       const tick = horizon < 120
         ? `+${Number(seconds.toFixed(2))} s`
@@ -272,7 +417,7 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
     show('se', `${(100 * value.monte_carlo_se).toFixed(3)} pp`, value);
     const money = (number, target = false) => Number(number).toLocaleString('en-US', {style: 'currency', currency: 'USD', minimumFractionDigits: ASSETS[selectedAsset].digits, maximumFractionDigits: target ? 8 : ASSETS[selectedAsset].digits});
     show('spot', money(p.spot), value); show('target', money(p.target, true), value);
-    show('age', `${(now() / 1000 - value.model_time).toFixed(1)}s`, value); show('samples', `${p.known_count}/60 fixed; ${value.diagnostics.paths.toLocaleString()} paths`, value);
+    show('age', `${Math.max(0, now() / 1000 - value.model_time).toFixed(1)}s`, value); show('samples', `${p.known_count}/60 fixed; ${value.diagnostics.paths.toLocaleString()} paths`, value);
     show('delta', g.delta_pp_per_dollar === null ? 'Unavailable' : selectedAsset === 'BTC' ? `${signed(g.delta_pp_per_100_dollars)} pp / $100` : `${signed(g.delta_pp_per_dollar)} pp / USD`, value, g.delta_pp_per_dollar !== null);
     show('gamma', `${scientific(g.gamma_per_dollar_squared)} / USD squared`, value, g.gamma_per_dollar_squared !== null);
     show('theta', g.theta_per_second === null ? 'Unavailable' : `${signed(g.theta_per_second * 100)} pp / s`, value, g.theta_per_second !== null);
@@ -297,70 +442,126 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
     const svg = $('greek-chart');
     if (!svg || typeof doc.createElementNS !== 'function') return;
     const metric = ['delta', 'gamma', 'theta', 'vega'].includes($('greek-metric')?.value) ? $('greek-metric').value : 'delta';
-    const rows = value.sensitivity_fan.filter(row => row[metric] !== null);
-    const observed = value.observed_sensitivities.filter(row => row[metric] !== null);
-    const descriptions = {delta: 'Delta: probability / USD', gamma: 'Gamma: probability / USD squared',
-      theta: 'Calendar theta: probability / elapsed second', vega: 'Vega: probability / (USD/sqrt(second))'};
-    set('greek-status', `${selectedAsset} ${descriptions[metric]}. Amber: ${observed.length} observed snapshots for this contract. Blue/dashed: conditional future median / 5th / 95th percentiles. Terminal sensitivities are unavailable.`);
+    const fan = sensitivityView === 'observed' ? [] : value.sensitivity_fan;
+    const history = sensitivityView === 'future' ? [] : value.observed_sensitivities;
+    const rows = fan.filter(row => row[metric] !== null);
+    const observed = history.filter(row => row[metric] !== null);
+    const factor = metric === 'delta' ? selectedAsset === 'BTC' ? 10000 : 100 : metric === 'theta' ? 100 : 1;
+    const units = {delta: selectedAsset === 'BTC' ? 'pp / $100' : 'pp / USD', gamma: 'probability / USD²',
+      theta: 'pp / elapsed second', vega: 'probability / (USD/√second)'};
+    const display = amount => {
+      const scaled = amount * factor;
+      return scaled === 0 || Math.abs(scaled) >= .001 && Math.abs(scaled) < 10000 ? scaled.toFixed(3) : scaled.toExponential(3);
+    };
+    const descriptions = {delta: 'Delta', gamma: 'Gamma', theta: 'Calendar theta', vega: 'Vega'};
+    const viewLabel = sensitivityView === 'all' ? 'Full contract' : sensitivityView === 'observed' ? 'Recorded snapshots only' : 'Conditional future only';
+    set('greek-status', `${selectedAsset} ${descriptions[metric]}: ${units[metric]}. ${viewLabel}. Amber: ${observed.length} recorded model snapshots for this contract. Blue/dashed: conditional future median / 5th / 95th percentiles. Partial sensitivities hold dollar volatility and realized settlement samples fixed. Terminal sensitivities are unavailable.`);
+    chartContext(svg, value, sensitivityView, [{value: 'all', label: 'Full contract'},
+      {value: 'observed', label: 'Recorded snapshots only'}, {value: 'future', label: 'Conditional future only'}], '82 30 624 210', metric);
     if (!rows.length && !observed.length) {
-      if (greekChartSnapshot?.metric === metric) {
+      if (greekChartSnapshot?.metric === metric && greekChartSnapshot.view === sensitivityView && sensitivityView !== 'observed') {
         mark('greek-chart', true, greekChartSnapshot);
         set('greek-status', `STALE - last known ${metric} chart from ${new Date(greekChartSnapshot.as_of * 1000).toLocaleTimeString('en-US')}; current sensitivity trajectories are unavailable.`);
       } else {
         svg.replaceChildren(); greekChartSnapshot = null; mark('greek-chart', false);
-        set('greek-status', 'Sensitivity trajectories are unavailable for deterministic volatility or after settlement.');
+        set('greek-status', sensitivityView === 'observed' ? 'No recorded snapshots are available for this sensitivity and contract.'
+          : 'Sensitivity trajectories are unavailable for deterministic volatility or after settlement.');
       }
       return;
     }
     svg.replaceChildren();
     svg.setAttribute('aria-label', `${selectedAsset} probability sensitivities during the selected 15-minute contract`);
-    greekChartSnapshot = {as_of: value.as_of, model_time: value.model_time, metric}; mark('greek-chart', false);
+    greekChartSnapshot = {as_of: value.as_of, model_time: value.model_time, metric, view: sensitivityView}; mark('greek-chart', false);
     let low = Math.min(0, ...rows.map(row => row[metric].p05), ...observed.map(row => row[metric])), high = Math.max(0, ...rows.map(row => row[metric].p95), ...observed.map(row => row[metric]));
     if (same(low, high, 1e-20)) { low -= 1e-10; high += 1e-10; }
     const padding = (high - low) * .08; low -= padding; high += padding;
-    const x = elapsed => 52 + 572 * elapsed / 900, y = g => 210 - 180 * (g - low) / (high - low);
+    const sourceElapsed = value.model_time - value.time.window_start;
+    let first = sensitivityView === 'future' ? sourceElapsed : sensitivityView === 'observed' ? observed[0].window_elapsed_seconds : 0;
+    let last = sensitivityView === 'observed' ? observed.at(-1).window_elapsed_seconds : 900;
+    if (first === last) { first = Math.max(0, first - .5); last = Math.min(900, last + .5); }
+    const x = elapsed => 82 + 542 * (elapsed - first) / (last - first), y = g => 210 - 180 * (g - low) / (high - low);
     const add = (tag, fields, label = '') => {
       const element = doc.createElementNS('http://www.w3.org/2000/svg', tag);
       for (const [key, val] of Object.entries(fields)) element.setAttribute(key, String(val));
-      element.textContent = label; svg.appendChild(element);
+      element.textContent = label; svg.appendChild(element); return element;
     };
-    add('text', {x: 52, y: 15, class: 'chart-axis-title'}, `${selectedAsset} ${metric}`);
-    add('text', {x: 210, y: 15, class: 'chart-label', fill: '#e8b86d'}, 'Observed');
-    add('text', {x: 330, y: 15, class: 'chart-label', fill: '#79b8ff'}, 'Conditional median and 5th-95th band');
+    const detail = (node, description, series, seriesLabel) => {
+      node.setAttribute('data-chart-detail', description); node.setAttribute('data-chart-series', series);
+      node.setAttribute('data-chart-label', seriesLabel);
+      const title = doc.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = description; node.appendChild(title); return node;
+    };
+    svg.setAttribute('data-chart-x-label', 'Elapsed contract time (minutes)');
+    svg.setAttribute('data-chart-y-label', `${metric}: ${units[metric]}`);
+    add('text', {x: 82, y: 15, class: 'chart-axis-title'}, `${selectedAsset} ${metric} (${units[metric]})`);
     for (const level of [low, (low + high) / 2, high]) {
-      add('line', {x1: 52, y1: y(level), x2: 624, y2: y(level), class: 'chart-grid'});
-      add('text', {x: 42, y: y(level) + 4, 'text-anchor': 'end', class: 'chart-label'}, level.toExponential(1));
+      add('line', {x1: 82, y1: y(level), x2: 624, y2: y(level), class: 'chart-grid'});
+      add('text', {x: 72, y: y(level) + 4, 'text-anchor': 'end', class: 'chart-label'}, display(level));
     }
     const sensitivityPath = points => points.map(([elapsed, sensitivity], index) => `${index ? 'L' : 'M'}${x(elapsed).toFixed(2)},${y(sensitivity).toFixed(2)}`).join(' ');
-    if (rows.length > 1) {
-      const band = [...rows.map(row => [row.window_elapsed_seconds, row[metric].p95]),
-        ...rows.slice().reverse().map(row => [row.window_elapsed_seconds, row[metric].p05])];
-      add('path', {d: `${sensitivityPath(band)} Z`, class: 'chart-ribbon', fill: '#79b8ff', stroke: 'none'});
+    const futureSegments = []; let futureSegment = null;
+    for (const row of fan) {
+      if (row[metric] === null) { futureSegment = null; continue; }
+      if (!futureSegment) { futureSegment = []; futureSegments.push(futureSegment); }
+      futureSegment.push(row);
     }
-    for (const q of ['p05', 'p95', 'p50']) add('path', {d: sensitivityPath(rows.map(row => [row.window_elapsed_seconds, row[metric][q]])), class: q === 'p50' ? 'chart-line chart-blue' : 'chart-line chart-band'});
+    for (const points of futureSegments) if (points.length > 1) {
+      const band = [...points.map(row => [row.window_elapsed_seconds, row[metric].p95]),
+        ...points.slice().reverse().map(row => [row.window_elapsed_seconds, row[metric].p05])];
+      detail(add('path', {d: `${sensitivityPath(band)} Z`, class: 'chart-ribbon', fill: '#79b8ff', stroke: 'none'}),
+        `${selectedAsset} conditional ${metric} 5th–95th scenario band in ${units[metric]}; not observed sensitivity history.`, 'scenario-band', 'Scenario band');
+    }
+    for (const q of rows.length ? ['p05', 'p95', 'p50'] : []) detail(add('path', {d: futureSegments.map(points => sensitivityPath(points.map(row => [row.window_elapsed_seconds, row[metric][q]]))).join(' '),
+      class: q === 'p50' ? 'chart-line chart-blue' : 'chart-line chart-band', 'vector-effect': 'non-scaling-stroke'}),
+      `Conditional ${metric} ${q === 'p50' ? 'median' : q === 'p05' ? '5th percentile' : '95th percentile'} (${units[metric]}).`,
+      q === 'p50' ? 'conditional-median' : 'scenario-bounds', q === 'p50' ? 'Conditional median' : 'Scenario bounds');
+    for (const points of futureSegments) if (points.length === 1) detail(add('circle', {cx: x(points[0].window_elapsed_seconds), cy: y(points[0][metric].p50),
+      r: 2.5, fill: '#79b8ff', class: 'chart-point chart-blue'}),
+      `Single conditional ${metric} median at ${(points[0].window_elapsed_seconds / 60).toFixed(3)} min elapsed: ${display(points[0][metric].p50)} ${units[metric]}.`,
+      'conditional-median', 'Conditional median');
+    for (const row of rows) detail(add('circle', {cx: x(row.window_elapsed_seconds), cy: y(row[metric].p50), r: 5,
+      fill: 'transparent', stroke: 'none', class: 'chart-inspect-point', 'pointer-events': 'all'}),
+      `${selectedAsset} conditional ${metric} at ${(row.window_elapsed_seconds / 60).toFixed(3)} min elapsed (+${Number(row.seconds.toFixed(3))} s): median ${display(row[metric].p50)}; 5th ${display(row[metric].p05)}; 95th ${display(row[metric].p95)} ${units[metric]}. Dollar volatility and realized settlement samples held fixed. Source observation ${new Date(value.model_time * 1000).toISOString()}.`,
+      'conditional-median', 'Conditional median');
     // A missing sensitivity is an explicit break, even if the surrounding
     // valid observations are close in time. A one-point segment needs a
     // marker because an SVG move command alone is invisible.
     const observedSegments = [];
     let segment = null;
-    for (const row of value.observed_sensitivities) {
+    for (const row of history) {
       if (row[metric] === null) { segment = null; continue; }
       if (!segment || row.model_time - segment.at(-1).model_time > 10) {
         segment = []; observedSegments.push(segment);
       }
       segment.push(row);
     }
-    if (observedSegments.length) add('path', {d: observedSegments.map(points => sensitivityPath(points.map(row => [row.window_elapsed_seconds, row[metric]]))).join(' '), class: 'chart-line chart-observed'});
+    if (observedSegments.length) detail(add('path', {d: observedSegments.map(points => sensitivityPath(points.map(row => [row.window_elapsed_seconds, row[metric]]))).join(' '),
+      class: 'chart-line chart-observed', 'vector-effect': 'non-scaling-stroke'}),
+      `Recorded ${selectedAsset} model ${metric} snapshots (${units[metric]}); gaps remain disconnected.`, 'observed-sensitivity', 'Recorded snapshots');
     for (const points of observedSegments) if (points.length === 1) {
-      add('circle', {cx: x(points[0].window_elapsed_seconds), cy: y(points[0][metric]), r: 3, fill: '#e8b86d', class: 'chart-point chart-observed'});
+      detail(add('circle', {cx: x(points[0].window_elapsed_seconds), cy: y(points[0][metric]), r: 3, fill: '#e8b86d', class: 'chart-point chart-observed'}),
+        `Recorded ${selectedAsset} model ${metric}: ${display(points[0][metric])} ${units[metric]}; source observation ${new Date(points[0].model_time * 1000).toISOString()}.`,
+        'observed-sensitivity', 'Recorded snapshots');
     }
-    for (const minute of [0, 5, 10, 15]) add('text', {x: x(minute * 60), y: 232, 'text-anchor': minute === 0 ? 'start' : minute === 15 ? 'end' : 'middle', class: 'chart-label'}, `${minute} min`);
-    add('line', {x1: x(value.time.elapsed_seconds), y1: 22, x2: x(value.time.elapsed_seconds), y2: 210, class: 'chart-target'});
-    add('text', {x: x(value.time.elapsed_seconds), y: 28, 'text-anchor': value.time.elapsed_seconds > 800 ? 'end' : 'start', class: 'chart-target-label'}, 'Now');
-    add('text', {x: 338, y: 252, 'text-anchor': 'middle', class: 'chart-axis-title'}, 'Elapsed time since this 15-minute contract opened');
+    for (const row of observed) detail(add('circle', {cx: x(row.window_elapsed_seconds), cy: y(row[metric]), r: 5,
+      fill: 'transparent', stroke: 'none', class: 'chart-inspect-point', 'pointer-events': 'all'}),
+      `${selectedAsset} recorded model ${metric}: ${display(row[metric])} ${units[metric]}; source observation ${new Date(row.model_time * 1000).toISOString()}; ${(row.window_elapsed_seconds / 60).toFixed(3)} min elapsed. Dollar volatility and realized settlement samples held fixed.`,
+      'observed-sensitivity', 'Recorded snapshots');
+    const ticks = sensitivityView === 'all' ? [0, 300, 600, 900] : [first, (first + last) / 2, last];
+    for (const elapsed of ticks) add('text', {x: x(elapsed), y: 232,
+      'text-anchor': elapsed === first ? 'start' : elapsed === last ? 'end' : 'middle', class: 'chart-label'}, `${Number((elapsed / 60).toFixed(3))} min`);
+    if (sourceElapsed >= first && sourceElapsed <= last) {
+      detail(add('line', {x1: x(sourceElapsed), y1: 22, x2: x(sourceElapsed), y2: 210, class: 'chart-target'}),
+      `Conditional paths begin at the CF source observation ${new Date(value.model_time * 1000).toISOString()}; report received ${new Date(value.as_of * 1000).toISOString()}.`,
+      'source-clock', 'Source observation');
+      add('text', {x: x(sourceElapsed), y: 28, 'text-anchor': x(sourceElapsed) > 540 ? 'end' : 'start', class: 'chart-target-label'}, 'Source observation');
+    }
+    add('text', {x: 353, y: 252, 'text-anchor': 'middle', class: 'chart-axis-title'}, 'Elapsed time since this 15-minute contract opened');
   }
   async function refresh() {
-    if (stopped || fetching || !validMarket(market)) return;
+    if (stopped) return;
+    if (selectedAsset === 'GOLD') { clear(GOLD_MODEL_REASON, null, true); return; }
+    if (fetching || !validMarket(market)) return;
     const generation = ++version, ticker = market.market.ticker, identity = currentIdentity, selectedPaths = paths, requestAsset = selectedAsset;
     fetching = true; controller = new AbortController(); const active = controller;
     const timeout = win.setTimeout(() => active.abort(), 12000);
@@ -374,8 +575,13 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
       if (response.status === 404) { clear('Restart the local Kalshi service to enable the live Monte Carlo probability endpoint, then refresh this page.'); return; }
       if (!response.ok || new TextEncoder().encode(body).byteLength > 500000) fail('Live probability model is unavailable.');
       const value = validateLiveProbability(JSON.parse(body), requestAsset);
+      const changedFit = lastShown && (lastShown.fitted_parameters?.artifact_sha256 ?? null) !== (value.fitted_parameters?.artifact_sha256 ?? null);
+      if (changedFit) clear('Historical fit changed; waiting for values from the current model.', value.fitted_parameters, true);
       if (value.status !== 'ready') { clear(value.reason, value.fitted_parameters); return; }
       if (!fresh(value)) { clear('Model data is stale or belongs to a different contract.'); return; }
+      if (lastShown && (value.model_time < lastShown.model_time || value.as_of < lastShown.as_of)) {
+        clear('An older source/model snapshot was ignored; waiting for newer observations.'); return;
+      }
       if (value.sampling_interval.method !== 'deterministic' && value.diagnostics.paths !== Number(selectedPaths)) fail('Simulation count changed; refresh the probability model.');
       render(value);
     } catch {
@@ -387,18 +593,31 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
   }
   function reset(message, hard = false) { version++; controller?.abort(); controller = null; fetching = false; clear(message, null, hard); }
   function selectAsset(value, explicit) {
-    if (!Object.hasOwn(ASSETS, value)) fail('Choose a supported crypto asset.');
+    if (!viewAsset(value)) fail('Choose a supported market asset.');
     if (explicit) explicitlySelected = true;
     if (doc.getElementById('probability-mc-title')) doc.getElementById('probability-mc-title').textContent = `${value} live Monte Carlo probability`;
     if (doc.getElementById('probability-mc-chart-heading')) doc.getElementById('probability-mc-chart-heading').textContent = `${value} probability through settlement`;
-    if (value === selectedAsset) return;
+    set('source-label', value === 'GOLD' ? 'Gold / Pyth Metal.Index.1OZGOLD/USD' : `${value} CF ${ASSETS[value].index} reference`);
+    for (const id of ['paths', 'greek-metric']) if ($(id)) $(id).disabled = value === 'GOLD';
+    if (value === selectedAsset) { if (value === 'GOLD') clear(GOLD_MODEL_REASON, null, true); return; }
     selectedAsset = value; market = null; currentIdentity = null;
-    reset(`Waiting for a fresh verified ${value} contract.`, true);
+    reset(value === 'GOLD' ? GOLD_MODEL_REASON : `Waiting for a fresh verified ${value} contract.`, true);
   }
   function setAsset(value) { return selectAsset(value, true); }
   function setMarketState(value) {
     const stateAsset = value?.selected_asset ?? assetForTicker(value?.market?.ticker);
-    if (!explicitlySelected && Object.hasOwn(ASSETS, stateAsset)) selectAsset(stateAsset, false);
+    if (!explicitlySelected && viewAsset(stateAsset)) selectAsset(stateAsset, false);
+    const nextEnvironment = value?.environment;
+    if (nextEnvironment != null && nextEnvironment !== environment) {
+      environment = nextEnvironment; market = null; currentIdentity = null;
+      reset('Market environment changed; waiting for a matching production index snapshot.', true);
+    }
+    if (environment !== null && environment !== 'production') {
+      market = null; currentIdentity = null;
+      reset('CF probability research requires production index data; no production model is retained in this environment.', true);
+      return;
+    }
+    if (selectedAsset === 'GOLD') { market = null; currentIdentity = null; reset(GOLD_MODEL_REASON, true); return; }
     market = stateAsset === selectedAsset ? value : null;
     const verified = market?.market_status === 'ready' && assetForTicker(market.market?.ticker) === selectedAsset
       && IDENTITY.test(market.market?.quote_id) ? market.market : null;
@@ -423,8 +642,26 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
     paths = value; reset('Refreshing the Monte Carlo estimate with the selected path count.', true); refresh();
   });
   $('refresh')?.addEventListener('click', () => { reset('Refreshing current Monte Carlo probability.'); refresh(); });
+  $('chart')?.addEventListener('chart:view', event => {
+    if (!['future', 'observed'].includes(event.detail?.view)) return;
+    probabilityView = event.detail.view;
+    const value = report || lastShown;
+    if (value) { draw(value); if (!report) mark('chart', true, lastShown); }
+  });
+  $('greek-chart')?.addEventListener('chart:view', event => {
+    if (!['all', 'observed', 'future'].includes(event.detail?.view)) return;
+    sensitivityView = event.detail.view;
+    const value = report || lastShown;
+    if (value) { drawGreeks(value); if (!report) retain(staleReason); }
+  });
   $('greek-metric')?.addEventListener('change', () => {
     if (report && fresh(report)) drawGreeks(report);
+    else if (lastShown) {
+      // The retained validated snapshot contains every metric. Replot the
+      // requested one from that exact evidence rather than deleting useful
+      // history or leaving a different metric under the changed selector.
+      drawGreeks(lastShown); retain(staleReason || 'Waiting for fresh model data.');
+    }
     else { $('greek-chart')?.replaceChildren(); greekChartSnapshot = null; mark('greek-chart', false); set('greek-status', 'Waiting for fresh data for the selected sensitivity.'); }
   });
   const timer = win.setInterval(refresh, pollMs);
@@ -438,6 +675,7 @@ export function mountProbability(doc = document, win = window, {fetchImpl = win.
     }
   }, 1000);
   function dispose() { stopped = true; reset('Probability view closed.'); win.clearInterval(timer); win.clearInterval(ageTimer); }
-  win.addEventListener('pagehide', dispose); clear(`Waiting for a fresh verified ${selectedAsset} contract.`);
+  win.addEventListener('pagehide', dispose); clear(selectedAsset === 'GOLD' ? GOLD_MODEL_REASON : `Waiting for a fresh verified ${selectedAsset} contract.`);
+  if (selectedAsset === 'GOLD') selectAsset(selectedAsset, false);
   return {ready: Promise.resolve(), refresh, setAsset, setMarketState, dispose, getReport: () => report, getAsset: () => selectedAsset};
 }

@@ -185,32 +185,80 @@ class ShadowArchive:
                                      (self.profile.source, started_at, received_at, '{}'))
             acquisition_id = cursor.lastrowid
             raw_by_time = {row['time'] / 1000: row for row in payload['data']['payload']}
+            # The validated response is strictly ascending and bounded. Read the
+            # existing prices once inside this acquisition's transaction instead
+            # of issuing a query for every unchanged tick in the rolling hour.
+            existing_rows = list(self.db.execute(
+                'SELECT event_time, price FROM observations WHERE event_time>=? AND event_time<=? LIMIT ?',
+                (observations[0].event_time, observations[-1].event_time, len(observations) + 1)))
+            existing = {row['event_time']: row['price'] for row in existing_rows}
+            # Sparse input can span more stored ticks than its own bounded row
+            # count. Do not load that entire range or mistake unprefetched rows
+            # for new observations; retain the original point lookup as needed.
+            range_exceeds_payload = len(existing_rows) > len(observations)
             for observation in observations:
                 raw_row = raw_by_time[observation.event_time]
-                old = self.db.execute('SELECT price FROM observations WHERE event_time=?',
-                                      (observation.event_time,)).fetchone()
+                old = existing.get(observation.event_time)
+                if old is None and range_exceeds_payload:
+                    old_row = self.db.execute('SELECT price FROM observations WHERE event_time=?',
+                                              (observation.event_time,)).fetchone()
+                    old = None if old_row is None else old_row['price']
                 if old is None:
                     evidence['newly_inserted_count'] += 1
                     evidence['changed_rows'].append(raw_row)
                     self.db.execute('INSERT INTO observations VALUES (?,?,?,?)',
                                     (observation.event_time, observation.received_at,
                                      observation.price, acquisition_id))
-                elif old['price'] != observation.price:
+                elif old != observation.price:
                     evidence['changed_rows'].append(raw_row)
                     self.db.execute('INSERT OR IGNORE INTO revisions VALUES (?,?,?,?,?)',
-                                    (observation.event_time, received_at, old['price'],
+                                    (observation.event_time, received_at, old,
                                      observation.price, acquisition_id))
             self.db.execute('UPDATE acquisitions SET payload=? WHERE id=?', (_json(evidence), acquisition_id))
         return acquisition_id
 
-    def history(self, now):
+    def history(self, now, *, lookback_seconds=None):
+        lookback = self.config.max_history_seconds
+        if lookback_seconds is not None:
+            if (isinstance(lookback_seconds, bool) or not isinstance(lookback_seconds, (int, float))
+                    or not math.isfinite(lookback_seconds) or not lookback <= lookback_seconds <= 3605):
+                raise ShadowError('An extended history lookback must cover the configured window and be at most 3605 seconds')
+            lookback = lookback_seconds
         if self.db.execute('SELECT 1 FROM revisions WHERE event_time>=? AND received_at<=? LIMIT 1',
-                           (now - self.config.max_history_seconds, now)).fetchone():
+                           (now - lookback, now)).fetchone():
             raise ShadowError('Index revisions exist in the fitting window; forecast withheld')
         return [IndexObservation(row['event_time'], row['received_at'], row['price'], source=self.profile.source)
                 for row in self.db.execute('''SELECT * FROM observations
                     WHERE event_time>=? AND event_time<=? AND received_at<=? ORDER BY event_time''',
-                                          (now - self.config.max_history_seconds, now, now))]
+                                          (now - lookback, now, now))]
+
+    def garch_minute_history(self, now):
+        """Read the full causal ETH minute prefix without widening normal history.
+
+        GARCH retains its original segment initialization across forecasts and
+        restarts. The first-received native minute endpoints, rather than a
+        moving 120-return window, provide that prefix. Revision evidence never
+        becomes a silently updated return series.
+        """
+        if (self.asset != 'ETH' or not isinstance(self.model_definition, dict)
+                or self.model_definition.get('model_version') != 'cf-ethusd-rti-minute-five-garch-v1'):
+            raise ShadowError('Extended minute history requires the explicit ETH GARCH model')
+        if (type(now) not in (int, float) or not math.isfinite(now)
+                or not 0 <= now <= 253402300799):
+            raise ShadowError('The GARCH minute-history clock is invalid')
+        from .garch_live import MAX_MINUTE_POINTS
+        boundary = math.floor(now / 60) * 60
+        if self.db.execute('''SELECT 1 FROM revisions
+                WHERE event_time<=? AND event_time%60=0 AND received_at<=? LIMIT 1''',
+                (boundary, now)).fetchone():
+            raise ShadowError('Native minute endpoint revisions exist; GARCH forecast withheld')
+        rows = self.db.execute('''SELECT event_time,received_at,price FROM observations
+            WHERE event_time<=? AND event_time%60=0 AND received_at<=?
+            ORDER BY event_time LIMIT ?''', (boundary, now, MAX_MINUTE_POINTS + 1)).fetchall()
+        if len(rows) > MAX_MINUTE_POINTS:
+            raise ShadowError('The GARCH native minute prefix exceeds its bounded history capacity')
+        return [IndexObservation(row['event_time'], row['received_at'], row['price'], source=self.profile.source)
+                for row in rows]
 
     def record_forecast(self, market, book, features, result, *,
                         quote_started_at, quote_received_at, index_acquisition_id):

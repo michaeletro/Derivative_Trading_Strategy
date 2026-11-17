@@ -1,10 +1,10 @@
-"""Read-only, bounded BTC order history; no account response is forwarded raw."""
+"""Read-only, bounded 15-minute order history; no raw account response is exposed."""
 from __future__ import annotations
 
 from decimal import Decimal
 import re
 
-from .positions import PositionError, _iso, _number, _stamp
+from .positions import PositionError, _account_ticker, _iso, _number, _stamp
 
 _TICKER = re.compile(r'KXBTC15M-[A-Za-z0-9_.:-]{1,119}\Z')
 _ID = re.compile(r'[A-Za-z0-9_.:-]{1,200}\Z')
@@ -33,11 +33,46 @@ def _price(value):
     return format(price, 'f')
 
 
+def _direction(raw):
+    """Keep canonical exposure independent of deprecated action/side aliases.
+
+    Kalshi's canonical fields encode long YES (yes/bid) or long NO (no/ask).
+    Pairing `outcome_side=no` with an old `action=sell` would reverse that bit.
+    Preserve a legacy action/side presentation only when the complete pair
+    agrees; otherwise display the equivalent outcome purchase explicitly.
+    """
+    canonical = []
+    for field, choices in (('outcome_side', {'yes': 'yes', 'no': 'no'}),
+                           ('book_side', {'bid': 'yes', 'ask': 'no'})):
+        value = raw.get(field)
+        if value is not None:
+            if not isinstance(value, str) or value not in choices:
+                raise PositionError('Order direction is unavailable or invalid')
+            canonical.append(choices[value])
+    if len(set(canonical)) > 1:
+        raise PositionError('Canonical order directions disagree')
+    side, action = raw.get('side'), raw.get('action')
+    legacy = side in ('yes', 'no') and action in ('buy', 'sell')
+    exposure = side if action == 'buy' else 'no' if side == 'yes' else 'yes'
+    if canonical:
+        if legacy and exposure == canonical[0]:
+            return side, action, 'legacy_action_side'
+        return canonical[0], 'buy', 'canonical_exposure'
+    if legacy:
+        return side, action, 'legacy_action_side'
+    if side in ('bid', 'ask'):
+        return 'yes' if side == 'bid' else 'no', 'buy', 'canonical_exposure'
+    raise PositionError('Order direction is unavailable or invalid')
+
+
 def _row(raw, *, paper):
     ticker = raw.get('ticker')
-    if not isinstance(ticker, str) or not _TICKER.fullmatch(ticker):
+    if not (isinstance(ticker, str) and _TICKER.fullmatch(ticker) if paper else _account_ticker(ticker)):
         return None
-    outcome = raw.get('outcome') if paper else raw.get('outcome_side', raw.get('side'))
+    if paper:
+        outcome, action, direction_basis = raw.get('outcome'), 'buy', 'paper_review'
+    else:
+        outcome, action, direction_basis = _direction(raw)
     if outcome not in ('yes', 'no'):
         raise PositionError('Order outcome is unavailable or invalid')
     status = raw.get('status')
@@ -63,7 +98,7 @@ def _row(raw, *, paper):
             raise PositionError('Order expiration is unavailable or invalid')
     return dict(order_id=_identifier(raw.get('order_id')),
                 client_order_id=_identifier(raw.get('client_order_id')), ticker=ticker,
-                outcome=outcome, action='buy' if paper else raw.get('action') if raw.get('action') in ('buy', 'sell') else 'unknown',
+                outcome=outcome, action=action, direction_basis=direction_basis,
                 count=count, fill_count=filled, remaining_count=remaining,
                 price=_price(raw.get('price') if paper else raw.get(outcome + '_price_dollars')),
                 status=status, created_at=created,
@@ -95,8 +130,21 @@ def build_order_report(client, intents, *, mode, environment, source, now):
             if (not isinstance(page, dict) or not isinstance(page.get('orders'), list)
                     or len(page['orders']) > 1000 or not isinstance(page.get('cursor', ''), str)):
                 raise PositionError('Account order history page is incomplete')
+            # The account-display reader explicitly requests primary account
+            # zero. A conflicting scope invalidates the whole page, including
+            # any earlier valid rows; silently filtering it could hide an
+            # accidentally unscoped cross-account acquisition.
+            for raw in page['orders']:
+                if isinstance(raw, dict):
+                    for field in ('subaccount_number', 'subaccount'):
+                        # The canonical venue alias is nullable. The explicit
+                        # request establishes scope when an alias is unknown.
+                        if raw.get(field) is not None and (type(raw[field]) is not int or raw[field] != 0):
+                            raise PositionError('Account order history differs from primary-account scope')
             rows, more = page['orders'], bool(page.get('cursor'))
-            reason = 'Available Bitcoin 15-minute account orders; excludes archived order history.'
+            report.update(account_scope='primary_subaccount_0', account_scope_verified=True)
+            reason = ('Available supported 15-minute account orders (BTC, ETH, SOL, XRP and Gold); '
+                      'excludes archived order history.')
         local = {intent.get('order_id'): intent for intent in intents
                  if isinstance(intent, dict) and intent.get('order_id')} if isinstance(intents, list) else {}
         invalid, seen = 0, set()
@@ -111,7 +159,7 @@ def build_order_report(client, intents, *, mode, environment, source, now):
                 if identity is None or identity in seen:
                     raise PositionError('Duplicate or missing order identifier')
                 owned = raw if source == 'paper_journal' else local.get(row['order_id'])
-                if isinstance(owned, dict):
+                if isinstance(owned, dict) and _TICKER.fullmatch(row['ticker']):
                     execution = owned.get('execution', {})
                     if (isinstance(execution, dict) and execution.get('order_type') == 'limit'
                             and owned.get('ticker') == row['ticker']
@@ -122,6 +170,7 @@ def build_order_report(client, intents, *, mode, environment, source, now):
                         # the journal-owned purchase in its reviewed outcome.
                         row['outcome'] = owned['outcome']
                         row['action'] = 'buy'
+                        row['direction_basis'] = 'journal_review'
                         row['price'] = _price(owned['price'])
                         row['cancelable'] = (owned.get('status') in ('resting', 'paper_resting')
                                              and not execution.get('cancel_requested', False)
@@ -137,6 +186,9 @@ def build_order_report(client, intents, *, mode, environment, source, now):
             reason += ' Display is limited to one thousand returned account records.'
         if invalid:
             reason += f' {invalid} invalid order record(s) were omitted.'
+        if any(row['direction_basis'] == 'canonical_exposure' for row in report['orders']):
+            reason += (' Canonical YES/NO exposure is shown as an equivalent BUY when the '
+                       'deprecated action/side pair is absent or disagrees; the price belongs to that outcome.')
         report.update(status='partial' if more or invalid else 'ready', fetched_at=_iso(now), reason=reason)
     except PositionError as error:
         report['reason'] = str(error)

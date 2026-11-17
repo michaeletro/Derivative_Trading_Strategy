@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import math
 
-from .crypto_assets import asset_spec
-from .forecast import (ForecastConfig, _averaging_inputs, _finite, _market,
-                       _observations, _volatility)
+from .crypto_assets import (asset_spec, view_asset_spec, GOLD_MODEL_REASON, GOLD_MODEL_VERSION)
+from .forecast import ForecastConfig, _finite
+from .forecast_inputs import prepare_forecast_inputs
 
 
 MODEL_VERSION = 'cf-brti-frozen-local-diffusion-greeks-v1'
@@ -148,7 +148,8 @@ def unavailable_greeks(reason, now=None, ticker=None, *, asset='BTC'):
 
 def probability_greeks(market, observations, now, config=None, *,
                        shock_dollars=100.0, elapsed_seconds=0.0, asset='BTC',
-                       volatility_scale=1.0):
+                       volatility_scale=1.0, _prepared_inputs=None,
+                       _readiness_only=False):
     """Return settlement probability, local sensitivities and conditional shocks.
 
     No trading dependency or execution signal is produced. ForecastConfig only
@@ -157,6 +158,11 @@ def probability_greeks(market, observations, now, config=None, *,
     """
     result = unavailable_greeks('Probability sensitivities are unavailable', now,
                                market.get('ticker') if isinstance(market, dict) else None)
+    if asset == 'GOLD':
+        result.update(asset='GOLD', source=view_asset_spec(asset).source,
+                      model_version=GOLD_MODEL_VERSION, reason=GOLD_MODEL_REASON,
+                      assumptions=[GOLD_MODEL_REASON])
+        return result
     try:
         profile = asset_spec(asset)
         result = unavailable_greeks('Probability sensitivities are unavailable', now,
@@ -177,11 +183,14 @@ def probability_greeks(market, observations, now, config=None, *,
             raise ValueError('Underlying shock must be a finite USD amount between minus and plus one million')
         if not _finite(elapsed_seconds) or not 0 <= elapsed_seconds <= 30:
             raise ValueError('Scenario elapsed time must be between zero and thirty seconds')
-        strike, closed = _market(market, now, asset=asset)
-        ordered, history = _observations(observations, now, config, asset=asset)
-        raw_sigma, return_count, effective_count = _volatility(history, now, config, asset=asset)
+        inputs = prepare_forecast_inputs(market, observations, now, config,
+            asset=asset, prepared=_prepared_inputs)
+        strike, closed = inputs.strike, inputs.closed
+        ordered, history = inputs.ordered, inputs.history
+        raw_sigma, return_count, effective_count = (
+            inputs.raw_sigma, inputs.return_count, inputs.effective_count)
         sigma = raw_sigma * volatility_scale
-        known_sum, known_count, future = _averaging_inputs(ordered, closed, now, asset=asset)
+        known_sum, known_count, future = inputs.known_sum, inputs.known_count, inputs.future
         latest = ordered[-1]
         spot, model_time = latest.price, latest.event_time
         if not 0 < spot + shock_dollars <= 1000000000:
@@ -211,6 +220,11 @@ def probability_greeks(market, observations, now, config=None, *,
                                market['strike_type'] == 'greater_or_equal', probability, greeks)
                      for shock in scenario_shocks
                      if 0 < spot + shock <= 1000000000]
+        if _readiness_only:
+            # Retain all scenario-domain/numerical checks above without building
+            # a presentation report merely to establish monitor readiness.
+            result.update(status='ready', reason='Probability monitor inputs are ready')
+            return result
         result.update(status='ready', reason=(
             'Analytic frozen-diffusion settlement probability; sensitivities hold dollar volatility fixed'
             if denominator > 0 else

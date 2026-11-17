@@ -84,13 +84,21 @@ class FittedParameters:
     test_fitted_log_loss: float
     test_baseline_brier_score: float
     test_fitted_brier_score: float
+    history_window_seconds: int = 1800
 
     def __post_init__(self):
+        if type(self.history_window_seconds) is not int or not 1800 <= self.history_window_seconds <= 3600:
+            raise FittedParameterError('Fitted artifact history window must be an integer from 1800 through 3600 seconds')
         _parameters(self.asset, self.half_life_seconds, self.volatility_scale,
                     self.artifact_sha256, self.created_at)
         _scores(self.test_contract_count, self.test_baseline_log_loss,
                 self.test_fitted_log_loss, self.test_baseline_brier_score,
                 self.test_fitted_brier_score)
+
+    @property
+    def min_live_history_seconds(self):
+        """Permit existing five-second receipt lag without shortening the fitted window."""
+        return self.history_window_seconds - 5
 
     @property
     def out_of_sample_improved(self):
@@ -104,7 +112,8 @@ class FittedParameters:
             volatility_scale=self.volatility_scale, artifact_sha256=self.artifact_sha256,
             created_at=self.created_at, calibration_status=_STATUS,
             model_scope='frozen_arithmetic_diffusion', fitted=True, calibrated=False,
-            history_window_seconds=1800, min_live_history_seconds=1795,
+            history_window_seconds=self.history_window_seconds,
+            min_live_history_seconds=self.min_live_history_seconds,
             execution_eligible=False, test_contract_count=self.test_contract_count,
             test_baseline_log_loss=self.test_baseline_log_loss,
             test_fitted_log_loss=self.test_fitted_log_loss,
@@ -202,7 +211,7 @@ def load_fitted_parameters(path):
             raise ValueError()
         features = artifact.get('features')
         if (not isinstance(features, dict) or features.get('asset') != asset
-                or type(features.get('history_seconds')) is not int or features['history_seconds'] != 1800
+                or type(features.get('history_seconds')) is not int or not 1800 <= features['history_seconds'] <= 3600
                 or features.get('exact_second_grid_required') is not True
                 or not isinstance(features.get('half_lives_seconds'), list)
                 or selected.get('half_life_seconds') not in features['half_lives_seconds']):
@@ -217,7 +226,8 @@ def load_fitted_parameters(path):
             artifact_sha256=artifact['artifact_sha256'], created_at=artifact['created_at'],
             test_contract_count=count, test_baseline_log_loss=baseline['log_loss'],
             test_fitted_log_loss=fitted['log_loss'], test_baseline_brier_score=baseline['brier_score'],
-            test_fitted_brier_score=fitted['brier_score'])
+            test_fitted_brier_score=fitted['brier_score'],
+            history_window_seconds=features['history_seconds'])
     except FittedParameterError:
         raise
     except (KeyError, ValueError, TypeError, OverflowError):

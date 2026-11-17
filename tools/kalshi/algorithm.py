@@ -6,6 +6,7 @@ requires evidence that is not supplied by a probability estimate alone.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal
 import hashlib
@@ -29,14 +30,109 @@ def unavailable_state(reason):
                 reason=reason, fetched_at=None, forecast=None, eligibility=None, paper_order=None)
 
 
+_REPORT_BYTES = 4_000_000
+_PAPER_STRATEGIES = {'ensemble', 'rolling', 'minute_five'}
+
+
+def _report_stamp(value):
+    if not isinstance(value, str) or len(value) > 40:
+        raise ValueError()
+    stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if stamp.tzinfo is None or stamp.utcoffset().total_seconds() != 0:
+        raise ValueError()
+    return stamp.timestamp()
+
+
+def _retained_algorithm(raw, reason):
+    """Retain historical paper accounting without retaining a current signal."""
+    result = unavailable_state(reason)
+    if raw.get('strategy') in _PAPER_STRATEGIES:
+        result['strategy'] = raw['strategy']
+    if isinstance(raw.get('portfolio'), dict) and raw['portfolio'].get('mode') == 'paper':
+        result['portfolio'] = deepcopy(raw['portfolio'])
+    return result
+
+
+def _algorithm_snapshot(raw, now, *, expected_strategy=None, current=True):
+    if (not isinstance(raw, dict) or type(raw.get('version')) is not int or raw['version'] != 1
+            or raw.get('status') not in ('ready', 'unavailable')
+            or raw.get('mode', 'paper') != 'paper' or raw.get('live_execution_enabled', False) is not False):
+        raise ValueError()
+    if raw.get('kind') == 'kalshi_multi_algorithm_state':
+        assets, markets = raw.get('assets'), raw.get('markets')
+        if (not isinstance(assets, list) or not 1 <= len(assets) <= 4
+                or len(set(assets)) != len(assets) or not isinstance(markets, dict)
+                or set(markets) != set(assets) or raw.get('calibrated') is not False
+                or raw.get('live_execution_enabled') is not False):
+            raise ValueError()
+        for asset in assets:
+            asset_spec(asset)
+        fresh = raw['status'] == 'ready' and -1 <= now - _report_stamp(raw['fetched_at']) <= 10
+        available = current and fresh
+        result = dict(kind=raw['kind'], version=1, status='ready' if available else 'unavailable',
+            fetched_at=raw['fetched_at'] if available else None, assets=assets,
+            markets={asset: _algorithm_snapshot(markets[asset], now,
+                expected_strategy=expected_strategy, current=available) for asset in assets},
+            calibrated=False, live_execution_enabled=False,
+            reason=raw['reason'] if available else 'External paper runner has no current compatible samples')
+        for asset, row in result['markets'].items():
+            if (row.get('forecast') or {}).get('asset', asset) != asset:
+                raise ValueError()
+        if not isinstance(raw.get('portfolio'), dict) or raw['portfolio'].get('mode') != 'paper':
+            raise ValueError()
+        result['portfolio'] = deepcopy(raw['portfolio'])
+        return result
+    if raw.get('kind') != 'kalshi_algorithm_state':
+        raise ValueError()
+    strategy = raw.get('strategy', 'ensemble')
+    if strategy not in _PAPER_STRATEGIES or expected_strategy is not None and strategy != expected_strategy:
+        raise ValueError()
+    if raw['status'] == 'unavailable':
+        return _retained_algorithm(raw, 'Paper runner has no current valid data; inspect its local report')
+    model, gate, order = raw.get('forecast'), raw.get('eligibility'), raw.get('paper_order')
+    if not all(isinstance(value, dict) for value in (model, gate, order)):
+        raise ValueError()
+    fixed = strategy == 'minute_five'
+    if strategy == 'rolling' and not isinstance(raw.get('indicator'), dict):
+        raise ValueError()
+    if (model.get('kind') != ('kalshi_minute_five_forecast' if fixed else 'kalshi_settlement_ensemble')
+            or model.get('calibrated') is not False or model.get('execution_eligible') is not False
+            or gate.get('kind') != ('kalshi_fixed_budget_eligibility' if fixed else 'kalshi_kelly_eligibility')
+            or gate.get('mode') != 'paper' or gate.get('live_eligible') is not False
+            or gate.get('execution_eligible') is not False
+            or order.get('status') not in ('none', 'skipped', 'paper_filled', 'rejected')):
+        raise ValueError()
+    asset = model.get('asset', raw.get('asset', 'BTC'))
+    profile = asset_spec(asset)
+    if model.get('status') == 'ready' and (model.get('source') != profile.source
+            or not model.get('ticker', '').startswith(profile.series + '-')):
+        raise ValueError()
+    if raw.get('asset', asset) != asset:
+        raise ValueError()
+    if gate.get('asset', asset) != asset:
+        raise ValueError()
+    indicator = raw.get('indicator')
+    if isinstance(indicator, dict) and (indicator.get('asset', asset) != asset
+            or indicator.get('ticker', model.get('ticker')) != model.get('ticker')):
+        raise ValueError()
+    if raw.get('portfolio') is not None and (not isinstance(raw['portfolio'], dict)
+            or raw['portfolio'].get('mode') != 'paper'):
+        raise ValueError()
+    if not current or not -1 <= now - _report_stamp(raw['fetched_at']) <= 10:
+        return _retained_algorithm(raw, 'Paper report is stale or its producer is stopped; values are historical')
+    return {key: deepcopy(raw[key]) for key in ('kind', 'version', 'status', 'reason', 'fetched_at',
+        'forecast', 'eligibility', 'paper_order', 'portfolio', 'asset', 'strategy', 'indicator', 'market_snapshot')
+        if key in raw}
+
+
 def read_algorithm_report(path, now):
-    """Load only the explicitly configured, bounded paper-runner report."""
+    """Read an explicit paper snapshot or a named console's paper-only wrapper."""
     if path is None:
-        return unavailable_state('Start the ensemble paper runner and configure its report path')
+        return unavailable_state('Configure a paper strategy report to monitor its observations')
     try:
         with open(path, 'rb') as source:
-            body = source.read(1_000_001)
-        if len(body) > 1_000_000:
+            body = source.read(_REPORT_BYTES+1)
+        if len(body) > _REPORT_BYTES:
             raise ValueError()
         def unique(pairs):
             result = {}
@@ -47,33 +143,47 @@ def read_algorithm_report(path, now):
             return result
         raw = json.loads(body, object_pairs_hook=unique,
             parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
-        if (not isinstance(raw, dict) or raw.get('kind') != 'kalshi_algorithm_state'
-                or raw.get('version') != 1 or raw.get('status') not in ('ready', 'unavailable')):
-            raise ValueError()
-        if raw['status'] == 'unavailable':
-            result = unavailable_state('Ensemble runner has no current valid data; inspect its local report')
-            if isinstance(raw.get('portfolio'), dict) and raw['portfolio'].get('mode') == 'paper':
-                result['portfolio'] = raw['portfolio']
-            return result
-        stamp = datetime.fromisoformat(raw['fetched_at'].replace('Z', '+00:00'))
-        if stamp.tzinfo is None or stamp.utcoffset().total_seconds() != 0:
-            raise ValueError()
-        if not -1 <= now - stamp.timestamp() <= 10:
-            return unavailable_state('Ensemble report is stale; start or resume the paper runner')
-        model, gate, order = raw['forecast'], raw['eligibility'], raw['paper_order']
-        if (model.get('kind') != 'kalshi_settlement_ensemble' or model.get('calibrated') is not False
-                or model.get('execution_eligible') is not False
-                or gate.get('kind') != 'kalshi_kelly_eligibility' or gate.get('mode') != 'paper'
-                or gate.get('live_eligible') is not False or gate.get('execution_eligible') is not False
-                or order.get('status') not in ('none', 'skipped', 'paper_filled', 'rejected')):
-            raise ValueError()
-        result = {key: raw[key] for key in ('kind', 'version', 'status', 'reason', 'fetched_at',
-                                           'forecast', 'eligibility', 'paper_order')}
-        if isinstance(raw.get('portfolio'), dict) and raw['portfolio'].get('mode') == 'paper':
-            result['portfolio'] = raw['portfolio']
+        producer, session = None, None
+        if isinstance(raw, dict) and raw.get('kind') == 'kalshi_paper_strategy_console':
+            if (type(raw.get('version')) is not int or raw['version'] != 1
+                    or raw.get('mode') != 'paper' or raw.get('execution_eligible') is not False
+                    or raw.get('live_execution_enabled') is not False):
+                raise ValueError()
+            expected = {'ensemble': 'ensemble', 'rolling': 'rolling', 'rolling-rsi': 'rolling',
+                        'minute-five': 'minute_five'}.get(raw.get('strategy'))
+            state = raw.get('state')
+            if expected is None:
+                raise ValueError()
+            if state is None and raw.get('status') in ('configured', 'stopped'):
+                result = unavailable_state('External paper console is configured but has no observations; start it with --run'
+                    if raw['status'] == 'configured' else 'External paper console is stopped and has no observed snapshot')
+                result.update(monitor_source='external_report',
+                    producer_status='idle' if raw['status'] == 'configured' else 'stopped', monitor_session=None)
+                return result
+            if not isinstance(state, dict):
+                raise ValueError()
+            producer = state.get('status')
+            if (state.get('kind') != 'kalshi_managed_paper' or state.get('version') != 1
+                    or state.get('calibrated') is not False or state.get('live_execution_enabled') is not False
+                    or producer not in ('idle', 'starting', 'running', 'stopping', 'stopped', 'failed')
+                    or raw.get('status') != producer):
+                raise ValueError()
+            config = raw.get('config')
+            if isinstance(config, dict) and isinstance(config.get('state_dir'), str) and isinstance(config.get('experiment_id'), str):
+                session = hashlib.sha256(json.dumps([config['state_dir'], config['experiment_id']],
+                    separators=(',', ':')).encode('utf-8')).hexdigest()
+            snapshot = state.get('snapshot')
+            result = (unavailable_state('External paper strategy has no observed snapshot') if snapshot is None else
+                _algorithm_snapshot(snapshot, now, expected_strategy=expected, current=producer == 'running'))
+        else:
+            result = _algorithm_snapshot(raw, now)
+        provenance = dict(monitor_source='external_report', producer_status=producer, monitor_session=session)
+        result.update(provenance)
+        for row in result.get('markets', {}).values():
+            row.update(provenance)
         return result
     except Exception:
-        return unavailable_state('Configured ensemble paper report is unavailable or invalid')
+        return unavailable_state('Configured paper strategy report is unavailable or incompatible')
 
 
 class _BoundContractClient:
@@ -124,22 +234,40 @@ class EnsemblePaperService:
         if portfolio is not None and self.asset not in getattr(portfolio, 'assets', ('BTC',)):
             raise EngineError('Crypto asset is not selected in the shared paper portfolio')
 
+    def _settle_one(self):
+        """Archive one old outcome receipt and independently settle any holding.
+
+        A paired replay may hold contracts the collecting worker never bought,
+        so outcome collection also covers previously forecast closed markets.
+        """
+        targets = []
+        if self.portfolio is not None:
+            targets = [row['ticker'] for row in self.portfolio.snapshot()['positions']
+                       if row['ticker'].startswith(self.profile.series + '-')]
+        try:
+            targets.extend(self.archive.pending_tickers(self.clock(), limit=20))
+        except Exception:
+            pass
+        targets = list(dict.fromkeys(targets))
+        if not targets:
+            return None
+        ticker = targets[self._settlement_cursor % len(targets)]
+        self._settlement_cursor += 1
+        try:
+            market = self.client.get_market(ticker)
+            received_at = self.clock()
+            try:
+                self.archive.record_outcome(market, received_at)
+            except Exception:
+                # Evidence storage failure cannot strand an existing holding.
+                pass
+            return None if self.portfolio is None else self.portfolio.settle_market(market, received_at)
+        except Exception:
+            return None
+
     def sample(self):
         try:
-            settlement = None
-            if self.portfolio is not None:
-                positions = [row for row in self.portfolio.snapshot()['positions']
-                             if row['ticker'].startswith(self.profile.series + '-')]
-                if positions:
-                    # Bound old-position reconciliation to one public read per
-                    # cycle, before acquiring the fresh decision inputs.
-                    position = positions[self._settlement_cursor % len(positions)]
-                    self._settlement_cursor += 1
-                    try:
-                        settlement = self.portfolio.settle_market(
-                            self.client.get_market(position['ticker']), self.clock())
-                    except Exception:
-                        pass
+            settlement = self._settle_one()
             started = self.clock()
             payload = (self.client.get_cfbenchmarks_values() if self.asset == 'BTC'
                        else self.client.get_cfbenchmarks_values(index_id=self.profile.index_id))

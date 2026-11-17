@@ -36,6 +36,9 @@ def parser():
     download.add_argument('--max-pages', type=int, default=100, help='Maximum pages in each Kalshi market tier')
     fit.add_argument('--model', type=Path, required=True, help='Save the fitted research artifact outside the checkout')
     fit.add_argument('--dataset-id', type=int, help='Use a particular retained contract dataset; default is the latest for this asset')
+    for command in (fit, walk):
+        command.add_argument('--history-seconds', type=int, default=1800,
+            help='Trailing volatility window per historical forecast, from 1800 through 3600 seconds; default 1800')
     walk.add_argument('--dataset-id', type=int, help='Use a particular retained contract dataset')
     walk.add_argument('--weights', type=Path, help='Export the latest evaluated arithmetic-ensemble weights as a separate research artifact')
     walk.add_argument('--min-train-days', type=int, default=3)
@@ -82,6 +85,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     client = None
     exit_code = 0
+    weights_artifact = None
     try:
         from kalshi.client import KalshiClient, KalshiError
         from kalshi.history import HistoryArchive, HistoryError, fetch_cf_hours
@@ -98,6 +102,8 @@ def main(argv=None):
             if weights_path in reserved or weights_path == _private_path(args.report):
                 raise CLIError('Weights must differ from the report, archive and SQLite sidecars')
 
+        if args.command in ('fit', 'walk-forward') and not 1800 <= args.history_seconds <= 3600:
+            raise CLIError('Historical volatility history must be from 1800 through 3600 seconds')
         if args.command == 'walk-forward':
             from kalshi.history_features import FeatureError, build_training_rows
             from kalshi.walkforward import WalkForwardError, walk_forward_evaluate
@@ -106,7 +112,7 @@ def main(argv=None):
                 raise CLIError('Contract dataset ID must be a positive integer')
             with HistoryArchive(archive_path, read_only=True) as archive:
                 prepared = build_training_rows(archive, asset=args.asset,
-                    dataset_id=args.dataset_id, progress=_progress)
+                    dataset_id=args.dataset_id, progress=_progress, history_seconds=args.history_seconds)
             _progress(dict(prepared['summary'], stage='feature_summary'))
             output = walk_forward_evaluate(prepared['rows'], asset=args.asset,
                 min_train_days=args.min_train_days, weight_days=args.weight_days,
@@ -123,10 +129,11 @@ def main(argv=None):
                     model_scope='frozen_arithmetic_ensemble', deployment_status='offline_research_only',
                     execution_eligible=False, calibrated=False, created_at=output['created_at'],
                     evaluation_status=output['evaluation_status'], latest_fit=output['latest_fit'],
-                    source_report_sha256=output['artifact_sha256'], data_provenance=prepared['provenance'])
+                    source_report_sha256=output['artifact_sha256'], data_provenance=prepared['provenance'],
+                    features=prepared['summary'])
                 encoded = json.dumps(artifact, allow_nan=False, sort_keys=True, separators=(',', ':'))
                 artifact['artifact_sha256'] = hashlib.sha256(encoded.encode('utf-8')).hexdigest()
-                _write_report(args.weights, artifact)
+                weights_artifact = artifact
         elif args.command == 'fit':
             from kalshi.history_features import FeatureError, build_training_rows
             from kalshi.calibration import CalibrationError, fit_probability_model
@@ -136,7 +143,7 @@ def main(argv=None):
                 raise CLIError('Contract dataset ID must be a positive integer')
             with HistoryArchive(archive_path, read_only=True) as archive:
                 prepared = build_training_rows(archive, asset=args.asset,
-                    dataset_id=args.dataset_id, progress=_progress)
+                    dataset_id=args.dataset_id, progress=_progress, history_seconds=args.history_seconds)
             _progress(dict(prepared['summary'], stage='feature_summary'))
             output = fit_probability_model(prepared['rows'], asset=args.asset, progress=_progress)
             output['features'] = prepared['summary']
@@ -193,6 +200,8 @@ def main(argv=None):
                     execution_eligible=False, calibration_status='not_fitted')
         if args.report:
             _write_report(args.report, output)
+        if weights_artifact is not None:
+            _write_report(args.weights, weights_artifact)
         display = output
         if args.command == 'fit':
             # The full artifact contains frozen acquisition provenance and

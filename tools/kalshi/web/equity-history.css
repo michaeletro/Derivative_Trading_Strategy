@@ -1,0 +1,25 @@
+.equity-history-controls{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:16px 0}
+.equity-history-control{display:flex;flex-direction:column;gap:6px;min-width:180px;font-size:.82rem;color:var(--muted,#a8bdd1)}
+.equity-history-control select{min-height:38px;border:1px solid var(--line,#294057);border-radius:8px;background:var(--surface,#111f2e);color:var(--text,#edf5ff);padding:8px 10px}
+.equity-history-controls button{min-height:38px}
+.equity-history-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}
+.equity-history-metric{padding:14px;border:1px solid var(--line,#294057);border-radius:12px;background:rgba(75,111,152,.08)}
+.equity-history-metric span,.equity-history-metric small{display:block;color:var(--muted,#a8bdd1);font-size:.78rem;line-height:1.5}
+.equity-history-metric strong{display:block;color:var(--text,#edf5ff);font-size:1.3rem;margin:8px 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.equity-history-status{padding:12px 14px;border-left:3px solid #65c9c4;background:rgba(57,156,151,.08);border-radius:4px;line-height:1.55}
+.equity-history-status[data-stale=true]{border-left-color:#ffc174;background:rgba(180,114,39,.1)}
+.equity-history-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}
+.equity-history-chart-panel:first-child{grid-column:1/-1}
+.equity-history-chart-panel svg{display:block;width:100%;min-height:220px;max-height:480px;touch-action:pan-y}
+.equity-history-chart-panel h3{margin:0 0 6px}
+.equity-history-legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin:8px 0;font-size:.8rem}
+.equity-history-legend label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.equity-history-legend i{width:16px;height:3px;display:inline-block;border-radius:2px}
+.equity-history-note{font-size:.82rem;color:var(--muted,#a8bdd1);line-height:1.6}
+.equity-history-disclosure{margin:14px 0}
+.equity-history-disclosure summary{cursor:pointer;font-weight:600}
+.equity-history-table{font-size:.8rem;white-space:nowrap}
+.equity-history-table td:first-child{white-space:normal;min-width:160px}
+.equity-history-root[data-stale=true] .equity-history-chart-panel{opacity:.8}
+@media(max-width:1000px){.equity-history-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.equity-history-chart-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:540px){.equity-history-controls{align-items:stretch;flex-direction:column}.equity-history-control{min-width:0}.equity-history-metrics{gap:8px}.equity-history-metric{padding:10px}.equity-history-metric strong{font-size:1.05rem}.equity-history-chart-panel svg{min-height:200px}.equity-history-chart-grid{gap:10px}}

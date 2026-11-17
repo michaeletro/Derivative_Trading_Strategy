@@ -12,6 +12,7 @@ import re
 import time
 
 from .engine import _levels
+from .crypto_assets import view_asset_from_ticker
 
 
 ZERO = Decimal('0')
@@ -20,6 +21,15 @@ MAX_MARKETS = 20
 MARK_BUDGET_SECONDS = 8.0
 _TICKER = re.compile(r'KXBTC15M-[A-Za-z0-9_.:-]{1,119}\Z')
 _FIXED = re.compile(r'-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,12})?\Z')
+
+
+def _account_ticker(ticker):
+    """Account monitoring accepts explicit view assets, without execution rights."""
+    try:
+        view_asset_from_ticker(ticker)
+        return True
+    except ValueError:
+        return False
 
 
 class PositionError(ValueError):
@@ -124,13 +134,75 @@ def _journal_positions(intents, wanted_status):
     return result, uncertain
 
 
-def _mark(client, ticker, outcome, quantity, now, deadline, clock, started):
+def _account_groups(positions):
+    """Preserve exchange partitions and aggregate gross quantities by outcome.
+
+    GET positions can return one ticker on multiple exchange shards. Opposing
+    holdings on different shards must not be silently netted. Legacy records
+    without an exchange identity remain usable only for an unambiguous ticker.
+    """
+    if not isinstance(positions, list) or len(positions) > 100000:
+        raise PositionError('Account position response is incomplete or exceeds supported bounds')
+    seen, partitions, grouped, realized, fees = set(), {}, {}, [], []
+    for position in positions:
+        if not isinstance(position, dict):
+            raise PositionError('Account position response is invalid')
+        ticker = position.get('ticker')
+        if not _account_ticker(ticker):
+            continue
+        for field in ('subaccount', 'subaccount_number'):
+            if position.get(field) is not None and (type(position[field]) is not int or position[field] != 0):
+                raise PositionError('Account position response differs from primary-account scope')
+        exchange = position.get('exchange_index')
+        if 'exchange_index' in position and (type(exchange) is not int or not 0 <= exchange <= 1000):
+            raise PositionError('Account position exchange partition is invalid')
+        key = ticker, exchange
+        if key in seen:
+            raise PositionError('Duplicate account position requires reconciliation')
+        seen.add(key)
+        partition = partitions.setdefault(ticker, set())
+        partition.add(exchange)
+        if None in partition and len(partition) > 1:
+            raise PositionError('Mixed unidentified account partitions require reconciliation')
+        quantity = _number(position.get('position_fp'), signed=True)
+        pnl = _optional(position, 'realized_pnl_dollars', signed=True)
+        fee = _optional(position, 'fees_paid_dollars')
+        realized.append(pnl)
+        fees.append(fee)
+        if quantity == ZERO:
+            continue
+        outcome = 'yes' if quantity > ZERO else 'no'
+        group = grouped.setdefault((ticker, outcome), dict(quantity=ZERO, realized=[], fees=[], exchanges=[]))
+        group['quantity'] += abs(quantity)
+        group['realized'].append(pnl)
+        group['fees'].append(fee)
+        if exchange is not None:
+            group['exchanges'].append(exchange)
+    return grouped, partitions, realized, fees
+
+
+def _position_read(cache, ticker, name, reader):
+    """Reuse one read only within this position-report acquisition."""
+    entry = cache.setdefault(ticker, {})
+    if entry.get(name + '_failed'):
+        raise PositionError('Position market data is unavailable; no current mark')
+    if name not in entry:
+        try:
+            entry[name] = reader()
+        except Exception:
+            entry[name + '_failed'] = True
+            raise
+    return entry[name]
+
+
+def _mark(client, ticker, outcome, quantity, now, deadline, clock, started, cache=None):
     """Return a full-depth gross mark, or a fixed message explaining its absence."""
     if clock() >= deadline:
         return dict(status='unknown', value=None, price=None, basis='unavailable',
                     warning='Position marking time budget reached; refresh to try again')
     try:
-        market = client.get_market(ticker)
+        market = (client.get_market(ticker) if cache is None else
+                  _position_read(cache, ticker, 'market', lambda: client.get_market(ticker)))
         checked_at = clock()
         if checked_at > deadline:
             raise PositionError('Position marking time budget exceeded')
@@ -156,7 +228,8 @@ def _mark(client, ticker, outcome, quantity, now, deadline, clock, started):
         if status != 'active' or close_time <= estimated_wall_time:
             return dict(status=status, value=None, price=None, basis='unavailable',
                         warning='Market is closed or awaiting final settlement; no live liquidation mark')
-        book = client.get_orderbook(ticker)
+        book = (client.get_orderbook(ticker) if cache is None else
+                _position_read(cache, ticker, 'book', lambda: client.get_orderbook(ticker)))
         if not isinstance(book, dict) or not isinstance(book.get('orderbook_fp'), dict):
             raise PositionError('Position order book is unavailable')
         yes = _levels(book['orderbook_fp'].get('yes_dollars'))
@@ -189,7 +262,7 @@ def _mark(client, ticker, outcome, quantity, now, deadline, clock, started):
 
 
 def build_position_report(client, intents, *, mode, environment, source, now, clock=time.monotonic):
-    """Read current BTC exposure without modifying account or order-journal state."""
+    """Read supported 15-minute exposure without changing account or journal state."""
     report = dict(kind='kalshi_position_report', version=1, mode=mode, environment=environment,
                   source=source, status='unavailable', fetched_at=None, reason='Position data is unavailable',
                   summary=dict(cash_balance=None, portfolio_value=None, open_count=0,
@@ -207,6 +280,7 @@ def build_position_report(client, intents, *, mode, environment, source, now, cl
         started = clock()
         deadline = started + MARK_BUDGET_SECONDS
         rows, raw_realized, raw_fees = [], [], []
+        holdings_only = False
         journal, uncertain = _journal_positions(intents, 'paper_filled' if source == 'paper_journal' else 'filled')
         report['summary']['unknown_intent_count'] = uncertain
         if source == 'paper_journal':
@@ -219,62 +293,78 @@ def build_position_report(client, intents, *, mode, environment, source, now, cl
             reason = ('Paper journal only. Entry costs and fees use simulated limit prices and conservative fee allowances; '
                       'liquidation values exclude exit fees. This is not account performance.')
         else:
-            balance = client.get_balance()
+            primary_balance = getattr(client, 'get_primary_account_balance', None)
+            scoped = callable(primary_balance)
+            balance = primary_balance() if scoped else client.get_balance()
+            report['account_scope'] = 'primary_subaccount_0' if scoped else 'unverified'
+            report['account_scope_verified'] = scoped
+            report['exchange_scope'] = 'all'
+            report['venue_updated_at'] = balance.get('updated_ts') if isinstance(balance, dict) else None
             if clock() > deadline:
                 raise PositionError('Account balance acquisition exceeded the freshness budget')
             if not isinstance(balance, dict):
                 raise PositionError('Account balance response is invalid')
             report['summary']['cash_balance'] = _money(_balance_field(balance, 'balance_dollars', 'balance'))
             report['summary']['portfolio_value'] = _money(_balance_field(balance, 'portfolio_value_dollars', 'portfolio_value'))
-            positions = client.get_account_positions()
+            # The current-holdings capability is deliberately explicit. Older
+            # readers retain their all-settlement-state contract; a failed or
+            # incomplete current read must never fall back to a different scope.
+            current_reader = getattr(type(client), 'get_current_account_positions', None)
+            holdings_only = callable(current_reader)
+            positions = (client.get_current_account_positions() if holdings_only
+                         else client.get_account_positions())
+            report.update(holdings_scope='current_nonzero_unsettled' if holdings_only else 'recent_all_settlement_states',
+                          accounting_scope='separate_performance_history' if holdings_only else 'recent_position_rows')
             if clock() > deadline:
                 raise PositionError('Account position acquisition exceeded the freshness budget')
-            if not isinstance(positions, list) or len(positions) > 100000:
-                raise PositionError('Account position response is incomplete or exceeds supported bounds')
-            seen = set()
-            for position in positions:
-                if not isinstance(position, dict):
-                    raise PositionError('Account position response is invalid')
-                ticker = position.get('ticker')
-                if not isinstance(ticker, str) or not _TICKER.fullmatch(ticker):
-                    continue
-                if ticker in seen:
-                    raise PositionError('Duplicate account position requires reconciliation')
-                seen.add(ticker)
-                signed_quantity = _number(position.get('position_fp'), signed=True)
-                realized = _optional(position, 'realized_pnl_dollars', signed=True)
-                fees = _optional(position, 'fees_paid_dollars')
-                raw_realized.append(realized)
-                raw_fees.append(fees)
-                if signed_quantity == ZERO:
-                    continue
-                outcome = 'yes' if signed_quantity > ZERO else 'no'
-                quantity = abs(signed_quantity)
+            groups, partitions, raw_realized, raw_fees = _account_groups(positions)
+            for (ticker, outcome), group in groups.items():
+                quantity = group['quantity']
                 row = _empty_row(ticker, outcome, quantity)
-                row.update(realized_pnl=_money(realized), fees_paid=_money(fees))
+                row.update(realized_pnl=_money(_sum_complete(group['realized'])),
+                           fees_paid=_money(_sum_complete(group['fees'])),
+                           exchange_indexes=sorted(group['exchanges']),
+                           shard_scope_verified=None not in partitions[ticker])
                 own = journal.get((ticker, outcome))
                 opposite = journal.get((ticker, 'no' if outcome == 'yes' else 'yes'))
                 basis = None
-                if own and opposite is None and own['quantity'] == quantity:
+                if len(partitions[ticker]) == 1 and own and opposite is None and own['quantity'] == quantity:
                     basis = own['entry'] + own['fee_allowance']
                     row.update(cost_basis=_money(basis), average_entry_price=_money(own['entry'] / quantity))
                 rows.append((row, basis, quantity))
-            reason = ('Recent BTC 15-minute account positions, not lifetime or all-account performance. '
-                      'Realized P&L and fees are reported separately by Kalshi. '
-                      'Entry basis is an estimate only when journal fills reconcile; other basis and unrealized P&L are unavailable.')
+            reason = (('Current non-zero unsettled supported 15-minute account holdings (BTC, ETH, SOL, XRP and Gold). '
+                       'Closed contracts awaiting settlement remain included. '
+                       'Realized P&L and fee totals are unavailable in this holdings-only query; '
+                       'broader settled and exited accounting belongs to Performance. ')
+                      if holdings_only else
+                      ('Recent supported 15-minute account positions (BTC, ETH, SOL, XRP and Gold), '
+                       'not lifetime or all-account performance. '
+                       'Realized P&L and fees are reported separately by Kalshi. '))
+            reason += ('Entry basis is an estimate only when journal fills reconcile; '
+                       'other basis and unrealized P&L are unavailable.')
 
         if len(rows) > 1000:
             raise PositionError('Position display exceeds the supported thousand-row bound')
-        market_count = 0
+        marked_tickers, mark_cache = set(), {}
         open_pnl, paper_realized, paper_fees = [], [], []
         partial = bool(uncertain)
         for row, basis, quantity in rows:
-            if market_count < MAX_MARKETS:
-                mark = _mark(client, row['ticker'], row['outcome'], quantity, now, deadline, clock, started)
-                market_count += 1
+            if row['ticker'] in marked_tickers or len(marked_tickers) < MAX_MARKETS:
+                mark = _mark(client, row['ticker'], row['outcome'], quantity, now, deadline, clock, started,
+                             cache=mark_cache)
+                marked_tickers.add(row['ticker'])
             else:
                 mark = dict(status='unknown', value=None, price=None, basis='unavailable',
                             warning='Only twenty position marks are fetched per refresh')
+            if (source == 'kalshi_account' and len(partitions[row['ticker']]) > 1
+                    and mark['basis'] == 'executable_bid_depth_gross'):
+                # A ticker book is not proof that holdings on different venue
+                # shards can be liquidated there. Retain its depth benchmark
+                # separately, without promoting it to an executable mark.
+                row.update(book_benchmark_value=_money(mark['value']),
+                           book_benchmark_price=_money(mark['price']))
+                mark = dict(mark, value=None, price=None, basis='unavailable',
+                    warning='Ticker-book depth benchmark only; liquidation across reported exchange shards is unverified')
             row.update(status=mark['status'], mark_price=_money(mark['price']),
                        marked_value=_money(mark['value']), mark_basis=mark['basis'], warning=mark['warning'])
             if source == 'kalshi_account':
@@ -299,8 +389,8 @@ def build_position_report(client, intents, *, mode, environment, source, now, cl
             report['summary']['realized_pnl'] = _money(sum(paper_realized, ZERO))
             report['summary']['fees_paid'] = _money(sum(paper_fees, ZERO))
         else:
-            report['summary']['realized_pnl'] = _money(_sum_complete(raw_realized))
-            report['summary']['fees_paid'] = _money(_sum_complete(raw_fees))
+            report['summary']['realized_pnl'] = None if holdings_only else _money(_sum_complete(raw_realized))
+            report['summary']['fees_paid'] = None if holdings_only else _money(_sum_complete(raw_fees))
         report['summary']['unrealized_pnl'] = _money(_sum_complete(open_pnl))
         if uncertain:
             reason += f' {uncertain} unresolved order intent(s) are not counted as confirmed holdings.'

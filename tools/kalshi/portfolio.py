@@ -16,13 +16,15 @@ import re
 import sqlite3
 import uuid
 
-from .engine import RiskConfig, _levels
+from .engine import EngineError, RiskConfig, _levels
 from .crypto_assets import ASSETS, asset_spec, asset_from_ticker
 
 ZERO, ONE = Decimal(0), Decimal(1)
 GRID = Decimal('0.000000000001')
 PROB_GRID = Decimal('0.000001')
 TICKER = re.compile(r'KXBTC15M-[A-Za-z0-9_.:-]{1,119}\Z')
+_MINUTE_FIVE_SETTINGS = dict(entry_elapsed_seconds=300, entry_window_seconds=60,
+    budget='1', hold_to_settlement=True, decision='median_settlement_average')
 
 
 class PortfolioError(ValueError):
@@ -108,19 +110,24 @@ class PaperPortfolio:
 
     def __init__(self, path, risk, *, take_profit=None, entry_edge=None, exit_edge='0.01', assets=('BTC',),
                  entry_fee=None, exit_fee=None, strategy='ensemble', strategy_config=None):
-        if not isinstance(strategy, str) or strategy not in ('ensemble', 'rolling'):
-            raise PortfolioError('Choose the ensemble or rolling paper strategy')
+        if not isinstance(strategy, str) or strategy not in ('ensemble', 'rolling', 'minute_five'):
+            raise PortfolioError('Choose the ensemble, rolling or minute-five paper strategy')
         if strategy == 'ensemble' and strategy_config not in (None, {}):
             raise PortfolioError('Rolling strategy settings require the rolling paper strategy')
-        if strategy == 'rolling' and not isinstance(strategy_config, dict):
-            raise PortfolioError('Rolling strategy settings must be an explicit finite configuration')
+        if strategy in ('rolling', 'minute_five') and not isinstance(strategy_config, dict):
+            raise PortfolioError('Paper strategy settings must be an explicit finite configuration')
+        if strategy == 'minute_five' and (strategy_config != _MINUTE_FIVE_SETTINGS
+                or type(strategy_config.get('entry_elapsed_seconds')) is not int
+                or type(strategy_config.get('entry_window_seconds')) is not int
+                or strategy_config.get('hold_to_settlement') is not True):
+            raise PortfolioError('Minute-five settings require a one-dollar budget, minute-five entry and hold to settlement')
         try:
-            serialized_strategy = _json(strategy_config) if strategy == 'rolling' else None
+            serialized_strategy = _json(strategy_config) if strategy != 'ensemble' else None
             if serialized_strategy is not None and len(serialized_strategy) > 4096:
                 raise ValueError()
             self.strategy_config = json.loads(serialized_strategy) if serialized_strategy is not None else None
         except (TypeError, ValueError, OverflowError, RecursionError):
-            raise PortfolioError('Rolling strategy settings must be an explicit finite configuration') from None
+            raise PortfolioError('Paper strategy settings must be an explicit finite configuration') from None
         self.strategy = strategy
         if (not isinstance(assets, (list, tuple)) or not 1 <= len(assets) <= len(ASSETS)
                 or any(not isinstance(asset, str) or asset not in ASSETS for asset in assets)
@@ -140,7 +147,9 @@ class PaperPortfolio:
         self.take_profit = None if take_profit is None else _number(take_profit, maximum=Decimal(1000), places=6)
         self.entry_edge = risk.min_edge if entry_edge is None else _number(entry_edge, maximum=ONE, places=6)
         self.exit_edge = _number(exit_edge, maximum=ONE, places=6)
-        if (self.take_profit is not None and self.take_profit <= ZERO
+        if strategy == 'minute_five' and self.take_profit is not None:
+            raise PortfolioError('Minute-five paper positions are held to official settlement')
+        if strategy != 'minute_five' and (self.take_profit is not None and self.take_profit <= ZERO
                 or self.entry_edge < risk.min_edge or not ZERO <= self.exit_edge < self.entry_edge):
             raise PortfolioError('Entry/exit bands or take-profit target are invalid')
         from kalshi_bot import _private_path
@@ -245,6 +254,141 @@ class PaperPortfolio:
         self.db.execute('INSERT INTO decisions VALUES (?,?,?,?,?)',
             (key, ticker, now, int(action['status'] == 'paper_filled'), _json(saved)))
         return action
+
+    def _fixed_budget_inputs(self, market, book):
+        if self.strategy != 'minute_five':
+            raise PortfolioError('Fixed-budget entries require the minute-five paper strategy')
+        identity = _identity(market)
+        if asset_from_ticker(identity['ticker']).symbol not in self.assets:
+            raise PortfolioError('The crypto asset is outside this paper portfolio selection')
+        if not isinstance(book, dict) or not isinstance(book.get('orderbook_fp'), dict):
+            raise PortfolioError('Paper fixed-point order book is unavailable')
+        bids = {side: _levels(book['orderbook_fp'].get(side + '_dollars')) for side in ('yes', 'no')}
+        if bids['yes'] and bids['no'] and bids['yes'][-1][0] + bids['no'][-1][0] >= ONE:
+            raise PortfolioError('Paper order book is locked or crossed')
+        return identity, bids
+
+    def mark_hold_position(self, market, book, now, *, probability_yes=None):
+        """Update a hypothetical liquidation mark, without entering or exiting.
+
+        This strategy actually holds to official settlement. The descriptive
+        bid mark retains the existing portfolio's net-liquidation convention;
+        it does not charge an exit fee to cash or trigger an early sale.
+        """
+        try:
+            now = _time(now)
+            identity, bids = self._fixed_budget_inputs(market, book)
+            raw_yes = None if probability_yes is None else _number(probability_yes, maximum=ONE)
+            ticker = identity['ticker']
+            with self._transaction():
+                row = self.db.execute('SELECT identity FROM positions WHERE ticker=?', (ticker,)).fetchone()
+                if row is not None and json.loads(row[0]) != identity:
+                    raise PortfolioError('Held paper contract terms changed; reconciliation is required')
+                held = self.exposure(ticker)
+                if held['quantity'] == ZERO:
+                    return _empty('No minute-five holding requires a mark')
+                if market.get('status') == 'active' and identity['open_time'] <= now < identity['close_time']:
+                    raw = None if raw_yes is None else raw_yes if held['outcome'] == 'yes' else ONE - raw_yes
+                    self._mark(ticker, bids[held['outcome']], now, raw)
+                return _empty('Minute-five position is held to official settlement', outcome=held['outcome'])
+        except PortfolioError as error:
+            return _empty(str(error), status='skipped')
+        except (EngineError, ValueError, TypeError, InvalidOperation, OverflowError):
+            return _empty('Paper hold-mark inputs are incomplete or inconsistent', status='skipped')
+
+    def buy_once_fixed_budget(self, market, book, now, *, outcome, probability,
+                              raw_probability=None, budget='1'):
+        """One atomic, whole-contract paper buy during elapsed [300,360).
+
+        ``probability`` and ``raw_probability`` refer to the selected outcome.
+        They are descriptive inputs, not Kelly or expected-edge entry filters.
+        The one-dollar cap includes the entry fee allowance and every depth fill.
+        Source/model/quote freshness must be verified by the acquiring service.
+        """
+        try:
+            now = _time(now)
+            identity, bids = self._fixed_budget_inputs(market, book)
+            if not isinstance(outcome, str) or outcome not in ('yes', 'no'):
+                raise PortfolioError('Choose the median model YES or NO outcome')
+            probability = _number(probability, maximum=ONE)
+            raw = probability if raw_probability is None else _number(raw_probability, maximum=ONE)
+            if _number(budget, maximum=ONE, places=4) != ONE:
+                raise PortfolioError('Minute-five entries require a one-dollar all-in budget')
+            ticker = identity['ticker']
+            # This stable decision key survives position settlement and does not
+            # depend on a changing forecast timestamp or a process restart.
+            key = 'minute-five-entry-' + hashlib.sha256(ticker.encode('utf-8')).hexdigest()
+            with self._transaction():
+                marker = self.db.execute('SELECT 1 FROM decisions WHERE decision_key=?', (key,)).fetchone()
+                prior = self.db.execute('SELECT identity FROM positions WHERE ticker=?', (ticker,)).fetchone()
+                if prior is not None and json.loads(prior[0]) != identity:
+                    raise PortfolioError('Held paper contract terms changed; reconciliation is required')
+                held = self.exposure(ticker)
+                if marker is not None or held['quantity'] > ZERO:
+                    held_outcome = held['outcome'] or outcome
+                    if (held['quantity'] > ZERO and market.get('status') == 'active'
+                            and identity['open_time'] <= now < identity['close_time']):
+                        held_raw = raw if held_outcome == outcome else ONE - raw
+                        self._mark(ticker, bids[held_outcome], now, held_raw)
+                    return _empty('This contract already received its minute-five entry; hold to official settlement',
+                                  outcome=held_outcome)
+                elapsed = now - identity['open_time']
+                if market.get('status') != 'active' or not 300 <= elapsed < 360 or now >= identity['close_time']:
+                    return _empty('Minute-five entries require a fresh decision between 300 and 360 elapsed seconds',
+                                  outcome=outcome)
+                if identity['close_time'] - now < self.risk.min_seconds_to_close:
+                    return _empty('The startup minimum time-to-close cutoff blocks this minute-five entry',
+                                  outcome=outcome)
+                venue = market.get('_crypto15m', market.get('_btc15m'))
+                if venue is not None:
+                    if not isinstance(venue, dict):
+                        raise PortfolioError('Verified venue fee information is unavailable')
+                    if self.entry_fee < _number(venue.get('fee_reserve_lower_bound'), maximum=ONE):
+                        raise PortfolioError('Paper entry fee allowance is below the current verified venue fee bound')
+                # The configured order/cash/exposure ceilings remain hard caps.
+                # No exit allowance is added: this entry holds to settlement.
+                available_budget = min(ONE, self.cash, self.risk.max_order_cost,
+                    self.risk.max_total_cost - self.committed(),
+                    self.risk.max_market_cost - held['cost_basis'])
+                asks = [(ONE - price, count) for price, count in reversed(bids['no' if outcome == 'yes' else 'yes'])]
+                count, gross, fees = ZERO, ZERO, ZERO
+                for price, available in asks:
+                    unit = price + self.entry_fee
+                    remaining = available_budget - gross - fees
+                    if remaining < unit or count >= self.risk.max_contracts:
+                        break
+                    take = min(available.to_integral_value(rounding=ROUND_FLOOR),
+                        (remaining / unit).to_integral_value(rounding=ROUND_FLOOR),
+                        Decimal(self.risk.max_contracts) - count)
+                    if take <= ZERO:
+                        continue
+                    count += take
+                    gross += take * price
+                    fees += take * self.entry_fee
+                if count == ZERO:
+                    return _empty('No whole contract fits the one-dollar entry budget, visible liquidity and risk ceilings',
+                                  outcome=outcome)
+                basis = gross + fees
+                self.db.execute('INSERT INTO positions VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    (ticker, outcome, _money(count), _money(basis), _json(identity), now,
+                     None, None, None, _money(raw)))
+                self._set('cash', _money(self.cash - basis))
+                self._set('fees_paid', _money(Decimal(self._get('fees_paid')) + fees))
+                self._set('gross_turnover', _money(Decimal(self._get('gross_turnover')) + gross))
+                self._mark(ticker, bids[outcome], now, raw)
+                average = gross / count
+                action = dict(status='paper_filled',
+                    reason='Minute-five median-choice paper entry within a one-dollar all-in cap; held to official settlement',
+                    action='buy', outcome=outcome, count=_money(count), price=_money(average),
+                    reserved_cost=_money(basis), realized_pnl='0', client_order_id=str(uuid.uuid4()),
+                    model_probability=_money(raw), market_probability=_money(average),
+                    gap=_money(raw - average), direction='long_yes' if outcome == 'yes' else 'short_yes_via_no',
+                    budget='1', budget_unused=_money(ONE - basis), fees=_money(fees))
+                return self._record(key, ticker, now, action, fees)
+        except PortfolioError as error:
+            return _empty(str(error), status='skipped')
+        except (EngineError, ValueError, TypeError, InvalidOperation, OverflowError):
+            return _empty('Fixed-budget paper inputs are incomplete or inconsistent', status='skipped')
 
     def _buy(self, ticker, outcome, asks, probability, raw_probability, identity, now):
         held = self.exposure(ticker)
@@ -410,6 +554,8 @@ class PaperPortfolio:
     def rebalance(self, forecast, market, book, now, selected_side='auto', *,
                   entry_allowed=None, exit_trigger=False, signal_reason=None):
         try:
+            if self.strategy == 'minute_five':
+                raise PortfolioError('Minute-five positions use fixed-budget entry and official settlement only')
             now = _time(now)
             if (entry_allowed is not None and (not isinstance(entry_allowed, dict)
                     or set(entry_allowed) != {'yes', 'no'}
@@ -567,6 +713,44 @@ class PaperPortfolio:
                 model_probability=None, market_probability=_money(payout), gap=None,
                 direction='long_yes' if row['outcome'] == 'yes' else 'short_yes_via_no')
             return self._record(key, ticker, now, action)
+
+    def performance_ledger(self, limit=2000):
+        """Read recorded simulated realizations on the owning SQLite thread.
+
+        This separate snapshot keeps a long performance history out of the
+        frequently polled strategy state. It never marks or mutates holdings.
+        """
+        if type(limit) is not int or not 1 <= limit <= 2000:
+            raise PortfolioError('Performance history limit must be one to two thousand executions')
+        total = self.db.execute('SELECT COUNT(*) FROM decisions WHERE filled=1').fetchone()[0]
+        rows = self.db.execute('SELECT decision_key,payload FROM decisions WHERE filled=1 ORDER BY rowid DESC LIMIT ?',
+                               (limit,)).fetchall()
+        events = []
+        for row in reversed(rows):
+            event = json.loads(row['payload'])
+            event['id'] = row['decision_key']
+            event['time'] = event['as_of']
+            event['quantity'] = event['count']
+            if event['action'] == 'buy':
+                event['closing_quantity'] = '0'
+            else:
+                closed = Decimal(event['close_quantity'] if event['action'] == 'flip' else event['count'])
+                event['closing_quantity'] = _money(closed)
+                if event['action'] == 'flip':
+                    yes_price = Decimal(event['price'])
+                    close_price = yes_price if Decimal(event['from_signed_position']) > ZERO else ONE - yes_price
+                    proceeds = closed * (close_price - self.exit_fee)
+                else:
+                    proceeds = Decimal(event['reserved_cost'])
+                event['closing_basis'] = _money(proceeds - Decimal(event['realized_pnl']))
+            events.append(event)
+        complete = total <= limit
+        return dict(events=events, initial_cash=self._get('initial_cash'), environment='production',
+            accounting_method='recorded_model_average_cost', coverage=dict(
+                complete=complete, history_complete=complete, truncated=not complete,
+                omitted_count=max(0, total - limit), scope='supported_15m',
+                reason='Recorded model paper executions; fees are the experiment allowances.' if complete else
+                         f'Only the latest {limit} model paper executions are available in this view.'))
 
     def snapshot(self):
         positions = []

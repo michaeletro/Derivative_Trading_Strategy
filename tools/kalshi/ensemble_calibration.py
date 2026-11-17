@@ -15,6 +15,7 @@ import re
 
 LIKELIHOOD_EPSILON = 1e-12
 SCORE_EPSILON = 1e-12
+GRADIENT_TOLERANCE = 1e-7
 MAX_ROWS = 250_000
 _COMPONENT = re.compile(r'[A-Za-z0-9_.:-]{1,80}\Z')
 
@@ -168,9 +169,17 @@ def fit_ensemble_weights(rows, *, regularization=0.1, iterations=500):
     prepared = _prepared(rows, keys)
     weights = tuple(1 / len(keys) for _ in keys)
     initial, *_ = _objective(prepared, weights, regularization)
-    step, completed, converged = 1.0, 0, False
+    # Account for the known L2 curvature before backtracking. This avoids
+    # tiny objective-resolution oscillations under very strong shrinkage.
+    step, completed, converged = 1 / max(1.0, 2 * regularization), 0, False
+    maximum_step = 100.0 if regularization == 0 else min(100.0, 1 / (2 * regularization))
     for iteration in range(iterations):
         current, _, _, derivatives = _objective(prepared, weights, regularization, gradient=True)
+        projected = _project_simplex(tuple(weight - derivative for weight, derivative in zip(weights, derivatives)))
+        residual = math.sqrt(math.fsum((new - old) ** 2 for new, old in zip(projected, weights)))
+        if residual <= GRADIENT_TOLERANCE:
+            completed, converged = iteration + 1, True
+            break
         trial_step = step
         for _ in range(60):
             candidate = _project_simplex(tuple(w - trial_step * g for w, g in zip(weights, derivatives)))
@@ -184,13 +193,11 @@ def fit_ensemble_weights(rows, *, regularization=0.1, iterations=500):
             raise EnsembleCalibrationError('Mixture optimization line search did not converge')
         weights = candidate
         completed = iteration + 1
-        if max(abs(delta) for delta in change) <= 1e-10:
-            converged = True
-            break
-        step = min(100.0, trial_step * 1.5)
+        step = min(maximum_step, trial_step * 1.5)
     objective, nll, penalty, derivatives = _objective(prepared, weights, regularization, gradient=True)
     stationary = _project_simplex(tuple(weight - derivative for weight, derivative in zip(weights, derivatives)))
     residual = math.sqrt(math.fsum((new - old) ** 2 for new, old in zip(stationary, weights)))
+    converged = residual <= GRADIENT_TOLERANCE
     return dict(kind='kalshi_ensemble_weight_fit', version=1,
         weights=dict(zip(keys, weights)), regularization=float(regularization),
         objective=objective, negative_log_likelihood=nll, penalty=penalty,
@@ -199,6 +206,7 @@ def fit_ensemble_weights(rows, *, regularization=0.1, iterations=500):
             component_ids=list(keys), equal_weight_target=1 / len(keys),
             initial_objective=initial, converged=converged,
             projected_gradient_residual=residual,
+            projected_gradient_tolerance=GRADIENT_TOLERANCE,
             contract_weighting='each_contract_total_weight_one',
             likelihood_probability_transform='epsilon_plus_one_minus_two_epsilon_times_mixture',
             likelihood_epsilon=LIKELIHOOD_EPSILON, scoring_probability_clip=SCORE_EPSILON,

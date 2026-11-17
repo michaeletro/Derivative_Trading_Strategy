@@ -22,15 +22,12 @@ class StaleOrderState(EngineError):
     """A valid asynchronous read predates a known fill or cancellation."""
 
 
-def _quantity(value, maximum):
-    number = decimal_value(value, 'order quantity', places=2, maximum=maximum)
-    if number != number.to_integral_value():
-        raise EngineError('Fractional order quantities require manual reconciliation')
-    return number
+def _quantity(value, maximum, *, field='order quantity'):
+    return decimal_value(value, field, places=2, maximum=maximum)
 
 
 def _alias_quantity(row, names, maximum, *, required=True):
-    values = [_quantity(row[key], maximum) for key in names if key in row]
+    values = [_quantity(row[key], maximum, field=key) for key in names if key in row]
     if not values:
         if required:
             raise EngineError('Order quantity fields are unavailable')
@@ -99,11 +96,11 @@ def validate_order_state(row, intent):
         raise EngineError('Only the recorded binary limit order can be reconciled')
     _direction(row, 'bid' if intent['outcome'] == 'yes' else 'ask')
     _price(row, intent)
-    original = _quantity(intent['count'], Decimal('1000000'))
+    original = _quantity(intent['count'], Decimal('1000000'), field='journal count')
     initial = _alias_quantity(row, ('initial_count_fp', 'initial_count'), original)
     if original <= ZERO or initial != original:
         raise EngineError('Initial order quantity differs from the durable intent')
-    old_fill = _quantity(intent['fill_count'], original)
+    old_fill = _quantity(intent['fill_count'], original, field='journal fill_count')
     fill = _alias_quantity(row, ('fill_count_fp', 'fill_count'), original)
     remaining = _alias_quantity(row, ('remaining_count_fp', 'remaining_count'), original)
     if fill + remaining > original:
@@ -117,7 +114,7 @@ def validate_order_state(row, intent):
             raise EngineError('Open order state requires positive remaining quantity')
     else:
         raise EngineError('Order status is unavailable')
-    old_remaining = _quantity(intent['execution']['remaining_count'], original)
+    old_remaining = _quantity(intent['execution']['remaining_count'], original, field='journal remaining_count')
     if fill < old_fill or remaining > old_remaining:
         raise StaleOrderState('Order read predates the durable acknowledgement')
     return status, fill, remaining

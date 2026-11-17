@@ -42,7 +42,7 @@ def _finite(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
 
 
-def _configuration(asset, horizons, half_lives, dataset_id):
+def _configuration(asset, horizons, half_lives, dataset_id, history_seconds=1800):
     try:
         profile = asset_spec(asset)
     except ValueError:
@@ -57,6 +57,8 @@ def _configuration(asset, horizons, half_lives, dataset_id):
         raise FeatureError('Choose one to twelve distinct volatility half-lives from one to 3600 seconds')
     if dataset_id is not None and (type(dataset_id) is not int or dataset_id <= 0):
         raise FeatureError('Historical dataset ID must be a positive integer')
+    if type(history_seconds) is not int or not 1800 <= history_seconds <= 3600:
+        raise FeatureError('Historical volatility history must be an integer from 1800 through 3600 seconds')
     return profile, tuple(sorted(horizons, reverse=True)), tuple(sorted(half_lives))
 
 
@@ -181,8 +183,8 @@ class _SecondGrid:
         self.maximum_cache_hours = max(self.maximum_cache_hours, len(self.cache))
         return ticks
 
-    def window(self, as_of):
-        start = as_of - 1800
+    def window(self, as_of, history_seconds=1800):
+        start = as_of - history_seconds
         start_hour, end_hour = math.floor(start / 3600) * 3600, math.floor(as_of / 3600) * 3600
         merged = {}
         # Read one preceding endpoint too, so contradictory adjacent-hour
@@ -210,7 +212,8 @@ class _SecondGrid:
 
 
 def build_training_rows(archive, *, asset='BTC', horizons=(840, 600, 300, 120, 60, 30, 10),
-                        half_lives=(60, 300, 900), dataset_id=None, progress=None):
+                        half_lives=(60, 300, 900), dataset_id=None, progress=None,
+                        history_seconds=1800):
     """Return compact retrospective Gaussian states with official binary labels.
 
     Every accepted contract contributes all requested horizons. Source-time
@@ -218,7 +221,7 @@ def build_training_rows(archive, *, asset='BTC', horizons=(840, 600, 300, 120, 6
     expiry remain explicitly retrospective and cannot establish historical latency.
     The settlement grid is the existing model approximation, not a rules parser.
     """
-    profile, horizons, half_lives = _configuration(asset, horizons, half_lives, dataset_id)
+    profile, horizons, half_lives = _configuration(asset, horizons, half_lives, dataset_id, history_seconds)
     if getattr(archive, 'read_only', False) is not True:
         raise FeatureError('Historical feature extraction requires a read-only archive')
     db = archive.db
@@ -230,10 +233,11 @@ def build_training_rows(archive, *, asset='BTC', horizons=(840, 600, 300, 120, 6
         contracts, exclusions = _contracts(dataset)
         if not contracts:
             raise FeatureError('No eligible official binary contracts are available for fitting')
-        lower = contracts[0][2] - max(horizons) - 1800
+        lower = contracts[0][2] - max(horizons) - history_seconds
         upper = contracts[-1][2] - min(horizons)
         grid = _SecondGrid(db, profile.index_id, lower, upper)
-        configs = [ForecastConfig(ewma_half_life_seconds=value) for value in half_lives]
+        configs = [ForecastConfig(ewma_half_life_seconds=value, max_history_seconds=history_seconds)
+                   for value in half_lives]
         rows, accepted = [], 0
         for position, (market, label, closed) in enumerate(contracts, 1):
             prepared = []
@@ -241,7 +245,7 @@ def build_training_rows(archive, *, asset='BTC', horizons=(840, 600, 300, 120, 6
                 for horizon in horizons:
                     as_of = closed - horizon
                     strike, _ = _market(market, as_of, asset=profile.symbol)
-                    points = grid.window(as_of)
+                    points = grid.window(as_of, history_seconds)
                     known, count, future = _averaging_inputs(points, closed, as_of, asset=profile.symbol)
                     offsets = [stamp - as_of for stamp in future]
                     if not offsets or offsets[0] <= 0:
@@ -284,7 +288,7 @@ def build_training_rows(archive, *, asset='BTC', horizons=(840, 600, 300, 120, 6
         summary = dict(asset=profile.symbol, eligible_official_contracts=len(contracts),
             accepted_contracts=accepted, feature_rows=len(rows), excluded_contracts=dict(exclusions),
             horizons_seconds=list(horizons), half_lives_seconds=list(half_lives),
-            history_seconds=1800, maximum_cached_hours=grid.maximum_cache_hours,
+            history_seconds=history_seconds, maximum_cached_hours=grid.maximum_cache_hours,
             complete_case_selection_bias_possible=True,
             exact_second_grid_required=True, execution_eligible=False)
         return dict(rows=rows, summary=summary, provenance=provenance)

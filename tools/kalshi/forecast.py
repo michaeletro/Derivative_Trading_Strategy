@@ -10,7 +10,8 @@ from datetime import datetime
 import math
 import random
 
-from .crypto_assets import asset_from_ticker, asset_spec
+from .crypto_assets import (asset_from_ticker, asset_spec, view_asset_spec,
+                            GOLD_MODEL_REASON, GOLD_MODEL_VERSION)
 
 
 MODEL_VERSION = "cf-brti-ewma-gbm-average-v1"
@@ -199,6 +200,11 @@ def forecast(market: dict, observations: list[IndexObservation], now: float,
                   as_of=now if _finite(now) else None,
                   ticker=market.get("ticker") if isinstance(market, dict) else None,
                   reason="Forecast is unavailable", assumptions=list(_ASSUMPTIONS), diagnostics={})
+    if asset == 'GOLD':
+        result.update(asset='GOLD', source=view_asset_spec(asset).source,
+                      model_version=GOLD_MODEL_VERSION, reason=GOLD_MODEL_REASON,
+                      assumptions=[GOLD_MODEL_REASON])
+        return result
     try:
         spec = asset_spec(asset)
         if spec.symbol != 'BTC':

@@ -24,6 +24,9 @@ from .forecast import ForecastConfig
 from .settlement_ensemble import EnsembleConfig, MODEL_VERSION, model_version_for_asset
 from .shadow import ShadowArchive
 
+MINUTE_FIVE_SETTINGS = dict(entry_elapsed_seconds=300, entry_window_seconds=60,
+    budget='1', hold_to_settlement=True, decision='median_settlement_average')
+
 
 class ManagedError(ValueError):
     def __init__(self, message, status=400):
@@ -88,6 +91,14 @@ def _paper_snapshot(snapshot):
                 or gate.get('live_eligible') is not False or gate.get('execution_eligible') is not False
                 or not isinstance(order, dict) or order.get('status') not in ('none', 'skipped', 'rejected', 'paper_filled')):
             raise ManagedError('Paper worker cannot publish exchange execution eligibility')
+        if snapshot.get('strategy') == 'minute_five':
+            if (model.get('kind') != 'kalshi_minute_five_forecast' or model.get('version') != 1
+                    or gate.get('kind') != 'kalshi_fixed_budget_eligibility' or gate.get('version') != 1
+                    or gate.get('budget') != '1' or type(gate.get('paper_eligible')) is not bool):
+                raise ManagedError('Minute-five worker returned an unsupported fixed-budget paper snapshot')
+        elif (model.get('kind') == 'kalshi_minute_five_forecast'
+                or gate.get('kind') == 'kalshi_fixed_budget_eligibility'):
+            raise ManagedError('Fixed-budget forecasts require the minute-five paper strategy')
         indicator = snapshot.get('indicator')
         if indicator is not None and (not isinstance(indicator, dict)
                 or indicator.get('kind') != 'kalshi_rolling_indicator' or indicator.get('version') != 1
@@ -103,17 +114,24 @@ class ManagedPaperRunner:
     the same selection resumes its durable archive and paper reservations.
     """
 
-    def __init__(self, client_factory, base_path, risk, *, clock=time.time, interval=5):
+    def __init__(self, client_factory, base_path, risk, *, clock=time.time, interval=5,
+                 probability_fit=None):
         if (not callable(client_factory) or not isinstance(risk, RiskConfig)
                 or risk.sizing_mode != 'kelly' or risk.required_series != 'KXBTC15M'
                 or isinstance(interval, bool) or not isinstance(interval, (int, float))
                 or not math.isfinite(interval) or not 5 <= interval <= 60):
             raise ManagedError('Managed paper runner requires a Bitcoin Kelly policy and a five-to-sixty-second interval')
+        if probability_fit is not None:
+            from .fitted_parameters import FittedParameters
+            if not isinstance(probability_fit, FittedParameters):
+                raise ManagedError('A verified immutable historical probability fit is required')
+        self._probability_fit = probability_fit
         self._client_factory, self._base = client_factory, Path(base_path).expanduser().absolute()
         self._risk, self._clock, self._interval = risk, clock, float(interval)
         self._lock = threading.RLock()
         self._thread, self._stop_event, self._closed = None, None, False
         self._experiment_id = None
+        self._performance = None
         self._state = dict(kind='kalshi_managed_paper', version=1, status='idle',
             reason='Paper strategy is stopped. Start explicitly to collect data and simulate orders.',
             config=None, snapshot=None, started_at=None, updated_at=None,
@@ -123,28 +141,52 @@ class ManagedPaperRunner:
         with self._lock:
             return deepcopy(self._state)
 
+    def performance_ledger(self):
+        """Copy the worker-owned ledger without opening SQLite on a reader thread."""
+        with self._lock:
+            return deepcopy(self._performance)
+
     def _selection(self, body):
-        allowed = {'weights', 'side', 'bankroll', 'kelly_fraction', 'paths', 'take_profit', 'entry_edge', 'exit_edge', 'assets', 'entry_fee', 'exit_fee', 'strategy', 'rolling'}
-        if (not isinstance(body, dict) or not {'weights', 'side'} <= body.keys()
-                or body.keys() - allowed or not isinstance(body['side'], str)
-                or body['side'] not in ('auto', 'yes', 'no')):
+        allowed = {'weights', 'side', 'bankroll', 'kelly_fraction', 'paths', 'take_profit', 'entry_edge', 'exit_edge', 'assets', 'entry_fee', 'exit_fee', 'strategy', 'rolling', 'minute_five'}
+        strategy = body.get('strategy', 'ensemble') if isinstance(body, dict) else None
+        side = body.get('side', 'auto') if isinstance(body, dict) else None
+        if (not isinstance(body, dict) or body.keys() - allowed
+                or strategy != 'minute_five' and not {'weights', 'side'} <= body.keys()
+                or not isinstance(side, str) or side not in ('auto', 'yes', 'no')):
             raise ManagedError('Choose ensemble weights and automatic, YES or NO paper trading')
         requested_assets = body.get('assets', ['BTC'])
+        if isinstance(requested_assets, list) and 'GOLD' in requested_assets:
+            from .crypto_assets import GOLD_MODEL_REASON
+            raise ManagedError(GOLD_MODEL_REASON)
         if (not isinstance(requested_assets, list) or not 1 <= len(requested_assets) <= len(ASSETS)
                 or any(not isinstance(asset, str) or asset not in ASSETS for asset in requested_assets)
                 or len(set(requested_assets)) != len(requested_assets)):
             raise ManagedError('Select one or more supported paper assets: BTC, ETH, SOL or XRP')
         assets = tuple(asset for asset in ASSETS if asset in requested_assets)
-        strategy = body.get('strategy', 'ensemble')
-        if not isinstance(strategy, str) or strategy not in ('ensemble', 'rolling'):
-            raise ManagedError('Choose ensemble convergence or rolling probability deviation')
+        if not isinstance(strategy, str) or strategy not in ('ensemble', 'rolling', 'minute_five'):
+            raise ManagedError('Choose ensemble convergence, rolling probability deviation or minute-five median')
+        if strategy == 'minute_five':
+            if self._risk.min_seconds_to_close >= 600:
+                raise ManagedError('Minute-five entries require the startup entry cutoff below six hundred seconds')
+            if side != 'auto':
+                raise ManagedError('Minute-five median chooses YES or NO automatically')
+            if body.get('take_profit') is not None:
+                raise ManagedError('Minute-five median holds positions to official settlement')
+            settings = body.get('minute_five', MINUTE_FIVE_SETTINGS)
+            if (not isinstance(settings, dict) or set(settings) != set(MINUTE_FIVE_SETTINGS)
+                    or any(type(settings[key]) is not type(value) or settings[key] != value
+                           for key, value in MINUTE_FIVE_SETTINGS.items())):
+                raise ManagedError('Minute-five median uses the fixed five-minute entry and one-dollar budget')
+        elif body.get('minute_five') is not None:
+            raise ManagedError('Minute-five settings require the minute-five strategy')
         rolling = None
         if strategy == 'rolling':
-            from .rolling import MAX_GAP_SECONDS, RollingConfig
+            from .rolling import MAX_GAP_SECONDS, SAMPLE_SECONDS, RollingConfig
             raw = body.get('rolling', {})
-            fields = {'window_seconds', 'min_samples', 'entry_z', 'exit_z', 'alpha', 'phase_seconds'}
+            fields = {'window_seconds', 'min_samples', 'entry_z', 'exit_z', 'alpha', 'phase_seconds',
+                      'rsi_filter', 'rsi_period', 'rsi_entry'}
             if not isinstance(raw, dict) or raw.keys() - fields:
-                raise ManagedError('Provide supported rolling window, warmup, z, tail and expiry-phase settings')
+                raise ManagedError('Provide supported rolling window, warmup, z, tail, expiry-phase and RSI settings')
             try:
                 rolling_config = RollingConfig(**raw)
             except (ValueError, TypeError) as error:
@@ -160,28 +202,35 @@ class ManagedPaperRunner:
             if (self._interval > MAX_GAP_SECONDS or rolling_config.min_samples > capacity
                     or rolling_config.alpha < 1 / (capacity + 1)):
                 raise ManagedError('Rolling warmup and tail threshold must be attainable at the configured sampling interval before the entry cutoff')
+            if rolling_config.rsi_filter and (self._interval > SAMPLE_SECONDS
+                    or rolling_config.rsi_period > capacity):
+                raise ManagedError('RSI confirmation requires five-second polling and a seed period attainable before the entry cutoff')
             rolling = rolling_config.to_dict()
         elif body.get('rolling') is not None:
             raise ManagedError('Rolling indicator settings require the rolling strategy')
         try:
-            config = EnsembleConfig(paths=body.get('paths', 1000), weights=body['weights'])
+            config = EnsembleConfig(paths=body.get('paths', 1000),
+                                    weights=(1, 1, 1) if strategy == 'minute_five' else body['weights'])
         except (ValueError, TypeError, OverflowError):
             raise ManagedError('Provide valid long_run, recent and ewma weights and a supported path count') from None
         bankroll = _amount(body.get('bankroll', format(self._risk.kelly_bankroll, 'f')),
                            'paper bankroll', self._risk.kelly_bankroll, 4)
-        fraction = _amount(body.get('kelly_fraction', format(self._risk.kelly_fraction, 'f')),
+        fraction = _amount(format(self._risk.kelly_fraction, 'f') if strategy == 'minute_five' else
+                           body.get('kelly_fraction', format(self._risk.kelly_fraction, 'f')),
                            'paper Kelly multiplier', self._risk.kelly_fraction, 6)
         entry_fee = _fee_allowance(body.get('entry_fee', format(self._risk.fee_reserve_per_contract, 'f')), 'Paper entry fee allowance')
-        exit_fee = _fee_allowance(body.get('exit_fee', format(self._risk.fee_reserve_per_contract, 'f')), 'Paper exit fee allowance')
+        exit_fee = entry_fee if strategy == 'minute_five' else _fee_allowance(
+            body.get('exit_fee', format(self._risk.fee_reserve_per_contract, 'f')), 'Paper exit fee allowance')
         take_profit = None if body.get('take_profit') is None else _amount(
             body['take_profit'], 'paper take-profit fraction', Decimal('1000'), 6)
         default_entry = min(self._risk.min_edge, Decimal('0.01'))
-        entry_edge = _amount(body.get('entry_edge', format(default_entry, 'f')),
+        entry_edge = _amount(format(default_entry, 'f') if strategy == 'minute_five' else
+                             body.get('entry_edge', format(default_entry, 'f')),
                              'paper entry edge', Decimal(1), 6)
         try:
             default_exit = min(Decimal('0.005'), (entry_edge / 2).quantize(
                 Decimal('0.000001'), rounding=ROUND_DOWN))
-            raw_exit = body.get('exit_edge', format(default_exit, 'f'))
+            raw_exit = format(default_exit, 'f') if strategy == 'minute_five' else body.get('exit_edge', format(default_exit, 'f'))
             if not isinstance(raw_exit, str) or len(raw_exit) > 40:
                 raise EngineError('Invalid exit edge')
             exit_edge = Decimal(decimal_value(raw_exit, 'paper exit edge', places=6,
@@ -202,14 +251,14 @@ class ManagedPaperRunner:
                 max_quote_age_seconds=min(5, self._risk.max_quote_age_seconds))
         except EngineError:
             raise ManagedError('Paper entry edge below the startup minimum must have at most four decimal places') from None
-        selected = dict(weights=config.to_dict()['weights'], side=body['side'], paths=config.paths,
+        selected = dict(weights=config.to_dict()['weights'], side=side, paths=config.paths,
                         strategy=strategy, rolling=rolling,
                         assets=list(assets),
                         bankroll=format(bankroll, 'f'), kelly_fraction=format(fraction, 'f'),
                         take_profit=None if take_profit is None else format(take_profit, 'f'),
                         entry_edge=format(entry_edge, 'f'), exit_edge=format(exit_edge, 'f'),
                         entry_fee=format(entry_fee, 'f'), exit_fee=format(exit_fee, 'f'))
-        experiment = dict(model=config.to_dict(), risk=risk.to_dict(), side=body['side'],
+        experiment = dict(model=config.to_dict(), risk=risk.to_dict(), side=side,
                           take_profit=selected['take_profit'], entry_edge=selected['entry_edge'],
                           exit_edge=selected['exit_edge'])
         if assets != ('BTC',):
@@ -218,6 +267,23 @@ class ManagedPaperRunner:
             experiment.update(entry_fee=selected['entry_fee'], exit_fee=selected['exit_fee'])
         if strategy == 'rolling':
             experiment.update(strategy=strategy, rolling=rolling)
+        elif strategy == 'minute_five':
+            from .minute_five import minute_five_forecast_config, minute_five_model_definition
+            base_config = ForecastConfig(paths=config.paths, seed=config.seed,
+                min_returns=config.min_returns, min_history_seconds=config.min_history_seconds,
+                max_age_seconds=config.max_age_seconds, max_history_seconds=config.max_history_seconds)
+            definitions = {}
+            for asset in assets:
+                forecast_config = minute_five_forecast_config(base_config, asset=asset,
+                                                            probability_fit=self._probability_fit)
+                definitions[asset] = minute_five_model_definition(forecast_config, asset=asset,
+                    probability_fit=self._probability_fit)
+            selected['minute_five'] = deepcopy(MINUTE_FIVE_SETTINGS)
+            if self._probability_fit is not None and self._probability_fit.asset in assets:
+                selected['probability_fit'] = self._probability_fit.metadata()
+            experiment = dict(strategy=strategy, minute_five=selected['minute_five'],
+                              models=definitions, risk=risk.to_dict(), assets=list(assets),
+                              entry_fee=selected['entry_fee'])
         encoded = json.dumps(experiment,
                              sort_keys=True, separators=(',', ':'), allow_nan=False)
         identity = hashlib.sha256(encoded.encode('utf-8')).hexdigest()
@@ -230,14 +296,15 @@ class ManagedPaperRunner:
         from kalshi_bot import _private_path, CLIError
         try:
             directory = _private_path(self._base / identity)
-            archive_path = _private_path(directory / 'ensemble.sqlite3')
+            archive_name = 'minute-five.sqlite3' if selected['strategy'] == 'minute_five' else 'ensemble.sqlite3'
+            archive_path = _private_path(directory / archive_name)
             journal_path = _private_path(directory / 'paper.sqlite3')
             portfolio_path = _private_path(directory / 'portfolio.sqlite3')
             if selected['strategy'] == 'rolling':
                 _private_path(directory / 'rolling.sqlite3')
             if selected['assets'] != ['BTC']:
                 for asset in selected['assets']:
-                    _private_path(directory / (asset.lower() + '-ensemble.sqlite3'))
+                    _private_path(directory / (asset.lower() + '-' + archive_name))
                     _private_path(directory / (asset.lower() + '-paper.sqlite3'))
         except CLIError:
             raise ManagedError('Managed paper state must remain outside Git checkouts and cannot use symbolic links') from None
@@ -250,12 +317,13 @@ class ManagedPaperRunner:
                 raise ManagedError('Stop the current paper strategy and wait for it to finish before changing selections', 409)
             self._stop_event = threading.Event()
             self._experiment_id = identity
+            self._performance = None
             stamp = _iso(self._clock())
             self._state.update(status='starting', reason='Starting the isolated paper experiment.',
                 config=selected, snapshot=None, started_at=stamp, updated_at=stamp)
             self._thread = threading.Thread(target=self._run,
                 args=(config, risk, selected, archive_path, journal_path, portfolio_path, self._stop_event),
-                name='kalshi-ensemble-paper', daemon=True)
+                name='kalshi-minute-five-paper' if selected['strategy'] == 'minute_five' else 'kalshi-ensemble-paper', daemon=True)
             try:
                 self._thread.start()
             except Exception:
@@ -310,28 +378,49 @@ class ManagedPaperRunner:
                         raise ManagedError('Paper worker requires an isolated read-only production data client')
                     if stop.is_set():
                         return
-                    asset_archive = archive_path if legacy else archive_path.parent / (asset.lower() + '-ensemble.sqlite3')
+                    archive_name = 'minute-five.sqlite3' if strategy == 'minute_five' else 'ensemble.sqlite3'
+                    asset_archive = archive_path if legacy else archive_path.parent / (asset.lower() + '-' + archive_name)
                     asset_journal = journal_path if legacy else journal_path.parent / (asset.lower() + '-paper.sqlite3')
                     extra = {} if asset == 'BTC' else {'asset': asset}
-                    archive = resources.enter_context(ShadowArchive(asset_archive, base_config,
-                        model_definition=dict(model_version=model_version_for_asset(asset), config=config.to_dict()), **extra))
-                    journal = resources.enter_context(Journal(asset_journal, mode='paper', environment='production', risk=risk))
+                    actual_config = base_config
+                    if strategy == 'minute_five':
+                        from .minute_five import (MinuteFivePaperService, minute_five_forecast_config,
+                                                  minute_five_model_definition)
+                        actual_config = minute_five_forecast_config(base_config, asset=asset,
+                            probability_fit=self._probability_fit)
+                        definition = minute_five_model_definition(actual_config, asset=asset,
+                            probability_fit=self._probability_fit)
+                    else:
+                        definition = dict(model_version=model_version_for_asset(asset), config=config.to_dict())
+                    archive = resources.enter_context(ShadowArchive(asset_archive, actual_config,
+                        model_definition=definition, **extra))
+                    journal = None if strategy == 'minute_five' else resources.enter_context(
+                        Journal(asset_journal, mode='paper', environment='production', risk=risk))
                     if portfolio is None:
                         portfolio = resources.enter_context(PaperPortfolio(portfolio_path, risk,
                             take_profit=selected['take_profit'], entry_edge=selected['entry_edge'], exit_edge=selected['exit_edge'],
                             entry_fee=selected['entry_fee'], exit_fee=selected['exit_fee'],
-                            **({} if strategy == 'ensemble' else {'strategy': strategy, 'strategy_config': selected['rolling']}),
+                            **({} if strategy == 'ensemble' else {'strategy': strategy,
+                                'strategy_config': selected['minute_five'] if strategy == 'minute_five' else selected['rolling']}),
                             **({} if legacy else {'assets': assets})))
                         if strategy == 'rolling':
                             from .rolling import RollingConfig, RollingIndicator
                             indicator = resources.enter_context(RollingIndicator(archive_path.parent / 'rolling.sqlite3',
                                 RollingConfig(**selected['rolling'])))
-                    services[asset] = EnsemblePaperService(client, archive, journal, config=config,
-                        clock=self._clock, selected_side=selected['side'], portfolio=portfolio,
-                        **({} if strategy == 'ensemble' else {'strategy': strategy, 'indicator': indicator}), **extra)
+                    if strategy == 'minute_five':
+                        services[asset] = MinuteFivePaperService(client, archive, portfolio,
+                            config=actual_config, clock=self._clock, asset=asset,
+                            probability_fit=self._probability_fit)
+                    else:
+                        services[asset] = EnsemblePaperService(client, archive, journal, config=config,
+                            clock=self._clock, selected_side=selected['side'], portfolio=portfolio,
+                            **({} if strategy == 'ensemble' else {'strategy': strategy, 'indicator': indicator}), **extra)
                 with self._lock:
                     if not stop.is_set():
-                        self._state.update(status='running', reason='Paper strategy is collecting data and simulating eligible Kelly orders.')
+                        self._state.update(status='running', reason=(
+                            'Minute-five median is collecting data for one-dollar paper entries held to settlement.'
+                            if strategy == 'minute_five' else
+                            'Paper strategy is collecting data and simulating eligible Kelly orders.'))
                 first = 0
                 while not stop.is_set():
                     started = time.monotonic()
@@ -351,7 +440,10 @@ class ManagedPaperRunner:
                                 status='ready', fetched_at=_iso(self._clock()), assets=list(assets), markets=deepcopy(samples),
                                 portfolio=portfolio.snapshot(), calibrated=False, live_execution_enabled=False,
                                 reason=f'{ready}/{len(assets)} most recent crypto samples are valid; check each asset\'s freshness. All positions share one paper bankroll.'))
+                        performance = portfolio.performance_ledger()
+                        performance['fetched_at'] = _iso(self._clock())
                         with self._lock:
+                            self._performance = performance
                             self._state.update(snapshot=snapshot, updated_at=_iso(self._clock()))
                             if not stop.is_set():
                                 self._state.update(status='running', reason='Paper strategy is running; exchange execution remains disabled.')

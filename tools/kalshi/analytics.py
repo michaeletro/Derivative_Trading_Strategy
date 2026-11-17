@@ -235,7 +235,9 @@ class AnalyticsService:
             self._history_errors[asset] = str(error)
             raise
         self._history_errors.pop(asset, None)
-        self._candles[asset] = (now, candles)
+        # Cache freshness belongs to the completed acquisition, not the instant
+        # before its HTTP request. Preserve it on subsequent cache hits.
+        self._candles[asset] = (self.clock(), candles)
         return candles
 
     @staticmethod
@@ -288,8 +290,19 @@ class AnalyticsService:
                     raise AnalyticsError('Spot acquisition exceeded the freshness limit')
                 if not -5 <= acquired - _stamp(ticker['exchange_time']) <= 30:
                     raise AnalyticsError('Spot ticker is stale or invalid')
-                spot = dict(ticker, candles=candles, asset=asset)
-                result.update(status='ready', fetched_at=_iso(self._tickers[asset][0]), spot=deepcopy(spot),
+                ticker_received = self._tickers[asset][0]
+                history_received = self._candles[asset][0] if candles else None
+                # A history refresh can complete after the cached ticker was
+                # received, especially across a minute boundary. Publishing
+                # the ticker receipt as the whole report's timestamp would
+                # make a legitimate closed candle appear to come from the
+                # future. Use the newest actual component receipt, while
+                # keeping each source's clock visible and unchanged.
+                snapshot_received = max(ticker_received, history_received or ticker_received)
+                spot = dict(ticker, candles=candles, asset=asset,
+                            ticker_received_at=_iso(ticker_received),
+                            history_received_at=None if history_received is None else _iso(history_received))
+                result.update(status='ready', fetched_at=_iso(snapshot_received), spot=deepcopy(spot),
                               forecast=(unavailable_forecast(result['history_error'], normalized_weights) if not candles
                                         else ensemble_scenario(asset, spot, market, acquired, normalized_weights)))
             except Exception as error:

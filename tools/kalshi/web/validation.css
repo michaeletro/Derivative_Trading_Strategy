@@ -1,0 +1,37 @@
+.validation-panel{margin:24px 0}.validation-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.validation-heading h2{margin:0}.validation-heading p{margin:8px 0}.validation-research{white-space:nowrap;border-color:#756845;color:#e9c989}.validation-status{padding:11px 14px;background:#101925;border:1px solid var(--line,#263646);border-radius:7px}.validation-controls{display:flex;align-items:end;gap:16px;flex-wrap:wrap;margin:18px 0}.validation-controls label{display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--muted,#9caebf)}.validation-controls select{font:inherit;color:var(--text,#e7edf5);background:#101925;border:1px solid #41546a;border-radius:6px;padding:9px 12px;min-width:150px}.validation-controls button{margin-left:auto}.validation-controls select:focus-visible,.validation-controls button:focus-visible{outline:2px solid var(--accent,#79b8ff);outline-offset:3px}.validation-score-table{min-width:660px}.validation-score-table caption{text-align:left;font-size:11px;padding:7px 0 12px;color:var(--muted,#9caebf)}.validation-score-table td{font-variant-numeric:tabular-nums}.validation-best td{background:rgba(101,201,188,.055)}.validation-best td:first-child{color:#80d5c9}.validation-chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:22px}.validation-figure{margin:0;padding:16px 16px 12px;border:1px solid var(--line,#263646);border-radius:8px;background:rgba(14,22,33,.55);min-width:0}.validation-figure h3{font-size:13px;font-weight:550;margin:0 0 12px}.validation-figure svg{width:100%;height:auto;display:block;overflow:visible}.validation-figure figcaption{line-height:1.65;margin-top:8px;color:var(--muted,#9caebf)}.validation-axis{stroke:#526375;stroke-width:1}.validation-grid{stroke:#263646;stroke-width:1}.validation-label{fill:#a9b9ca;font:10px ui-sans-serif,system-ui,sans-serif}.validation-uncertainty{font-size:12px;line-height:1.75;padding:14px 16px;border-left:3px solid #65c9bc;background:rgba(101,201,188,.045);overflow-wrap:anywhere}.validation-math{font-size:12px;line-height:1.85;padding:14px 16px;border:1px solid var(--line,#263646);border-radius:7px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.validation-assumptions{line-height:1.8;padding-left:20px;color:var(--muted,#9caebf)}#validation-root[data-stale=true] .validation-status{border-color:#94723c;color:#e9c989}#validation-root[data-stale=true] .validation-chart-grid,#validation-root[data-stale=true] .validation-score-table{opacity:.65}
+@media(max-width:850px){.validation-chart-grid{grid-template-columns:1fr}.validation-controls button{margin-left:0}.validation-heading{flex-direction:column;gap:8px}}@media(max-width:500px){.validation-figure{padding:12px}.validation-controls{align-items:stretch;flex-direction:column}.validation-controls label,.validation-controls select{width:100%}.validation-research{white-space:normal}.validation-label{font-size:11px}}
+
+/* Match the live research cards without changing historical score semantics. */
+.validation-figure{padding:18px;border-radius:10px;background:#0e1722}
+.validation-figure h3{font-size:14px;font-weight:600;line-height:1.5;margin-bottom:12px}
+.validation-figure svg{box-sizing:border-box;border:1px solid var(--chart-border,#304156);border-radius:8px;background:var(--chart-bg,#0b131d);overflow:hidden}
+.validation-figure svg:focus-visible{outline:2px solid var(--accent,#9bc8f5);outline-offset:3px}
+.validation-label{fill:#b2c4d8;font:11px ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.validation-grid{stroke:#293b4f;stroke-width:.75}
+.validation-axis{stroke:#688099;stroke-width:1}
+.validation-point{stroke:#0b131d;stroke-width:1;cursor:crosshair}
+.validation-point:hover,.validation-figure rect[data-chart-detail]:hover{stroke:#e5effb;stroke-width:1.5}
+.validation-figure figcaption{font-size:11px;line-height:1.75;margin-top:11px}
+@media(max-width:500px){.validation-figure{padding:12px 10px}.validation-chart-grid{gap:16px}}
+
+/* Historical evidence uses the same card hierarchy as current model panels. */
+.workspace-tabpanel .validation-panel { margin: 0 0 22px; }
+.workspace-tabpanel .validation-heading { gap: 16px 24px; }
+.workspace-tabpanel .validation-heading h2 { font-size: 22px; line-height: 1.35; }
+.workspace-tabpanel .validation-research { border-radius: 6px; font-size: 10px; line-height: 1.5; }
+.workspace-tabpanel .validation-status { padding: 12px 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.workspace-tabpanel .validation-controls { padding: 14px; border: 1px solid #304156; border-radius: 8px; background: #0e1722; }
+.workspace-tabpanel .validation-controls label { min-width: 0; }
+.workspace-tabpanel .validation-controls select { min-height: 39px; }
+.workspace-tabpanel .validation-chart-grid { gap: 20px; }
+.workspace-tabpanel .validation-figure { padding: 18px; border-color: #2b3e53; background: #0e1722; }
+.workspace-tabpanel .validation-score-table caption { line-height: 1.75; font-size: 11px; }
+.workspace-tabpanel .validation-best td { background: #1233325c; }
+.workspace-tabpanel .validation-best td:first-child { color: #98dfd4; }
+.workspace-tabpanel .validation-uncertainty { font-size: 12px; border-radius: 0 7px 7px 0; }
+@media (max-width: 620px) {
+  .workspace-tabpanel .validation-heading h2 { font-size: 20px; }
+  .workspace-tabpanel .validation-controls { padding: 12px; }
+  .workspace-tabpanel .validation-figure { padding: 14px 11px; }
+  .workspace-tabpanel .validation-chart-grid { gap: 16px; }
+}
